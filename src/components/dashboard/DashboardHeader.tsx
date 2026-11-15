@@ -115,12 +115,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               <span className="hidden sm:inline">Ver formulario</span>
             </a>
 
-            {settings.requirePin && onLockNow && (
+            {onLockNow && (
               <button
                 type="button"
                 onClick={onLockNow}
-                className="inline-flex items-center gap-1 rounded-full border border-[#DFCBB3] bg-white p-2 text-[#594133] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
-                title="Bloquear dashboard"
+                className="inline-flex items-center gap-1 rounded-full border border-[#DFCBB3] bg-white px-2.5 py-2 sm:p-2 text-xs font-semibold text-[#594133] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
+                title="Bloquear bóveda administrativa"
+                aria-label="Bloquear bóveda administrativa"
               >
                 <Lock className="h-4 w-4" />
               </button>

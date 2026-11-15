@@ -18,6 +18,7 @@ import {
   deleteGift,
   deleteLead,
   DsbAuthError,
+  fetchAppState,
   loginStep1,
   logoutDsbSession,
   resetDefaultGifts,
@@ -65,9 +66,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   // Check active session token on mount
   useEffect(() => {
     let cancelled = false;
-    verifyDsbSession().then((res) => {
+    verifyDsbSession().then(async (res) => {
       if (cancelled) return;
-      setSecurityStage(res.authenticated ? 'authenticated' : 'filter1_credentials');
+      if (res.authenticated) {
+        setSecurityStage('authenticated');
+        try {
+          const fresh = await fetchAppState();
+          if (!cancelled) onStateChange(fresh.state);
+        } catch {
+          // Handled by periodic sync
+        }
+      } else {
+        setSecurityStage('filter1_credentials');
+      }
     });
     return () => {
       cancelled = true;
@@ -129,6 +140,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       setAuthError(null);
       setPasswordInput('');
       setPinInput('');
+      const fresh = await fetchAppState();
+      onStateChange(fresh.state);
       setSecurityStage('authenticated');
     } catch (err) {
       if (err instanceof DsbAuthError) {
@@ -180,6 +193,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     setPasswordInput('');
     setPinInput('');
     setAuthError(null);
+    onStateChange({ ...appState, leads: [] });
     setSecurityStage('filter1_credentials');
   };
 
@@ -266,7 +280,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         <motion.div
           initial={{ opacity: 0, y: 18, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          className={`relative z-10 w-full max-w-md overflow-hidden rounded-[32px] text-[#FFFDF9] shadow-[0_28px_60px_-15px_rgba(15,10,8,0.8)] p-6 sm:p-8 ${
+          className={`relative z-10 w-full max-w-md overflow-hidden rounded-[28px] sm:rounded-[32px] text-[#FFFDF9] shadow-[0_28px_60px_-15px_rgba(15,10,8,0.8)] p-5 sm:p-8 ${
             isFilter2
               ? 'bg-gradient-to-b from-[#23252A] via-[#191B1F] to-[#121316] border-2 border-[#4B4F58]'
               : 'bg-[#1F120B] border border-[#C88A2B]/45'
@@ -401,16 +415,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 autoComplete="off"
               >
                 {/* Rotating Combination Safe Dial */}
-                <div className="relative mx-auto flex h-24 w-24 items-center justify-center">
+                <div className="relative mx-auto flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center">
                   <div className="absolute inset-0 rounded-full bg-gradient-to-b from-[#3A3E46] to-[#17191D] border-4 border-[#5C616C] shadow-[inset_0_3px_10px_rgba(0,0,0,0.85),0_10px_24px_rgba(0,0,0,0.65)]" />
                   <motion.div
                     animate={{ rotate: dialRotation }}
                     transition={{ type: 'spring', stiffness: 260, damping: 18 }}
-                    className="relative flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-[#E5AE4E] via-[#B47A24] to-[#6E450E] border-2 border-[#FEF08A]/50 shadow-lg"
+                    className="relative flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-gradient-to-br from-[#E5AE4E] via-[#B47A24] to-[#6E450E] border-2 border-[#FEF08A]/50 shadow-lg"
                   >
                     {/* Dial notch & spokes */}
                     <span className="absolute -top-1.5 h-2.5 w-1.5 rounded-full bg-[#FEF08A] shadow" />
-                    <div className="h-9 w-9 rounded-full bg-[#1C1E22] border border-[#F4CA73]/40 flex items-center justify-center">
+                    <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-[#1C1E22] border border-[#F4CA73]/40 flex items-center justify-center">
                       <span className="h-2.5 w-2.5 rounded-full bg-[#F4CA73]" />
                     </div>
                   </motion.div>

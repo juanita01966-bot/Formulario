@@ -222,9 +222,9 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
         {/* Outer subtle champagne glow */}
         <div className="pointer-events-none -inset-1 absolute rounded-[36px] bg-gradient-to-br from-[#E5AE4E]/35 via-[#B84A27]/15 to-[#4B644A]/25 blur-xl opacity-75" />
 
-        <div className="relative overflow-hidden rounded-[32px] bg-[#FFFDF9]/72 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-6 py-7 sm:px-9 sm:py-9">
+        <div className="relative overflow-hidden rounded-[28px] sm:rounded-[32px] bg-[#FFFDF9]/72 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-5 py-6 sm:px-9 sm:py-9">
           {/* Inner hairline architectural frame */}
-          <div className="pointer-events-none absolute inset-2.5 rounded-[24px] border border-[#E6D5BF]/60" />
+          <div className="pointer-events-none absolute inset-2 sm:inset-2.5 rounded-[22px] sm:rounded-[24px] border border-[#E6D5BF]/60" />
 
           {/* Top seasonal golden line */}
           <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#4B644A]" />
@@ -234,7 +234,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-            className="relative z-10 mx-auto mb-4 flex h-28 w-28 sm:h-32 sm:w-32 items-center justify-center rounded-full overflow-hidden bg-[#1A120D] border-2 border-[#C88A2B]/75 shadow-[0_14px_32px_-8px_rgba(34,21,14,0.45)]"
+            className="relative z-10 mx-auto mb-4 flex h-24 w-24 sm:h-32 sm:w-32 items-center justify-center rounded-full overflow-hidden bg-[#1A120D] border-2 border-[#C88A2B]/75 shadow-[0_14px_32px_-8px_rgba(34,21,14,0.45)]"
           >
             <img
               src="/images/logo%20ciprian.png"
@@ -245,7 +245,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
 
           {/* Hero Copy */}
           <div className="relative z-10 text-center space-y-2.5 mb-5">
-            <h1 className="font-serif text-[23px] sm:text-[26px] leading-[1.2] font-semibold tracking-tight text-[#22150E]">
+            <h1 className="font-serif text-[21px] sm:text-[26px] leading-[1.22] font-semibold tracking-tight text-[#22150E]">
               Reclama tu obsequio exclusivo y participa por hasta{' '}
               <span className="gold-foil-text font-bold">$2,000 USD</span> en productos Royal Prestige.
             </h1>

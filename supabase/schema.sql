@@ -97,12 +97,13 @@ alter table public.dsb_auth enable row level security;
 
 -- Revocar acceso directo desde cliente a la tabla de credenciales/hashes
 revoke all on table public.dsb_auth from anon, authenticated, public;
+revoke all on table public.leads from anon, public;
 
 drop policy if exists "app_settings_public_access" on public.app_settings;
 create policy "app_settings_public_access"
   on public.app_settings
   for all
-  to anon, authenticated
+  to authenticated
   using (true)
   with check (true);
 
@@ -110,20 +111,21 @@ drop policy if exists "gifts_public_access" on public.gifts;
 create policy "gifts_public_access"
   on public.gifts
   for all
-  to anon, authenticated
+  to authenticated
   using (true)
   with check (true);
 
 drop policy if exists "leads_public_access" on public.leads;
-create policy "leads_public_access"
+create policy "leads_service_only"
   on public.leads
   for all
-  to anon, authenticated
+  to service_role
   using (true)
   with check (true);
 
-grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on public.app_settings, public.gifts, public.leads to anon, authenticated;
+grant usage on schema public to anon, authenticated, service_role;
+grant select on public.app_settings, public.gifts to anon, authenticated;
+grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth to service_role;
 
 -- ----------------------------------------------------------------------------
 -- 6. Funciones RPC de seguridad (2FA: Usuario/Clave + PIN Caja Fuerte + Llave Maestra)
@@ -461,10 +463,15 @@ begin
 end;
 $$;
 
-grant execute on function public.dsb_login_step1(text, text) to anon, authenticated;
-grant execute on function public.dsb_verify_pin(text, text) to anon, authenticated;
-grant execute on function public.dsb_verify_session(text) to anon, authenticated;
-grant execute on function public.dsb_update_credentials(text, text, text, text) to anon, authenticated;
+revoke execute on function public.dsb_login_step1(text, text) from anon, authenticated, public;
+revoke execute on function public.dsb_verify_pin(text, text) from anon, authenticated, public;
+revoke execute on function public.dsb_verify_session(text) from anon, authenticated, public;
+revoke execute on function public.dsb_update_credentials(text, text, text, text) from anon, authenticated, public;
+
+grant execute on function public.dsb_login_step1(text, text) to service_role;
+grant execute on function public.dsb_verify_pin(text, text) to service_role;
+grant execute on function public.dsb_verify_session(text) to service_role;
+grant execute on function public.dsb_update_credentials(text, text, text, text) to service_role;
 
 -- ----------------------------------------------------------------------------
 -- 7. Datos semilla iniciales (idempotentes)
@@ -487,7 +494,7 @@ values (
   'The Ciprian Company · Show de Cocina',
   2792,
   false,
-  '2026',
+  '',
   'autumn',
   '#C88A2B'
 )
@@ -572,8 +579,8 @@ insert into public.dsb_auth (
 values (
   'default',
   'AdminCripian',
-  crypt('AdminMaster2026@', gen_salt('bf', 10)),
-  crypt('1966', gen_salt('bf', 10)),
-  crypt('PoloNorte121966@', gen_salt('bf', 10))
+  '$2a$10$4uVKRgYY9yuM1KgBWCsAEuADvJEoaLNZwbjb0vCOih5MqnTCEdh.G',
+  '$2a$10$Ht.aqXlB7b3GzsEpA5x6zuv7c/QE8vF1rDd2cn48lZeEk/os2bZ3y',
+  '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2'
 )
 on conflict (id) do nothing;
