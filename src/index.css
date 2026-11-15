@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --autumn-cream: #faf3e8;
+  --autumn-parchment: #f4e4ce;
+  --autumn-card: #fffdf9;
+  --autumn-border: #e6d5bf;
+  --autumn-espresso: #22150e;
+  --autumn-cocoa: #594133;
+  --autumn-terracotta: #b84a27;
+  --autumn-rust: #8c3318;
+  --autumn-gold: #c88a2b;
+  --autumn-gold-bright: #e5ae4e;
+  --autumn-sage: #3d6b52;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background-color: var(--autumn-cream);
+  color: var(--autumn-espresso);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.perspective-1000 {
+  perspective: 1100px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+/* Autumn warm surface shadow */
+.autumn-card-shadow {
+  box-shadow:
+    0 24px 60px -18px rgba(58, 30, 14, 0.14),
+    0 6px 18px -6px rgba(140, 51, 24, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+/* Gold metallic foil text */
+.gold-foil-text {
+  background: linear-gradient(125deg, #9a6315 0%, #c88a2b 35%, #f0c975 55%, #b5731b 80%, #8b550e 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Subtle diagonal autumn shimmer */
+@keyframes autumnShimmer {
+  0% {
+    transform: translateX(-140%) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(240%) skewX(-18deg);
+  }
+}
+
+.animate-shimmer {
+  animation: autumnShimmer 3.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f4e9da;
+}
+::-webkit-scrollbar-thumb {
+  background: #d2b695;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b58c61;
+}

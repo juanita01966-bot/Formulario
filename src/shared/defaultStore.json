@@ -1,0 +1,202 @@
+{
+  "settings": {
+    "advisorName": "Jose Miguel Ciprian",
+    "hostTitle": "The Ciprian Company",
+    "brandSubtitle": "The Ciprian Company · Show de Cocina",
+    "defaultTicketAmount": 2792,
+    "requirePin": false,
+    "pinCode": "2026"
+  },
+  "gifts": [
+    {
+      "id": "gift-cutlery",
+      "name": "Cubiertos Acero Inox",
+      "subtitle": "Juego de cubiertos en acero inoxidable de grado quirúrgico con acabado espejo.",
+      "tag": "Colección Mesa de Otoño",
+      "visualKey": "cutlery",
+      "accentColor": "#C88A2B",
+      "active": true,
+      "stockLabel": "Edición Limitada"
+    },
+    {
+      "id": "gift-bowls",
+      "name": "Set 2 Tazones",
+      "subtitle": "Set de 2 tazones térmicos de acero inoxidable con base antideslizante y sello hermético.",
+      "tag": "Favorito del Chef",
+      "visualKey": "bowls",
+      "accentColor": "#B84A27",
+      "active": true,
+      "stockLabel": "Disponible"
+    },
+    {
+      "id": "gift-sandokan",
+      "name": "Cuchillo Sandokan",
+      "subtitle": "Cuchillo de chef especializado Sandokan con filo alveolado de alta precisión.",
+      "tag": "Corte Maestro",
+      "visualKey": "knife",
+      "accentColor": "#8C3B20",
+      "active": true,
+      "stockLabel": "Alta Demanda"
+    },
+    {
+      "id": "gift-warner",
+      "name": "Contenedor Térmico Warner Pro",
+      "subtitle": "Contenedor térmico profesional de doble pared para conservar alimentos calientes o fríos.",
+      "tag": "Especial Cosecha",
+      "visualKey": "thermo",
+      "accentColor": "#4B644A",
+      "active": true,
+      "stockLabel": "Disponible"
+    },
+    {
+      "id": "gift-bamboo",
+      "name": "Tabla Bambú",
+      "subtitle": "Tabla de corte artesanal en bambú orgánico prensado con canal colector de jugos.",
+      "tag": "Madera Noble",
+      "visualKey": "bamboo",
+      "accentColor": "#A66328",
+      "active": true,
+      "stockLabel": "Disponible"
+    }
+  ],
+  "leads": [
+    {
+      "id": "lead-seed-1",
+      "name": "Valeria Mendoza Ríos",
+      "phone": "+52 55 4812 9034",
+      "acceptedTerms": true,
+      "giftId": "gift-sandokan",
+      "giftName": "Cuchillo Sandokan",
+      "giftVisualKey": "knife",
+      "claimCode": "OTN-4821",
+      "called": false,
+      "calledAt": null,
+      "category": "none",
+      "orderAmount": null,
+      "notes": "Registrada desde QR Show de Cocina.",
+      "qualification": {
+        "creditProfile": "Tarjeta de crédito activa",
+        "housingStatus": "Vivienda propia · Decisor",
+        "investmentPriority": "Alta prioridad de compra",
+        "score": 100,
+        "tier": "alto"
+      },
+      "createdAt": "2026-11-13T19:45:00.000Z"
+    },
+    {
+      "id": "lead-seed-2",
+      "name": "Roberto Carlos Navarro",
+      "phone": "+52 55 3190 7721",
+      "acceptedTerms": true,
+      "giftId": "gift-bowls",
+      "giftName": "Set 2 Tazones",
+      "giftVisualKey": "bowls",
+      "claimCode": "OTN-3915",
+      "called": false,
+      "calledAt": null,
+      "category": "none",
+      "orderAmount": null,
+      "notes": "",
+      "qualification": {
+        "creditProfile": "Débito / Contado solvente",
+        "housingStatus": "Renta estable (+1 año)",
+        "investmentPriority": "Interés moderado / Financiable",
+        "score": 73,
+        "tier": "medio"
+      },
+      "createdAt": "2026-11-13T18:10:00.000Z"
+    },
+    {
+      "id": "lead-seed-3",
+      "name": "Fernanda Salgado Pérez",
+      "phone": "+52 55 6281 4409",
+      "acceptedTerms": true,
+      "giftId": "gift-cutlery",
+      "giftName": "Cubiertos Acero Inox",
+      "giftVisualKey": "cutlery",
+      "claimCode": "OTN-7104",
+      "called": true,
+      "calledAt": "2026-11-13T16:30:00.000Z",
+      "category": "cita",
+      "orderAmount": null,
+      "notes": "Cita confirmada para el sábado 5:00 PM con su esposo.",
+      "qualification": {
+        "creditProfile": "Tarjeta de crédito activa",
+        "housingStatus": "Vivienda propia · Decisor",
+        "investmentPriority": "Interés moderado / Financiable",
+        "score": 93,
+        "tier": "alto"
+      },
+      "createdAt": "2026-11-13T15:20:00.000Z"
+    },
+    {
+      "id": "lead-seed-4",
+      "name": "Alejandro Ibarra Luna",
+      "phone": "+52 55 7742 1850",
+      "acceptedTerms": true,
+      "giftId": "gift-warner",
+      "giftName": "Contenedor Térmico Warner Pro",
+      "giftVisualKey": "thermo",
+      "claimCode": "OTN-6092",
+      "called": true,
+      "calledAt": "2026-11-12T20:15:00.000Z",
+      "category": "demo",
+      "orderAmount": null,
+      "notes": "Interesado en batería de 5 capas durante el Show de Cocina.",
+      "qualification": {
+        "creditProfile": "Crédito departamental",
+        "housingStatus": "Renta estable (+1 año)",
+        "investmentPriority": "Interés moderado / Financiable",
+        "score": 63,
+        "tier": "medio"
+      },
+      "createdAt": "2026-11-12T18:05:00.000Z"
+    },
+    {
+      "id": "lead-seed-5",
+      "name": "Claudia Patricia Herrera",
+      "phone": "+52 55 8819 3201",
+      "acceptedTerms": true,
+      "giftId": "gift-bamboo",
+      "giftName": "Tabla Bambú",
+      "giftVisualKey": "bamboo",
+      "claimCode": "OTN-5308",
+      "called": true,
+      "calledAt": "2026-11-12T17:40:00.000Z",
+      "category": "orden",
+      "orderAmount": 2950,
+      "notes": "Cerró orden de sistema familiar + entrega de Tabla Bambú.",
+      "qualification": {
+        "creditProfile": "Tarjeta de crédito activa",
+        "housingStatus": "Vivienda propia · Decisor",
+        "investmentPriority": "Alta prioridad de compra",
+        "score": 100,
+        "tier": "alto"
+      },
+      "createdAt": "2026-11-12T14:50:00.000Z"
+    },
+    {
+      "id": "lead-seed-6",
+      "name": "Mauricio Domínguez Cruz",
+      "phone": "+52 55 2940 6118",
+      "acceptedTerms": true,
+      "giftId": "gift-cutlery",
+      "giftName": "Cubiertos Acero Inox",
+      "giftVisualKey": "cutlery",
+      "claimCode": "OTN-2649",
+      "called": true,
+      "calledAt": "2026-11-11T21:00:00.000Z",
+      "category": "orden",
+      "orderAmount": 2634,
+      "notes": "Orden pagada con enganche, entrega programada.",
+      "qualification": {
+        "creditProfile": "Solo efectivo",
+        "housingStatus": "Familiar / Otro",
+        "investmentPriority": "Solo regalo por ahora",
+        "score": 25,
+        "tier": "basico"
+      },
+      "createdAt": "2026-11-11T16:30:00.000Z"
+    }
+  ]
+}
