@@ -1421,7 +1421,7 @@ if (!IS_VERCEL && fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
 if (!IS_VERCEL) {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => {
-    console.log(`Metricas Cipriano API listening on http://localhost:${PORT} (storage: ${USE_SUPABASE ? 'supabase' : 'local'})`);
+    console.log(`Metricas Ciprian API listening on http://localhost:${PORT} (storage: ${USE_SUPABASE ? 'supabase' : 'local'})`);
   });
 }
 

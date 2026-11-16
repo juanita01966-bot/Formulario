@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  BarChart3,
   Bell,
   Check,
   Copy,
@@ -68,20 +67,24 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     <header className="sticky top-0 z-30 border-b border-[#E6D5BF]/80 bg-gradient-to-r from-[#FFFDF9]/95 via-[#FFF9F0]/92 to-[#FAF1E4]/95 backdrop-blur-xl shadow-[0_6px_24px_-12px_rgba(34,21,14,0.1)]">
       <div className="h-1 w-full bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#3D6B52]" />
       <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3.5">
-        {/* Top bar: Métricas Cipriano brand + Actions */}
+        {/* Top bar: Métricas Ciprian brand + Actions */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <motion.div
-              whileHover={{ rotate: [0, -6, 6, 0], scale: 1.05 }}
-              transition={{ duration: 0.4 }}
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#22150E] via-[#5C2918] to-[#8C3318] text-[#F4CA73] shadow-md ring-2 ring-amber-400/20"
+              whileHover={{ scale: 1.06 }}
+              transition={{ duration: 0.35 }}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full p-[2px] bg-gradient-to-br from-[#F4CA73] via-[#C88A2B] to-[#6E450E] shadow-md"
             >
-              <BarChart3 className="h-5 w-5" />
+              <img
+                src="/images/logo%20ciprian.png"
+                alt="Métricas Ciprian"
+                className="h-full w-full rounded-full object-cover"
+              />
             </motion.div>
             <div className="flex items-center gap-2.5">
               <div>
                 <span className="font-serif text-lg sm:text-xl font-bold tracking-tight text-[#22150E] block leading-none">
-                  Métricas Cipriano
+                  Métricas Ciprian
                 </span>
                 <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#A2683A]">
                   Show de Cocina · Panel Operativo

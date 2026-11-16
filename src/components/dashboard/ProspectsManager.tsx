@@ -207,7 +207,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `metricas-cipriano-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `metricas-ciprian-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };

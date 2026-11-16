@@ -79,7 +79,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSaveSe
       {/* General Settings Card */}
       <section className="rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-5 sm:p-7 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
         <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#22150E]">
-          Configuración de Métricas Cipriano & Formulario
+          Configuración de Métricas Ciprian & Formulario
         </h2>
         <p className="text-xs sm:text-sm text-[#7B5D4A] mt-1">
           Personaliza la identidad del distribuidor y el ticket promedio base del panel operativo.

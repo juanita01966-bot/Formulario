@@ -55,7 +55,7 @@ export const TermsModal: React.FC<TermsModalProps> = ({ open, onClose, hostTitle
                 promocional es coordinada por el distribuidor autorizado independiente{' '}
                 <strong className="text-[#22150E]">{hostTitle}</strong>, en colaboración con la experiencia culinaria de
                 productos <strong className="text-[#22150E]">Royal Prestige</strong> (Hy Cite Enterprises, LLC) gestionada
-                mediante Métricas Cipriano.
+                mediante Métricas Ciprian.
               </p>
               <p>
                 <strong className="text-[#22150E]">2. Naturaleza del obsequio:</strong> No constituye un sorteo ni juego

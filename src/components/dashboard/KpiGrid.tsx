@@ -139,7 +139,7 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
   ];
 
   return (
-    <section aria-label="Indicadores de desempeño Métricas Cipriano" className="space-y-4">
+    <section aria-label="Indicadores de desempeño Métricas Ciprian" className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
         {cards.map((card, idx) => {
           const Icon = card.icon;
@@ -226,7 +226,7 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
               <p className="text-xs text-amber-200/80">
                 {ordenesCount > 0
                   ? `${ordenesCount} ${ordenesCount === 1 ? 'orden cerrada' : 'órdenes cerradas'} · Total $${totalVolume.toLocaleString('en-US')}`
-                  : 'Valor base configurado en Métricas Cipriano'}
+                  : 'Valor base configurado en Métricas Ciprian'}
               </p>
             </div>
           </div>
