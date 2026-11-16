@@ -3,11 +3,71 @@ import cors from 'cors';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
-const BUNDLED_DEFAULT_STORE = require('../src/shared/defaultStore.json');
+const BUNDLED_DEFAULT_STORE = {
+  settings: {
+    advisorName: 'Jose Miguel Ciprian',
+    hostTitle: 'The Ciprian Company',
+    brandSubtitle: 'The Ciprian Company · Show de Cocina',
+    defaultTicketAmount: 2792,
+    requirePin: false,
+    pinCode: '',
+  },
+  gifts: [
+    {
+      id: 'gift-cutlery',
+      name: 'Cubiertos Acero Inox',
+      subtitle: 'Juego de cubiertos en acero inoxidable de grado quirúrgico con acabado espejo.',
+      tag: 'Colección Mesa de Otoño',
+      visualKey: 'cutlery',
+      accentColor: '#C88A2B',
+      active: true,
+      stockLabel: 'Edición Limitada',
+    },
+    {
+      id: 'gift-bowls',
+      name: 'Set 2 Tazones',
+      subtitle: 'Set de 2 tazones térmicos de acero inoxidable con base antideslizante y sello hermético.',
+      tag: 'Favorito del Chef',
+      visualKey: 'bowls',
+      accentColor: '#B84A27',
+      active: true,
+      stockLabel: 'Disponible',
+    },
+    {
+      id: 'gift-sandokan',
+      name: 'Cuchillo Sandokan',
+      subtitle: 'Cuchillo de chef especializado Sandokan con filo alveolado de alta precisión.',
+      tag: 'Corte Maestro',
+      visualKey: 'knife',
+      accentColor: '#8C3B20',
+      active: true,
+      stockLabel: 'Alta Demanda',
+    },
+    {
+      id: 'gift-warner',
+      name: 'Contenedor Térmico Warner Pro',
+      subtitle: 'Contenedor térmico profesional de doble pared para conservar alimentos calientes o fríos.',
+      tag: 'Especial Cosecha',
+      visualKey: 'thermo',
+      accentColor: '#4B644A',
+      active: true,
+      stockLabel: 'Disponible',
+    },
+    {
+      id: 'gift-bamboo',
+      name: 'Tabla Bambú',
+      subtitle: 'Tabla de corte artesanal en bambú orgánico prensado con canal colector de jugos.',
+      tag: 'Madera Noble',
+      visualKey: 'bamboo',
+      accentColor: '#A66328',
+      active: true,
+      stockLabel: 'Disponible',
+    },
+  ],
+  leads: [],
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,8 +108,16 @@ function loadEnvFile() {
 
 loadEnvFile();
 
-const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
-const SUPABASE_SECRET_KEY = (process.env.SUPABASE_SECRET_KEY || '').trim();
+const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '')
+  .trim()
+  .replace(/\/+$/, '');
+const SUPABASE_SECRET_KEY = (
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_PUBLISHABLE_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  ''
+).trim();
 const USE_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
 
 const VALID_CATEGORIES = new Set(['none', 'cita', 'demo', 'orden']);
@@ -127,12 +195,8 @@ function buildDefaultAuthRecord() {
 function ensureAuthStore() {
   if (IS_VERCEL) {
     return {
-      username: 'AdminCripian',
+      ...buildDefaultAuthRecord(),
       tokenSecret: getSigningSecret(null),
-      passwordSalt: '',
-      passwordHash: '',
-      pinSalt: '',
-      pinHash: '',
     };
   }
 
@@ -315,6 +379,7 @@ function generateClaimCode() {
 async function supabaseRest(restPath, init = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${restPath}`, {
     ...init,
+    signal: init.signal || AbortSignal.timeout(6000),
     headers: {
       apikey: SUPABASE_SECRET_KEY,
       Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
@@ -460,6 +525,14 @@ function sanitizeStateForClient(store, isAuthed) {
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+if (IS_VERCEL) {
+  app.use((req, _res, next) => {
+    if (req.url && !req.url.startsWith('/api')) {
+      req.url = `/api${req.url.startsWith('/') ? '' : '/'}${req.url}`;
+    }
+    next();
+  });
+}
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
@@ -552,9 +625,7 @@ app.post('/api/auth/login', async (req, res) => {
         username: rpcRes.username,
       });
     } catch {
-      return res.status(503).json({
-        error: 'Servicio de seguridad temporalmente no disponible. Intenta en un momento.',
-      });
+      // Fall back to local scrypt verification if Supabase RPC is unreachable or restricted
     }
   }
 
@@ -633,11 +704,11 @@ app.post('/api/auth/verify-pin', async (req, res) => {
 
   const cleanPin = typeof pin === 'string' ? pin.trim() : '';
 
-  if (USE_SUPABASE) {
+  if (USE_SUPABASE && preAuth.sbPre) {
     try {
       const rpcRes = await supabaseRpc('dsb_verify_pin', {
         p_pin: cleanPin,
-        p_pre_auth_token: preAuth.sbPre || null,
+        p_pre_auth_token: preAuth.sbPre,
       });
 
       if (!rpcRes?.ok || !rpcRes?.sessionToken) {
@@ -678,9 +749,7 @@ app.post('/api/auth/verify-pin', async (req, res) => {
         username: rpcRes.username,
       });
     } catch {
-      return res.status(503).json({
-        error: 'No se pudo validar el PIN contra el servidor de seguridad.',
-      });
+      // Fall back to local scrypt verification if Supabase RPC is unreachable or restricted
     }
   }
 
