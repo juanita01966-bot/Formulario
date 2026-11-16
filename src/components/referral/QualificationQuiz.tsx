@@ -59,23 +59,23 @@ const IS_CLIENT_OPTIONS: Array<OptionItem & { value: boolean }> = [
 
 const FUTURE_PRODUCTS_YES: OptionItem[] = [
   {
-    id: 'bateria',
-    label: 'Batería y sistemas de cocción saludable',
+    id: 'ollas',
+    label: 'Ollas con la tecnología de cocinar sin agua y sin aceite',
     points: 25,
   },
   {
     id: 'extractor',
-    label: 'Extractor de jugos o licuadora de alta potencia',
+    label: 'Extractor de jugos con la tecnología de hacer helados y smoothie',
     points: 25,
   },
   {
-    id: 'cuchilleria',
-    label: 'Juego de cuchillería y accesorios de cocina',
-    points: 20,
+    id: 'licuadora',
+    label: 'La licuadora con la tecnología que muele y tritura',
+    points: 25,
   },
   {
-    id: 'filtracion',
-    label: 'Sistema de filtración de agua para el hogar',
+    id: 'purificador',
+    label: 'Purificador con tecnología de limpieza profunda para un agua más limpia',
     points: 25,
   },
   {
@@ -105,24 +105,24 @@ const HEALTHY_EATING_OPTIONS: OptionItem[] = [
 
 const FUTURE_PRODUCTS_NO: OptionItem[] = [
   {
-    id: 'ollas-sin-grasa',
-    label: 'Ollas y sartenes para cocinar sin grasa ni aceite',
+    id: 'ollas-no',
+    label: 'Ollas con la tecnología de cocinar sin agua y sin aceite',
     points: 35,
   },
   {
-    id: 'extractor-salud',
-    label: 'Extractor de nutrientes o licuadora de alta potencia',
+    id: 'extractor-no',
+    label: 'Extractor de jugos con la tecnología de hacer helados y smoothie',
     points: 30,
   },
   {
-    id: 'agua-pura',
-    label: 'Sistema de purificación de agua para la familia',
+    id: 'licuadora-no',
+    label: 'La licuadora con la tecnología que muele y tritura',
     points: 30,
   },
   {
-    id: 'utensilios',
-    label: 'Utensilios y cuchillería de acero quirúrgico',
-    points: 25,
+    id: 'purificador-no',
+    label: 'Purificador con tecnología de limpieza profunda para un agua más limpia',
+    points: 30,
   },
   {
     id: 'todas-no',
