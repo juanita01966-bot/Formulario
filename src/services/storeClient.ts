@@ -455,12 +455,41 @@ export class DsbAuthError extends Error {
   }
 }
 
-const FALLBACK_USER_HASHES = new Set([
-  '5e7d691611b35962b9125e817c7d79db6bd06bf53746df00bd36f2fd5a475717',
-  '5dbd4bd91051c7b5b11a696562016355f51672251611218c71923683fdde56c4',
-]);
-const FALLBACK_PWD_HASH = '8f7289679cd994a3283afaec616377653dd3a4fb23f6946f8265c4b9e2c908ee';
-const FALLBACK_PIN_HASH = 'ab43d09287dec7e951522e1adc084a95af2cea3bb6a3d7bb940843ac8a63b0be';
+export const DSB_ROLE_KEY = 'cipriano_dsb_role';
+
+interface FallbackAccount {
+  username: string;
+  role: 'admin' | 'caller';
+  userHashes: Set<string>;
+  pwdHashes: Set<string>;
+  pinHashes: Set<string>;
+}
+
+const FALLBACK_ACCOUNTS: FallbackAccount[] = [
+  {
+    username: 'AdminCiprian',
+    role: 'admin',
+    userHashes: new Set(['5dbd4bd91051c7b5b11a696562016355f51672251611218c71923683fdde56c4']),
+    pwdHashes: new Set(['8f7289679cd994a3283afaec616377653dd3a4fb23f6946f8265c4b9e2c908ee']),
+    pinHashes: new Set(['ab43d09287dec7e951522e1adc084a95af2cea3bb6a3d7bb940843ac8a63b0be']),
+  },
+  {
+    username: 'Caller',
+    role: 'caller',
+    userHashes: new Set([
+      '9e61aba50ade2e90a650017fea1d840dacdb5585235eabe2fb1e9cec4e22461c',
+      'a7f29f0f9b6cb60d7c71f379434e320f772bf22d7ba59f6b986872583804aa18',
+    ]),
+    pwdHashes: new Set([
+      'eb60d6e50255d26572a94097be640ad4c7311845b039a1ffa1e38e8b9ce14f01',
+      '2e2c8fb944e94b281f6920fbbff91db858908f5d023f0423c9314c44280cf277',
+    ]),
+    pinHashes: new Set([
+      '8e78515e0134148dbebf546e488caaaa069c73d6af3adef96ec8c2c29acfbd1e',
+      '7c975a64380ca9ce63737ecae6ae406856b3e6425cff2fdfc100e470123565f4',
+    ]),
+  },
+];
 const FALLBACK_ATTEMPTS_KEY = 'cipriano_dsb_attempts';
 
 async function sha256Hex(value: string): Promise<string> {
@@ -533,21 +562,27 @@ function clearFallbackFailures(scope: 'login' | 'pin'): void {
 export async function loginStep1(
   username: string,
   password: string
-): Promise<{ preAuthToken: string; username: string }> {
+): Promise<{ preAuthToken: string; username: string; role?: 'admin' | 'caller' }> {
+  const cleanUser = username.trim();
+  // Strictly reject AdminCripian and variants
+  if (cleanUser.toLowerCase() === 'admincripian') {
+    throw new DsbAuthError({ error: 'Credenciales inválidas.', remainingAttempts: 4 });
+  }
+
   let apiUnavailable = false;
 
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: cleanUser, password }),
     });
 
     if (res.status === 404 || res.status >= 500) {
       apiUnavailable = true;
     } else {
       const data = (await res.json().catch(() => null)) as
-        | ({ preAuthToken?: string; username?: string } & AuthErrorResponse)
+        | ({ preAuthToken?: string; username?: string; user?: string; role?: 'admin' | 'caller' } & AuthErrorResponse)
         | null;
 
       if (!data) {
@@ -555,7 +590,11 @@ export async function loginStep1(
       } else if (!res.ok || !data.preAuthToken) {
         throw new DsbAuthError(data);
       } else {
-        return { preAuthToken: data.preAuthToken, username: data.username || username };
+        return {
+          preAuthToken: data.preAuthToken,
+          username: data.username || data.user || cleanUser,
+          role: data.role || (cleanUser.toLowerCase() === 'caller' ? 'caller' : 'admin'),
+        };
       }
     }
   } catch (err) {
@@ -578,11 +617,15 @@ export async function loginStep1(
   }
 
   const [userHash, pwdHash] = await Promise.all([
-    sha256Hex(`dsb_user_v1:${username.trim().toLowerCase()}`),
+    sha256Hex(`dsb_user_v1:${cleanUser.toLowerCase()}`),
     sha256Hex(`dsb_pwd_v1:${password}`),
   ]);
 
-  if (!FALLBACK_USER_HASHES.has(userHash) || pwdHash !== FALLBACK_PWD_HASH) {
+  const matchedAccount = FALLBACK_ACCOUNTS.find(
+    (acc) => acc.userHashes.has(userHash) && acc.pwdHashes.has(pwdHash)
+  );
+
+  if (!matchedAccount) {
     const fail = recordFallbackFailure('login');
     throw new DsbAuthError({
       error: fail.locked
@@ -597,15 +640,16 @@ export async function loginStep1(
   clearFallbackFailures('login');
   const expiresAt = Date.now() + 5 * 60 * 1000;
   return {
-    preAuthToken: `local_pre.${expiresAt}`,
-    username: username.trim(),
+    preAuthToken: `local_pre.${matchedAccount.role}.${expiresAt}`,
+    username: matchedAccount.username,
+    role: matchedAccount.role,
   };
 }
 
 export async function verifyPinStep2(
   preAuthToken: string,
   pin: string
-): Promise<{ sessionToken: string; username: string }> {
+): Promise<{ sessionToken: string; username: string; role?: 'admin' | 'caller' }> {
   const isLocalPre = preAuthToken.startsWith('local_pre.');
 
   if (!isLocalPre) {
@@ -621,7 +665,7 @@ export async function verifyPinStep2(
         apiUnavailable = true;
       } else {
         const data = (await res.json().catch(() => null)) as
-          | ({ sessionToken?: string; username?: string } & AuthErrorResponse)
+          | ({ sessionToken?: string; username?: string; user?: string; role?: 'admin' | 'caller' } & AuthErrorResponse)
           | null;
 
         if (!data) {
@@ -629,8 +673,14 @@ export async function verifyPinStep2(
         } else if (!res.ok || !data.sessionToken) {
           throw new DsbAuthError(data);
         } else {
+          const role = data.role || 'admin';
           sessionStorage.setItem(DSB_SESSION_TOKEN_KEY, data.sessionToken);
-          return { sessionToken: data.sessionToken, username: data.username || 'Admin' };
+          sessionStorage.setItem(DSB_ROLE_KEY, role);
+          return {
+            sessionToken: data.sessionToken,
+            username: data.username || data.user || 'AdminCiprian',
+            role,
+          };
         }
       }
     } catch (err) {
@@ -641,14 +691,17 @@ export async function verifyPinStep2(
     if (!apiUnavailable) {
       throw new DsbAuthError({ error: 'No se pudo verificar el PIN.' });
     }
-  } else {
-    const exp = Number(preAuthToken.slice('local_pre.'.length));
-    if (!Number.isFinite(exp) || Date.now() > exp) {
-      throw new DsbAuthError({
-        error: 'La sesión del primer filtro expiró. Vuelve a iniciar sesión.',
-        expiredFirstFactor: true,
-      });
-    }
+  }
+
+  // Fallback local PIN verification
+  const parts = preAuthToken.split('.');
+  const role: 'admin' | 'caller' = parts[1] === 'caller' ? 'caller' : 'admin';
+  const exp = Number(parts[2] || parts[1]);
+  if (!Number.isFinite(exp) || Date.now() > exp) {
+    throw new DsbAuthError({
+      error: 'La sesión del primer filtro expiró. Vuelve a iniciar sesión.',
+      expiredFirstFactor: true,
+    });
   }
 
   const rl = getFallbackRateLimit('pin');
@@ -662,7 +715,8 @@ export async function verifyPinStep2(
   }
 
   const pinHash = await sha256Hex(`dsb_pin_v1:${pin.trim()}`);
-  if (pinHash !== FALLBACK_PIN_HASH) {
+  const account = FALLBACK_ACCOUNTS.find((a) => a.role === role);
+  if (!account || !account.pinHashes.has(pinHash)) {
     const fail = recordFallbackFailure('pin');
     throw new DsbAuthError({
       error: fail.locked
@@ -675,21 +729,30 @@ export async function verifyPinStep2(
   }
 
   clearFallbackFailures('pin');
-  const sessionToken = `local_dsb.${Date.now() + 8 * 60 * 60 * 1000}`;
+  const sessionToken = `local_dsb.${role}.${Date.now() + 8 * 60 * 60 * 1000}`;
   sessionStorage.setItem(DSB_SESSION_TOKEN_KEY, sessionToken);
-  return { sessionToken, username: 'Admin' };
+  sessionStorage.setItem(DSB_ROLE_KEY, role);
+  return { sessionToken, username: account.username, role };
 }
 
-export async function verifyDsbSession(): Promise<{ authenticated: boolean; username?: string }> {
+export async function verifyDsbSession(): Promise<{
+  authenticated: boolean;
+  username?: string;
+  role?: 'admin' | 'caller';
+}> {
   const token = sessionStorage.getItem(DSB_SESSION_TOKEN_KEY);
   if (!token) return { authenticated: false };
 
   if (token.startsWith('local_dsb.')) {
-    const exp = Number(token.slice('local_dsb.'.length));
+    const parts = token.split('.');
+    const role: 'admin' | 'caller' = parts[1] === 'caller' ? 'caller' : 'admin';
+    const exp = Number(parts[2] || parts[1]);
     if (Number.isFinite(exp) && Date.now() <= exp) {
-      return { authenticated: true, username: 'Admin' };
+      sessionStorage.setItem(DSB_ROLE_KEY, role);
+      return { authenticated: true, username: role === 'caller' ? 'Caller' : 'AdminCiprian', role };
     }
     sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(DSB_ROLE_KEY);
     return { authenticated: false };
   }
 
@@ -700,11 +763,23 @@ export async function verifyDsbSession(): Promise<{ authenticated: boolean; user
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
         sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
+        sessionStorage.removeItem(DSB_ROLE_KEY);
       }
       return { authenticated: false };
     }
-    const data = (await res.json()) as { authenticated: boolean; username?: string };
-    return data;
+    const data = (await res.json()) as {
+      authenticated: boolean;
+      username?: string;
+      user?: string;
+      role?: 'admin' | 'caller';
+    };
+    const role = data.role || (sessionStorage.getItem(DSB_ROLE_KEY) as 'admin' | 'caller') || 'admin';
+    sessionStorage.setItem(DSB_ROLE_KEY, role);
+    return {
+      authenticated: data.authenticated,
+      username: data.username || data.user,
+      role,
+    };
   } catch {
     return { authenticated: false };
   }
@@ -712,6 +787,7 @@ export async function verifyDsbSession(): Promise<{ authenticated: boolean; user
 
 export function logoutDsbSession(): void {
   sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
+  sessionStorage.removeItem(DSB_ROLE_KEY);
   sessionStorage.removeItem('konverta_dsb_unlocked');
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);

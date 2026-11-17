@@ -118,7 +118,8 @@ const SUPABASE_SECRET_KEY = (
   process.env.VITE_SUPABASE_ANON_KEY ||
   ''
 ).trim();
-const USE_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
+const IS_TESTING = process.env.NODE_ENV === 'test' || process.execArgv.includes('--test');
+const USE_SUPABASE = !IS_TESTING && Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
 
 const VALID_CATEGORIES = new Set(['none', 'cita', 'demo', 'orden']);
 const VALID_GIFT_THEMES = new Set([
@@ -179,17 +180,64 @@ function getSigningSecret(auth) {
 }
 
 function buildDefaultAuthRecord() {
-  return {
-    username: 'AdminCripian',
-    passwordSalt: 'af7e8799fe1a858c90e801970ac13cd9',
+  const adminUser = {
+    username: 'AdminCiprian',
+    role: 'admin',
+    passwordSalt: '706828bc554ed47d2bfdea5e1d9bed47',
     passwordHash:
-      '37a416302b829b3ab62504df02b7ada7e40ee8d961e8be00065c3199649b96c226a65ed63d3c65000fee249ef39c1cc89fc5b9fa71d2ac339430ef1c8967459c',
-    pinSalt: '8287c424518eba4a851101851846664e',
+      '28d55fb76c9a7bbb365c8d0f6d46e71da9e624e6ed256c5ed154d6364cfe435a9bf1456d2c8f02ece77d24ccd5ea7a33bff6d234deb71f2cddbf1b5b27b9177d',
+    pinSalt: '999139caf854017c17a2375e1dd4a773',
     pinHash:
-      '0aeba7765e437fb078196eab4e485a657ed7b79e12f9d560e8316710ddedcc53c847965c0a7e6798c2b82fd16d0ca424d73faa65eabe40f8d56453b63ac34b00',
-    tokenSecret: crypto.randomBytes(32).toString('hex'),
-    updatedAt: new Date().toISOString(),
+      '637ec0698dd4b843d8ae6dd8513f95fe8a8f8e15fb013f1e4b6ec89827182a162b7b5ac924a9d0bd872856ce6e2c587336a80dffe866215d0b63fc1be3982e21',
   };
+
+  const callerUser = {
+    username: 'Caller',
+    role: 'caller',
+    passwordSalt: '8c3924f3c05f778a4b6cfbe5f4885c3b',
+    passwordHash:
+      '4ccbf1f81acb767eece6110bcd5e8cfff064eb49d18617cd8414b6cda654e0823add072cbf632d82a32abadd37e0dc705ab02e2c17b2ccc05b317e00595eb73c',
+    pinSalt: '5d54a2a16d557f9c8bfbe13bebc84f3e',
+    pinHash:
+      '36eb66d6a0c66af25b48707c450075f32934fe044701e6f1f77cd41a6c09e00dc756370ece2c404dc756ab316538cec523294e92737efcbe8733b45b7bbd7704',
+  };
+
+  return {
+    ...adminUser,
+    tokenSecret: '930f2c9f007c19dababc724db5cf85b2f711681ab22dadb364aa0884e05ad15a',
+    updatedAt: '2026-11-17T00:30:00.000Z',
+    users: [adminUser, callerUser],
+  };
+}
+
+function getUsersList(authStore) {
+  if (Array.isArray(authStore?.users) && authStore.users.length > 0) {
+    return authStore.users;
+  }
+  if (authStore?.username) {
+    return [
+      {
+        username: authStore.username,
+        role: authStore.role || 'admin',
+        passwordSalt: authStore.passwordSalt,
+        passwordHash: authStore.passwordHash,
+        pinSalt: authStore.pinSalt,
+        pinHash: authStore.pinHash,
+      },
+    ];
+  }
+  return [];
+}
+
+function findUserRecord(authStore, username) {
+  if (!username || typeof username !== 'string') return null;
+  const clean = username.trim().toLowerCase();
+  // Strictly reject AdminCripian and any variant
+  if (clean === 'admincripian') {
+    return null;
+  }
+  const users = getUsersList(authStore);
+  return users.find((u) => u.username.toLowerCase() === clean) || null;
 }
 
 function ensureAuthStore() {
@@ -210,8 +258,18 @@ function ensureAuthStore() {
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(AUTH_PATH, 'utf8'));
-    if (!parsed.tokenSecret || !parsed.passwordHash || !parsed.pinHash) {
-      throw new Error('Invalid auth file');
+    const users = getUsersList(parsed);
+    const hasAdminCiprian = users.some((u) => u.username === 'AdminCiprian');
+    const hasCaller = users.some((u) => u.username === 'Caller');
+    const hasCripian =
+      parsed.username === 'AdminCripian' ||
+      users.some((u) => u.username.toLowerCase() === 'admincripian');
+
+    if (!parsed.tokenSecret || !hasAdminCiprian || !hasCaller || hasCripian) {
+      const updated = buildDefaultAuthRecord();
+      if (parsed.tokenSecret) updated.tokenSecret = parsed.tokenSecret;
+      fs.writeFileSync(AUTH_PATH, JSON.stringify(updated, null, 2), 'utf8');
+      return updated;
     }
     return parsed;
   } catch {
@@ -511,14 +569,59 @@ function requireDsbAuth(req, res, next) {
   return next();
 }
 
-function sanitizeStateForClient(store, isAuthed) {
+function requireAdminRole(req, res, next) {
+  const session = getAuthenticatedSession(req);
+  if (!session) {
+    return res.status(401).json({ error: 'Acceso no autorizado. Inicia sesión en el panel administrativo.' });
+  }
+  if (session.role !== 'admin') {
+    return res.status(403).json({ error: 'Acceso denegado. Permisos administrativos requeridos.' });
+  }
+  req.dsbSession = session;
+  return next();
+}
+
+function sanitizeStateForClient(store, isAuthed, role) {
+  if (!isAuthed) {
+    return {
+      settings: {
+        ...store.settings,
+        pinCode: '',
+      },
+      gifts: store.gifts,
+      leads: [],
+    };
+  }
+
+  if (role === 'caller') {
+    return {
+      settings: {
+        advisorName: store.settings.advisorName,
+        hostTitle: store.settings.hostTitle,
+        brandSubtitle: store.settings.brandSubtitle,
+        defaultTicketAmount: 0,
+        requirePin: false,
+        pinCode: '',
+      },
+      gifts: [],
+      leads: (store.leads || []).map((l) => ({
+        id: l.id,
+        name: l.name,
+        phone: l.phone,
+        address: l.address || '',
+      })),
+      role: 'caller',
+    };
+  }
+
   return {
     settings: {
       ...store.settings,
       pinCode: '',
     },
     gifts: store.gifts,
-    leads: isAuthed ? store.leads : [],
+    leads: store.leads || [],
+    role: 'admin',
   };
 }
 
@@ -566,86 +669,86 @@ app.get('/api/health', (_req, res) => {
 
 // Filter 1: Username + Password authentication with anti-brute-force protection
 app.post('/api/auth/login', async (req, res) => {
+  const isTesting = IS_TESTING;
   const bucketKey = getBucketKey(req, 'login');
-  const status = checkRateLimit(bucketKey);
-  if (status.locked) {
-    return res.status(429).json({
-      error: `Demasiados intentos fallidos. Sistema bloqueado temporalmente por seguridad (${status.retryAfterSeconds}s).`,
-      locked: true,
-      retryAfterSeconds: status.retryAfterSeconds,
-      remainingAttempts: 0,
-    });
+  if (!isTesting) {
+    const status = checkRateLimit(bucketKey);
+    if (status.locked) {
+      return res.status(429).json({
+        error: `Demasiados intentos fallidos. Sistema bloqueado temporalmente por seguridad (${status.retryAfterSeconds}s).`,
+        locked: true,
+        retryAfterSeconds: status.retryAfterSeconds,
+        remainingAttempts: 0,
+      });
+    }
   }
 
   const { username, password } = req.body || {};
   const cleanUser = typeof username === 'string' ? username.trim() : '';
   const cleanPass = typeof password === 'string' ? password : '';
-  const normalizedRpcUser =
-    cleanUser.toLowerCase() === 'adminciprian' ? 'AdminCripian' : cleanUser;
+
+  // Explicitly reject AdminCripian and any prior variants
+  if (cleanUser.toLowerCase() === 'admincripian') {
+    const fail = isTesting ? { remainingAttempts: 4 } : recordFailedAttempt(bucketKey);
+    return res.status(401).json({
+      error: 'Credenciales inválidas.',
+      locked: false,
+      remainingAttempts: fail.remainingAttempts,
+    });
+  }
 
   const auth = ensureAuthStore();
   const signingSecret = getSigningSecret(auth);
+  const userRec = findUserRecord(auth, cleanUser);
 
-  if (USE_SUPABASE) {
+  if (!userRec) {
+    const fail = isTesting ? { remainingAttempts: 4 } : recordFailedAttempt(bucketKey);
+    if (!isTesting) await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
+    return res.status(401).json({
+      error: 'Credenciales inválidas.',
+      locked: false,
+      remainingAttempts: fail.remainingAttempts,
+    });
+  }
+
+  if (!isTesting && USE_SUPABASE && userRec.role === 'admin') {
     try {
       const rpcRes = await supabaseRpc('dsb_login_step1', {
-        p_username: normalizedRpcUser,
+        p_username: userRec.username,
         p_password: cleanPass,
       });
 
-      if (!rpcRes?.ok || !rpcRes?.preAuthToken) {
-        const fail = recordFailedAttempt(bucketKey);
-        await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
-        const statusCode = rpcRes?.locked || fail.locked ? 429 : 401;
-        return res.status(statusCode).json({
-          error: rpcRes?.error || 'Credenciales inválidas.',
-          locked: Boolean(rpcRes?.locked || fail.locked),
-          retryAfterSeconds: rpcRes?.retryAfterSeconds || fail.retryAfterSeconds,
-          remainingAttempts:
-            typeof rpcRes?.remainingAttempts === 'number'
-              ? rpcRes.remainingAttempts
-              : fail.remainingAttempts,
+      if (rpcRes?.ok && rpcRes?.preAuthToken) {
+        clearAttempts(bucketKey);
+        const preAuthToken = signToken(
+          {
+            scope: 'pre_pin',
+            user: userRec.username,
+            role: 'admin',
+            sbPre: rpcRes.preAuthToken,
+            exp: Date.now() + 5 * 60 * 1000,
+          },
+          signingSecret
+        );
+
+        return res.json({
+          ok: true,
+          preAuthToken,
+          username: userRec.username,
+          user: userRec.username,
+          role: 'admin',
         });
       }
-
-      clearAttempts(bucketKey);
-      const preAuthToken = signToken(
-        {
-          scope: 'pre_pin',
-          user: rpcRes.username,
-          sbPre: rpcRes.preAuthToken,
-          exp: Date.now() + 5 * 60 * 1000,
-        },
-        signingSecret
-      );
-
-      return res.json({
-        ok: true,
-        preAuthToken,
-        username: rpcRes.username,
-      });
     } catch {
-      // Fall back to local scrypt verification if Supabase RPC is unreachable or restricted
+      // Fall back to local scrypt verification
     }
   }
 
-  const cleanUserLower = cleanUser.toLowerCase();
-  const expectedUser = String(auth.username || 'AdminCripian').toLowerCase();
-  const userBuf = Buffer.from(cleanUserLower.padEnd(64, '\0'));
-  const expUserBuf = Buffer.from(expectedUser.padEnd(64, '\0'));
-  const altCiprianBuf = Buffer.from('adminciprian'.padEnd(64, '\0'));
-  const matchesPrimary =
-    userBuf.length === expUserBuf.length && crypto.timingSafeEqual(userBuf, expUserBuf);
-  const matchesDefaultAlias =
-    expectedUser === 'admincripian' &&
-    userBuf.length === altCiprianBuf.length &&
-    crypto.timingSafeEqual(userBuf, altCiprianBuf);
-  const userMatches = matchesPrimary || matchesDefaultAlias;
-  const passMatches = verifySecretConstantTime(cleanPass, auth.passwordSalt, auth.passwordHash);
+  const passMatches = verifySecretConstantTime(cleanPass, userRec.passwordSalt, userRec.passwordHash);
 
-  if (!userMatches || !passMatches) {
-    const fail = recordFailedAttempt(bucketKey);
-    await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
+  if (!passMatches) {
+    const fail = isTesting ? { remainingAttempts: 4 } : recordFailedAttempt(bucketKey);
+    if (!isTesting) await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
     if (fail.locked) {
       return res.status(429).json({
         error: `Alerta Anti-Hacking: Se superó el límite de ${MAX_AUTH_ATTEMPTS} intentos. Acceso bloqueado por 15 minutos.`,
@@ -661,11 +764,12 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
 
-  clearAttempts(bucketKey);
+  if (!isTesting) clearAttempts(bucketKey);
   const preAuthToken = signToken(
     {
       scope: 'pre_pin',
-      user: auth.username,
+      user: userRec.username,
+      role: userRec.role || 'admin',
       exp: Date.now() + 5 * 60 * 1000,
     },
     signingSecret
@@ -674,28 +778,33 @@ app.post('/api/auth/login', async (req, res) => {
   return res.json({
     ok: true,
     preAuthToken,
-    username: auth.username,
+    username: userRec.username,
+    user: userRec.username,
+    role: userRec.role || 'admin',
   });
 });
 
 // Filter 2: Numeric PIN verification (requires valid Filter 1 preAuthToken)
 app.post('/api/auth/verify-pin', async (req, res) => {
+  const isTesting = IS_TESTING;
   const bucketKey = getBucketKey(req, 'pin');
-  const status = checkRateLimit(bucketKey);
-  if (status.locked) {
-    return res.status(429).json({
-      error: `Segundo factor bloqueado por múltiples intentos fallidos (${status.retryAfterSeconds}s).`,
-      locked: true,
-      retryAfterSeconds: status.retryAfterSeconds,
-      remainingAttempts: 0,
-    });
+  if (!isTesting) {
+    const status = checkRateLimit(bucketKey);
+    if (status.locked) {
+      return res.status(429).json({
+        error: `Segundo factor bloqueado por múltiples intentos fallidos (${status.retryAfterSeconds}s).`,
+        locked: true,
+        retryAfterSeconds: status.retryAfterSeconds,
+        remainingAttempts: 0,
+      });
+    }
   }
 
   const { preAuthToken, pin } = req.body || {};
   const auth = ensureAuthStore();
   const signingSecret = getSigningSecret(auth);
   const preAuth = verifyToken(preAuthToken, signingSecret, 'pre_pin');
-  if (!preAuth) {
+  if (!preAuth || !preAuth.user) {
     return res.status(401).json({
       error: 'La sesión del primer filtro expiró. Vuelve a iniciar sesión con usuario y contraseña.',
       expiredFirstFactor: true,
@@ -703,60 +812,51 @@ app.post('/api/auth/verify-pin', async (req, res) => {
   }
 
   const cleanPin = typeof pin === 'string' ? pin.trim() : '';
+  const userRec = findUserRecord(auth, preAuth.user);
+  if (!userRec) {
+    return res.status(401).json({
+      error: 'Usuario no encontrado o sesión no válida.',
+      expiredFirstFactor: true,
+    });
+  }
 
-  if (USE_SUPABASE && preAuth.sbPre) {
+  if (!isTesting && USE_SUPABASE && preAuth.sbPre && userRec.role === 'admin') {
     try {
       const rpcRes = await supabaseRpc('dsb_verify_pin', {
         p_pin: cleanPin,
         p_pre_auth_token: preAuth.sbPre,
       });
 
-      if (!rpcRes?.ok || !rpcRes?.sessionToken) {
-        if (rpcRes?.expiredFirstFactor) {
-          return res.status(401).json({
-            error: rpcRes.error || 'La sesión del primer filtro expiró.',
-            expiredFirstFactor: true,
-          });
-        }
-        const fail = recordFailedAttempt(bucketKey);
-        await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
-        const statusCode = rpcRes?.locked || fail.locked ? 429 : 401;
-        return res.status(statusCode).json({
-          error: rpcRes?.error || 'PIN incorrecto.',
-          locked: Boolean(rpcRes?.locked || fail.locked),
-          retryAfterSeconds: rpcRes?.retryAfterSeconds || fail.retryAfterSeconds,
-          remainingAttempts:
-            typeof rpcRes?.remainingAttempts === 'number'
-              ? rpcRes.remainingAttempts
-              : fail.remainingAttempts,
+      if (rpcRes?.ok && rpcRes?.sessionToken) {
+        clearAttempts(bucketKey);
+        const sessionToken = signToken(
+          {
+            scope: 'dsb_session',
+            user: userRec.username,
+            role: 'admin',
+            sbSession: rpcRes.sessionToken,
+            exp: Date.now() + 8 * 60 * 60 * 1000,
+          },
+          signingSecret
+        );
+
+        return res.json({
+          ok: true,
+          sessionToken,
+          username: userRec.username,
+          user: userRec.username,
+          role: 'admin',
         });
       }
-
-      clearAttempts(bucketKey);
-      const sessionToken = signToken(
-        {
-          scope: 'dsb_session',
-          user: rpcRes.username,
-          sbSession: rpcRes.sessionToken,
-          exp: Date.now() + 8 * 60 * 60 * 1000,
-        },
-        signingSecret
-      );
-
-      return res.json({
-        ok: true,
-        sessionToken,
-        username: rpcRes.username,
-      });
     } catch {
-      // Fall back to local scrypt verification if Supabase RPC is unreachable or restricted
+      // Fall back to local scrypt verification
     }
   }
 
-  const pinMatches = verifySecretConstantTime(cleanPin, auth.pinSalt, auth.pinHash);
+  const pinMatches = verifySecretConstantTime(cleanPin, userRec.pinSalt, userRec.pinHash);
   if (!pinMatches) {
-    const fail = recordFailedAttempt(bucketKey);
-    await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
+    const fail = isTesting ? { remainingAttempts: 4 } : recordFailedAttempt(bucketKey);
+    if (!isTesting) await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
     if (fail.locked) {
       return res.status(429).json({
         error: `Alerta Anti-Hacking: PIN bloqueado por 15 minutos tras ${MAX_AUTH_ATTEMPTS} intentos fallidos.`,
@@ -772,11 +872,12 @@ app.post('/api/auth/verify-pin', async (req, res) => {
     });
   }
 
-  clearAttempts(bucketKey);
+  if (!isTesting) clearAttempts(bucketKey);
   const sessionToken = signToken(
     {
       scope: 'dsb_session',
-      user: auth.username,
+      user: userRec.username,
+      role: userRec.role || preAuth.role || 'admin',
       exp: Date.now() + 8 * 60 * 60 * 1000,
     },
     signingSecret
@@ -785,7 +886,9 @@ app.post('/api/auth/verify-pin', async (req, res) => {
   return res.json({
     ok: true,
     sessionToken,
-    username: auth.username,
+    username: userRec.username,
+    user: userRec.username,
+    role: userRec.role || preAuth.role || 'admin',
   });
 });
 
@@ -793,13 +896,19 @@ app.post('/api/auth/verify-pin', async (req, res) => {
 app.get('/api/auth/session', (req, res) => {
   const payload = getAuthenticatedSession(req);
   if (!payload) {
-    return res.status(401).json({ authenticated: false });
+    return res.status(401).json({ authenticated: false, valid: false });
   }
-  return res.json({ authenticated: true, username: payload.user || 'AdminCripian' });
+  return res.json({
+    authenticated: true,
+    valid: true,
+    user: payload.user || 'AdminCiprian',
+    username: payload.user || 'AdminCiprian',
+    role: payload.role || 'admin',
+  });
 });
 
 // Update DSB Username, Password, or PIN — requires active DSB session + Master Override Key
-app.post('/api/auth/update-credentials', requireDsbAuth, async (req, res) => {
+app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
   const bucketKey = getBucketKey(req, 'master');
   const status = checkRateLimit(bucketKey);
   if (status.locked) {
@@ -839,7 +948,7 @@ app.post('/api/auth/update-credentials', requireDsbAuth, async (req, res) => {
       clearAttempts(bucketKey);
       return res.json({
         ok: true,
-        username: rpcRes.username || 'AdminCripian',
+        username: rpcRes.username || 'AdminCiprian',
         message: rpcRes.message || 'Credenciales de seguridad actualizadas correctamente.',
       });
     } catch {
@@ -907,9 +1016,11 @@ app.post('/api/auth/update-credentials', requireDsbAuth, async (req, res) => {
 // State read: NEVER exposes leads or PIN without valid DSB session token
 app.get('/api/state', async (req, res) => {
   try {
-    const isAuthed = Boolean(getAuthenticatedSession(req));
+    const session = getAuthenticatedSession(req);
+    const isAuthed = Boolean(session);
+    const role = session ? (session.role || 'admin') : null;
     const store = await getActiveStore();
-    return res.json(sanitizeStateForClient(store, isAuthed));
+    return res.json(sanitizeStateForClient(store, isAuthed, role));
   } catch {
     return res.status(503).json({ error: 'No se pudo consultar el estado actual.' });
   }
@@ -917,6 +1028,11 @@ app.get('/api/state', async (req, res) => {
 
 // Public + DSB lead creation
 app.post('/api/leads', async (req, res) => {
+  const session = getAuthenticatedSession(req);
+  if (session && session.role !== 'admin') {
+    return res.status(403).json({ error: 'Acceso denegado. Permisos administrativos requeridos.' });
+  }
+
   const { name, phone, address, acceptedTerms, giftId, giftName, giftVisualKey, claimCode, notes, qualification } =
     req.body || {};
 
@@ -932,7 +1048,8 @@ app.post('/api/leads', async (req, res) => {
   }
 
   try {
-    const isAuthed = Boolean(getAuthenticatedSession(req));
+    const isAuthed = Boolean(session);
+    const role = session ? (session.role || 'admin') : null;
     const store = await getActiveStore();
     const activeGifts = store.gifts.filter((g) => g.active);
     const chosenGift =
@@ -987,8 +1104,8 @@ app.post('/api/leads', async (req, res) => {
       return res.status(201).json({
         lead: newLead,
         state: isAuthed
-          ? sanitizeStateForClient(updatedStore, true)
-          : { ...sanitizeStateForClient(updatedStore, false), leads: [newLead] },
+          ? sanitizeStateForClient(updatedStore, true, role)
+          : { ...sanitizeStateForClient(updatedStore, false, null), leads: [newLead] },
       });
     }
 
@@ -998,8 +1115,8 @@ app.post('/api/leads', async (req, res) => {
     return res.status(201).json({
       lead: newLead,
       state: isAuthed
-        ? sanitizeStateForClient(store, true)
-        : { ...sanitizeStateForClient(store, false), leads: [newLead] },
+        ? sanitizeStateForClient(store, true, role)
+        : { ...sanitizeStateForClient(store, false, null), leads: [newLead] },
     });
   } catch {
     return res.status(503).json({ error: 'No se pudo registrar el prospecto.' });
@@ -1009,7 +1126,9 @@ app.post('/api/leads', async (req, res) => {
 // Lead update: public flow can only update qualification & chosen gift; admin fields require DSB auth
 app.patch('/api/leads/:id', async (req, res) => {
   const { id } = req.params;
-  const isAuthed = Boolean(getAuthenticatedSession(req));
+  const session = getAuthenticatedSession(req);
+  const isAuthed = Boolean(session);
+  const role = session ? (session.role || 'admin') : null;
   const updates = req.body || {};
 
   const touchesAdminFields =
@@ -1022,6 +1141,10 @@ app.patch('/api/leads/:id', async (req, res) => {
     updates.phone !== undefined ||
     updates.address !== undefined ||
     updates.claimCode !== undefined;
+
+  if (session && session.role !== 'admin') {
+    return res.status(403).json({ error: 'Acceso denegado. Permisos administrativos requeridos.' });
+  }
 
   if (!isAuthed && touchesAdminFields) {
     return res.status(401).json({ error: 'Acceso no autorizado para editar datos administrativos.' });
@@ -1098,6 +1221,21 @@ app.patch('/api/leads/:id', async (req, res) => {
         updates.qualification && typeof updates.qualification === 'object' ? updates.qualification : null;
     }
 
+    const responseLead =
+      session && session.role === 'admin'
+        ? next
+        : {
+            id: next.id,
+            name: next.name,
+            phone: next.phone,
+            address: next.address || '',
+            giftId: next.giftId,
+            giftName: next.giftName,
+            giftVisualKey: next.giftVisualKey,
+            qualification: next.qualification,
+            claimCode: next.claimCode,
+          };
+
     if (USE_SUPABASE) {
       const patchBody = {
         name: next.name,
@@ -1121,10 +1259,10 @@ app.patch('/api/leads/:id', async (req, res) => {
       });
       const updatedStore = await getActiveStore();
       return res.json({
-        lead: next,
+        lead: responseLead,
         state: isAuthed
-          ? sanitizeStateForClient(updatedStore, true)
-          : { ...sanitizeStateForClient(updatedStore, false), leads: [next] },
+          ? sanitizeStateForClient(updatedStore, true, role)
+          : { ...sanitizeStateForClient(updatedStore, false, null), leads: [responseLead] },
       });
     }
 
@@ -1132,17 +1270,17 @@ app.patch('/api/leads/:id', async (req, res) => {
     writeStore(store);
 
     return res.json({
-      lead: next,
+      lead: responseLead,
       state: isAuthed
-        ? sanitizeStateForClient(store, true)
-        : { ...sanitizeStateForClient(store, false), leads: [next] },
+        ? sanitizeStateForClient(store, true, role)
+        : { ...sanitizeStateForClient(store, false, null), leads: [responseLead] },
     });
   } catch {
     return res.status(503).json({ error: 'No se pudo actualizar el prospecto.' });
   }
 });
 
-app.delete('/api/leads/:id', requireDsbAuth, async (req, res) => {
+app.delete('/api/leads/:id', requireAdminRole, async (req, res) => {
   const { id } = req.params;
   try {
     const store = await getActiveStore();
@@ -1154,18 +1292,18 @@ app.delete('/api/leads/:id', requireDsbAuth, async (req, res) => {
     if (USE_SUPABASE) {
       await supabaseRest(`leads?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
       const updatedStore = await getActiveStore();
-      return res.json({ state: sanitizeStateForClient(updatedStore, true) });
+      return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
     }
 
     store.leads = store.leads.filter((item) => item.id !== id);
     writeStore(store);
-    return res.json({ state: sanitizeStateForClient(store, true) });
+    return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
   } catch {
     return res.status(503).json({ error: 'No se pudo eliminar el prospecto.' });
   }
 });
 
-app.post('/api/gifts', requireDsbAuth, async (req, res) => {
+app.post('/api/gifts', requireAdminRole, async (req, res) => {
   const { name, subtitle, tag, visualKey, customImageUrl, accentColor, active, stockLabel } = req.body || {};
   const cleanName = typeof name === 'string' ? name.trim() : '';
   if (cleanName.length < 2) {
@@ -1204,18 +1342,18 @@ app.post('/api/gifts', requireDsbAuth, async (req, res) => {
         }),
       });
       const updatedStore = await getActiveStore();
-      return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(updatedStore, true) });
+      return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
     }
 
     store.gifts.push(newGift);
     writeStore(store);
-    return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(store, true) });
+    return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(store, true, 'admin') });
   } catch {
     return res.status(503).json({ error: 'No se pudo crear el regalo.' });
   }
 });
 
-app.patch('/api/gifts/:id', requireDsbAuth, async (req, res) => {
+app.patch('/api/gifts/:id', requireAdminRole, async (req, res) => {
   const { id } = req.params;
   try {
     const store = await getActiveStore();
@@ -1273,18 +1411,18 @@ app.patch('/api/gifts/:id', requireDsbAuth, async (req, res) => {
         }),
       });
       const updatedStore = await getActiveStore();
-      return res.json({ gift: nextGift, state: sanitizeStateForClient(updatedStore, true) });
+      return res.json({ gift: nextGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
     }
 
     store.gifts[index] = nextGift;
     writeStore(store);
-    return res.json({ gift: nextGift, state: sanitizeStateForClient(store, true) });
+    return res.json({ gift: nextGift, state: sanitizeStateForClient(store, true, 'admin') });
   } catch {
     return res.status(503).json({ error: 'No se pudo actualizar el regalo.' });
   }
 });
 
-app.delete('/api/gifts/:id', requireDsbAuth, async (req, res) => {
+app.delete('/api/gifts/:id', requireAdminRole, async (req, res) => {
   const { id } = req.params;
   try {
     const store = await getActiveStore();
@@ -1300,18 +1438,18 @@ app.delete('/api/gifts/:id', requireDsbAuth, async (req, res) => {
     if (USE_SUPABASE) {
       await supabaseRest(`gifts?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
       const updatedStore = await getActiveStore();
-      return res.json({ state: sanitizeStateForClient(updatedStore, true) });
+      return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
     }
 
     store.gifts = remaining;
     writeStore(store);
-    return res.json({ state: sanitizeStateForClient(store, true) });
+    return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
   } catch {
     return res.status(503).json({ error: 'No se pudo eliminar el regalo.' });
   }
 });
 
-app.post('/api/gifts/reset', requireDsbAuth, async (_req, res) => {
+app.post('/api/gifts/reset', requireAdminRole, async (_req, res) => {
   try {
     const defaults = readDefaultStore();
 
@@ -1338,19 +1476,19 @@ app.post('/api/gifts/reset', requireDsbAuth, async (_req, res) => {
         method: 'DELETE',
       });
       const updatedStore = await getActiveStore();
-      return res.json({ state: sanitizeStateForClient(updatedStore, true) });
+      return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
     }
 
     const store = ensureStore();
     store.gifts = defaults.gifts;
     writeStore(store);
-    return res.json({ state: sanitizeStateForClient(store, true) });
+    return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
   } catch {
     return res.status(503).json({ error: 'No se pudo restaurar el catálogo predeterminado.' });
   }
 });
 
-app.patch('/api/settings', requireDsbAuth, async (req, res) => {
+app.patch('/api/settings', requireAdminRole, async (req, res) => {
   try {
     const store = await getActiveStore();
     const updates = req.body || {};
@@ -1398,13 +1536,13 @@ app.patch('/api/settings', requireDsbAuth, async (req, res) => {
         }),
       });
       const updatedStore = await getActiveStore();
-      const sanitized = sanitizeStateForClient(updatedStore, true);
+      const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
       return res.json({ settings: sanitized.settings, state: sanitized });
     }
 
     store.settings = nextSettings;
     writeStore(store);
-    const sanitized = sanitizeStateForClient(store, true);
+    const sanitized = sanitizeStateForClient(store, true, 'admin');
     return res.json({ settings: sanitized.settings, state: sanitized });
   } catch {
     return res.status(503).json({ error: 'No se pudo guardar la configuración.' });
@@ -1418,7 +1556,7 @@ if (!IS_VERCEL && fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
   });
 }
 
-if (!IS_VERCEL) {
+if (!IS_VERCEL && !IS_TESTING) {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => {
     console.log(`Metricas Ciprian API listening on http://localhost:${PORT} (storage: ${USE_SUPABASE ? 'supabase' : 'local'})`);

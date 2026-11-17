@@ -33,6 +33,7 @@ import { AutumnAtmosphere } from '../components/autumn/AutumnAtmosphere';
 import { DashboardHeader, type DashboardTab } from '../components/dashboard/DashboardHeader';
 import { KpiGrid, type KpiFilterKey } from '../components/dashboard/KpiGrid';
 import { ProspectsManager } from '../components/dashboard/ProspectsManager';
+import { CallerProspectsView } from '../components/dashboard/CallerProspectsView';
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
 import { SettingsPanel } from '../components/dashboard/SettingsPanel';
 
@@ -51,6 +52,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey>('all');
+  const [userRole, setUserRole] = useState<'admin' | 'caller'>('admin');
 
   // 2-Filter Cybersecurity Gateway State
   const [securityStage, setSecurityStage] = useState<SecurityStage>('checking');
@@ -69,6 +71,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     verifyDsbSession().then(async (res) => {
       if (cancelled) return;
       if (res.authenticated) {
+        if (res.role) setUserRole(res.role);
         setSecurityStage('authenticated');
         try {
           const fresh = await fetchAppState();
@@ -108,6 +111,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     try {
       const res = await loginStep1(usernameInput.trim(), passwordInput);
       setPreAuthToken(res.preAuthToken);
+      if (res.role) setUserRole(res.role);
       setAuthError(null);
       setPinInput('');
       setSecurityStage('filter2_pin');
@@ -136,7 +140,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
     setAuthLoading(true);
     try {
-      await verifyPinStep2(preAuthToken, code.trim());
+      const step2Res = await verifyPinStep2(preAuthToken, code.trim());
+      if (step2Res.role) setUserRole(step2Res.role);
       setAuthError(null);
       setPasswordInput('');
       setPinInput('');
@@ -189,6 +194,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   const handleLockNow = () => {
     logoutDsbSession();
+    setUserRole('admin');
     setPreAuthToken(null);
     setPasswordInput('');
     setPinInput('');
@@ -653,52 +659,60 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           leads={appState.leads}
           activeTab={activeTab}
           syncMode={syncMode}
+          userRole={userRole}
           onTabChange={setActiveTab}
           onJumpToPending={() => {
             setActiveTab('overview');
             setKpiFilter('pending');
           }}
           onLockNow={handleLockNow}
+          onLogout={handleLockNow}
         />
 
         <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 space-y-6">
-          {activeTab === 'overview' && (
+          {userRole === 'caller' ? (
+            <CallerProspectsView leads={appState.leads} />
+          ) : (
             <>
-              <KpiGrid
-                leads={appState.leads}
-                defaultTicketAmount={appState.settings.defaultTicketAmount}
-                activeFilter={kpiFilter}
-                onSelectFilter={setKpiFilter}
-              />
+              {activeTab === 'overview' && (
+                <>
+                  <KpiGrid
+                    leads={appState.leads}
+                    defaultTicketAmount={appState.settings.defaultTicketAmount}
+                    activeFilter={kpiFilter}
+                    onSelectFilter={setKpiFilter}
+                  />
 
-              <ProspectsManager
-                leads={appState.leads}
-                gifts={appState.gifts}
-                defaultTicketAmount={appState.settings.defaultTicketAmount}
-                activeFilter={kpiFilter}
-                onFilterChange={setKpiFilter}
-                onUpdateLead={handleUpdateLead}
-                onCreateManualLead={handleCreateManualLead}
-                onDeleteLead={handleDeleteLead}
-              />
+                  <ProspectsManager
+                    leads={appState.leads}
+                    gifts={appState.gifts}
+                    defaultTicketAmount={appState.settings.defaultTicketAmount}
+                    activeFilter={kpiFilter}
+                    onFilterChange={setKpiFilter}
+                    onUpdateLead={handleUpdateLead}
+                    onCreateManualLead={handleCreateManualLead}
+                    onDeleteLead={handleDeleteLead}
+                  />
+                </>
+              )}
+
+              {activeTab === 'gifts' && (
+                <GiftsEditor
+                  gifts={appState.gifts}
+                  giftTheme={appState.settings.giftTheme}
+                  customBoxColor={appState.settings.customBoxColor}
+                  onUpdateGiftTheme={handleUpdateGiftTheme}
+                  onCreateGift={handleCreateGift}
+                  onUpdateGift={handleUpdateGift}
+                  onDeleteGift={handleDeleteGift}
+                  onResetGifts={handleResetGifts}
+                />
+              )}
+
+              {activeTab === 'settings' && (
+                <SettingsPanel settings={appState.settings} onSaveSettings={handleSaveSettings} />
+              )}
             </>
-          )}
-
-          {activeTab === 'gifts' && (
-            <GiftsEditor
-              gifts={appState.gifts}
-              giftTheme={appState.settings.giftTheme}
-              customBoxColor={appState.settings.customBoxColor}
-              onUpdateGiftTheme={handleUpdateGiftTheme}
-              onCreateGift={handleCreateGift}
-              onUpdateGift={handleUpdateGift}
-              onDeleteGift={handleDeleteGift}
-              onResetGifts={handleResetGifts}
-            />
-          )}
-
-          {activeTab === 'settings' && (
-            <SettingsPanel settings={appState.settings} onSaveSettings={handleSaveSettings} />
           )}
         </main>
       </div>

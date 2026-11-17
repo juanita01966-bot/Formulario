@@ -71,6 +71,7 @@ create index if not exists leads_created_at_idx on public.leads (created_at desc
 create table if not exists public.dsb_auth (
   id text primary key default 'default',
   username text not null,
+  role text not null default 'admin',
   password_hash text not null,
   pin_hash text not null,
   master_hash text not null,
@@ -86,6 +87,8 @@ create table if not exists public.dsb_auth (
   session_expires_at timestamptz,
   updated_at timestamptz not null default now()
 );
+
+alter table public.dsb_auth add column if not exists role text not null default 'admin';
 
 -- ----------------------------------------------------------------------------
 -- 5. Row Level Security (RLS)
@@ -130,6 +133,35 @@ grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth to
 -- ----------------------------------------------------------------------------
 -- 6. Funciones RPC de seguridad (2FA: Usuario/Clave + PIN Caja Fuerte + Llave Maestra)
 -- ----------------------------------------------------------------------------
+create or replace function public.dsb_verify_secret_hash(
+  p_plain text,
+  p_stored_hash text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_salt text;
+  v_hex text;
+begin
+  if p_stored_hash is null or p_stored_hash = '' then
+    return false;
+  end if;
+
+  if p_stored_hash like 'sha256$%' then
+    v_salt := split_part(p_stored_hash, '$', 2);
+    v_hex := split_part(p_stored_hash, '$', 3);
+    return encode(digest(convert_to(v_salt || ':' || coalesce(p_plain, ''), 'UTF8'), 'sha256'), 'hex') = v_hex;
+  end if;
+
+  return p_stored_hash = crypt(coalesce(p_plain, ''), p_stored_hash);
+end;
+$$;
+
+revoke all on function public.dsb_verify_secret_hash(text, text) from anon, authenticated, public;
+
 create or replace function public.dsb_login_step1(
   p_username text,
   p_password text
@@ -149,9 +181,13 @@ declare
   v_pass_ok boolean := false;
   v_pre_token text;
 begin
-  select * into v_auth from public.dsb_auth where id = 'default';
+  if lower(v_clean_user) = 'admincripian' then
+    return jsonb_build_object('ok', false, 'error', 'Credenciales incorrectas.', 'remainingAttempts', 4);
+  end if;
+
+  select * into v_auth from public.dsb_auth where lower(username) = lower(v_clean_user);
   if not found then
-    return jsonb_build_object('ok', false, 'error', 'Módulo de seguridad no inicializado.');
+    return jsonb_build_object('ok', false, 'error', 'Credenciales incorrectas.', 'remainingAttempts', 4);
   end if;
 
   if v_auth.login_locked_until is not null and v_auth.login_locked_until > now() then
@@ -168,13 +204,12 @@ begin
   if v_auth.login_locked_until is not null and v_auth.login_locked_until <= now() then
     update public.dsb_auth
     set failed_login_attempts = 0, login_locked_until = null
-    where id = 'default';
+    where id = v_auth.id;
     v_auth.failed_login_attempts := 0;
   end if;
 
-  v_user_ok := (v_clean_user = v_auth.username)
-    or (v_auth.username = 'AdminCripian' and lower(v_clean_user) = 'admincripian');
-  v_pass_ok := (v_auth.password_hash = crypt(coalesce(p_password, ''), v_auth.password_hash));
+  v_user_ok := (lower(v_clean_user) = lower(v_auth.username));
+  v_pass_ok := public.dsb_verify_secret_hash(p_password, v_auth.password_hash);
 
   if not v_user_ok or not v_pass_ok then
     v_auth.failed_login_attempts := v_auth.failed_login_attempts + 1;
@@ -182,7 +217,7 @@ begin
       update public.dsb_auth
       set failed_login_attempts = v_auth.failed_login_attempts,
           login_locked_until = now() + interval '15 minutes'
-      where id = 'default';
+      where id = v_auth.id;
 
       return jsonb_build_object(
         'ok', false,
@@ -195,7 +230,7 @@ begin
 
     update public.dsb_auth
     set failed_login_attempts = v_auth.failed_login_attempts
-    where id = 'default';
+    where id = v_auth.id;
 
     v_remaining := greatest(0, v_max_attempts - v_auth.failed_login_attempts);
     return jsonb_build_object(
@@ -212,11 +247,12 @@ begin
       login_locked_until = null,
       pre_auth_token = v_pre_token,
       pre_auth_expires_at = now() + interval '10 minutes'
-  where id = 'default';
+  where id = v_auth.id;
 
   return jsonb_build_object(
     'ok', true,
     'username', v_auth.username,
+    'role', coalesce(v_auth.role, 'admin'),
     'preAuthToken', v_pre_token
   );
 end;
@@ -238,7 +274,12 @@ declare
   v_retry_secs int;
   v_session text;
 begin
-  select * into v_auth from public.dsb_auth where id = 'default';
+  if p_pre_auth_token is not null and trim(p_pre_auth_token) <> '' then
+    select * into v_auth from public.dsb_auth where pre_auth_token = p_pre_auth_token;
+  else
+    select * into v_auth from public.dsb_auth where id = 'default';
+  end if;
+
   if not found then
     return jsonb_build_object('ok', false, 'error', 'Módulo de seguridad no inicializado.');
   end if;
@@ -257,7 +298,7 @@ begin
   if v_auth.pin_locked_until is not null and v_auth.pin_locked_until <= now() then
     update public.dsb_auth
     set failed_pin_attempts = 0, pin_locked_until = null
-    where id = 'default';
+    where id = v_auth.id;
     v_auth.failed_pin_attempts := 0;
   end if;
 
@@ -272,13 +313,13 @@ begin
     );
   end if;
 
-  if v_auth.pin_hash <> crypt(trim(coalesce(p_pin, '')), v_auth.pin_hash) then
+  if not public.dsb_verify_secret_hash(trim(coalesce(p_pin, '')), v_auth.pin_hash) then
     v_auth.failed_pin_attempts := v_auth.failed_pin_attempts + 1;
     if v_auth.failed_pin_attempts >= v_max_attempts then
       update public.dsb_auth
       set failed_pin_attempts = v_auth.failed_pin_attempts,
           pin_locked_until = now() + interval '15 minutes'
-      where id = 'default';
+      where id = v_auth.id;
 
       return jsonb_build_object(
         'ok', false,
@@ -291,7 +332,7 @@ begin
 
     update public.dsb_auth
     set failed_pin_attempts = v_auth.failed_pin_attempts
-    where id = 'default';
+    where id = v_auth.id;
 
     v_remaining := greatest(0, v_max_attempts - v_auth.failed_pin_attempts);
     return jsonb_build_object(
@@ -310,12 +351,13 @@ begin
       pre_auth_expires_at = null,
       session_token = v_session,
       session_expires_at = now() + interval '8 hours'
-  where id = 'default';
+  where id = v_auth.id;
 
   return jsonb_build_object(
     'ok', true,
     'sessionToken', v_session,
-    'username', v_auth.username
+    'username', v_auth.username,
+    'role', coalesce(v_auth.role, 'admin')
   );
 end;
 $$;
@@ -331,16 +373,26 @@ as $$
 declare
   v_auth public.dsb_auth%rowtype;
 begin
-  select * into v_auth from public.dsb_auth where id = 'default';
+  if p_session_token is null or trim(p_session_token) = '' then
+    return jsonb_build_object('authenticated', false);
+  end if;
+
+  select * into v_auth
+  from public.dsb_auth
+  where session_token = trim(p_session_token);
+
   if not found then
     return jsonb_build_object('authenticated', false);
   end if;
 
   if v_auth.session_token is not null
      and v_auth.session_expires_at is not null
-     and v_auth.session_expires_at > now()
-     and trim(coalesce(p_session_token, '')) = v_auth.session_token then
-    return jsonb_build_object('authenticated', true, 'username', v_auth.username);
+     and v_auth.session_expires_at > now() then
+    return jsonb_build_object(
+      'authenticated', true,
+      'username', v_auth.username,
+      'role', coalesce(v_auth.role, 'admin')
+    );
   end if;
 
   return jsonb_build_object('authenticated', false);
@@ -572,15 +624,29 @@ on conflict (id) do nothing;
 insert into public.dsb_auth (
   id,
   username,
+  role,
   password_hash,
   pin_hash,
   master_hash
 )
 values (
   'default',
-  'AdminCripian',
+  'AdminCiprian',
+  'admin',
   '$2a$10$4uVKRgYY9yuM1KgBWCsAEuADvJEoaLNZwbjb0vCOih5MqnTCEdh.G',
   '$2a$10$Ht.aqXlB7b3GzsEpA5x6zuv7c/QE8vF1rDd2cn48lZeEk/os2bZ3y',
   '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2'
+),
+(
+  'caller',
+  'Caller',
+  'caller',
+  'sha256$caller_pwd_s1$619d4db488230618b7cae0edb9032dbaa4e5817d3b1cc1cf079a76f07c5f3295',
+  'sha256$caller_pin_s1$a0fd4eb49c0feef1123ea3d135bc07021a688893377d9c79d7eefa5cd8b427c3',
+  '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2'
 )
-on conflict (id) do nothing;
+on conflict (id) do update set
+  username = excluded.username,
+  role = excluded.role,
+  password_hash = excluded.password_hash,
+  pin_hash = excluded.pin_hash;
