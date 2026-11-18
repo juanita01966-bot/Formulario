@@ -76,8 +76,31 @@ export interface AppSettings {
   customBoxColor?: string;
 }
 
+export type QrStyleId =
+  | 'classic-gold'
+  | 'obsidian-dots'
+  | 'ivory-rounded'
+  | 'emerald-heritage'
+  | 'ruby-atelier';
+
+export type QrDotShape = 'square' | 'rounded' | 'dots';
+
+export interface QrCodeRecord {
+  id: string;
+  name: string;
+  targetUrl: string;
+  styleId: QrStyleId;
+  dotShape: QrDotShape;
+  foregroundColor: string;
+  backgroundColor: string;
+  includeLogo: boolean;
+  frameText?: string;
+  createdAt: string;
+}
+
 export interface AppState {
   settings: AppSettings;
   gifts: GiftItem[];
   leads: Lead[];
+  qrHistory?: QrCodeRecord[];
 }

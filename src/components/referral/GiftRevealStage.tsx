@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { CheckCircle2, MessageCircle, RotateCcw } from 'lucide-react';
-import type { GiftItem } from '../../types/app';
+import type { GiftItem, GiftThemeId } from '../../types/app';
+import { resolveBoxPalette } from '../../shared/giftThemes';
 import { GiftIllustration } from '../gifts/GiftIllustration';
 
 interface GiftRevealStageProps {
   leadName: string;
   gift: GiftItem;
   claimCode: string;
+  giftTheme?: GiftThemeId;
+  customBoxColor?: string;
   onStartAnother: () => void;
 }
 
@@ -30,17 +33,41 @@ interface SparkParticle {
 const SPARK_COLORS = ['#FFFBEB', '#FEF08A', '#FDE047', '#F59E0B', '#EA580C', '#E5AE4E'];
 
 /** Real CSS 3D Cube Gift Box with hinged top lid & golden satin ribbons */
-const Real3DGiftCube: React.FC<{ phase: RevealPhase }> = ({ phase }) => {
+const Real3DGiftCube: React.FC<{
+  phase: RevealPhase;
+  giftTheme?: GiftThemeId;
+  customBoxColor?: string;
+}> = ({ phase, giftTheme, customBoxColor }) => {
   const isOpening = phase === 'opening';
+  const palette = resolveBoxPalette(giftTheme, customBoxColor, 0);
+
+  const faceGradient = `linear-gradient(180deg, ${palette.lid} 0%, ${palette.front} 42%, ${palette.side} 100%)`;
+  const sideGradient = `linear-gradient(180deg, ${palette.front} 0%, ${palette.side} 58%, #150905 100%)`;
+  const lidSkirtGradient = `linear-gradient(180deg, ${palette.lid} 0%, ${palette.front} 72%, ${palette.side} 100%)`;
+  const lidTopGradient = `linear-gradient(135deg, ${palette.lid} 0%, ${palette.front} 55%, ${palette.side} 100%)`;
+  const ribbonVerticalGradient = `linear-gradient(90deg, ${palette.ribbonEnd} 0%, ${palette.ribbonMid} 24%, #FFFBEB 50%, ${palette.ribbonStart} 76%, ${palette.ribbonEnd} 100%)`;
+  const ribbonHorizontalGradient = `linear-gradient(180deg, ${palette.ribbonStart} 0%, #FFFBEB 45%, ${palette.ribbonMid} 75%, ${palette.ribbonEnd} 100%)`;
 
   return (
     <div className="relative h-56 w-56 flex items-center justify-center perspective-1000">
       {/* Ground / Floating Pedestal Halo */}
       <motion.div
-        className="pointer-events-none absolute bottom-4 h-7 w-36 rounded-full bg-amber-300/35 blur-md"
+        className="pointer-events-none absolute bottom-3 h-8 w-40 rounded-full blur-lg will-change-transform"
+        style={{
+          background: `radial-gradient(ellipse, ${palette.glow} 0%, rgba(253,224,71,0.32) 55%, transparent 78%)`,
+        }}
         animate={{
-          scale: phase === 'floating' ? [1.1, 0.78, 0.86] : phase === 'spinning' ? [0.85, 1.05, 0.85] : 1.4,
-          opacity: phase === 'opening' ? 0.9 : 0.55,
+          scale: phase === 'floating' ? [1.1, 0.78, 0.88] : phase === 'spinning' ? [0.85, 1.08, 0.85] : 1.45,
+          opacity: phase === 'opening' ? 0.95 : 0.65,
+        }}
+        transition={{ duration: 0.9, repeat: phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
+      />
+      {/* Crisp contact shadow anchored on floor */}
+      <motion.div
+        className="pointer-events-none absolute bottom-4 h-3.5 w-28 rounded-full bg-black/75 blur-[4px] will-change-transform"
+        animate={{
+          scaleX: phase === 'floating' ? [1.05, 0.76, 0.84] : phase === 'spinning' ? [0.82, 0.7, 0.82] : 0.95,
+          opacity: phase === 'opening' ? 0.25 : 0.6,
         }}
         transition={{ duration: 0.9, repeat: phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
       />
@@ -81,26 +108,34 @@ const Real3DGiftCube: React.FC<{ phase: RevealPhase }> = ({ phase }) => {
       >
         {/* 3D Cube Side Faces (128x128px, translateZ = 64px) */}
         {[
-          { key: 'front', transform: 'translateZ(64px)', bg: 'from-[#C85A32] to-[#7D2912]' },
-          { key: 'back', transform: 'rotateY(180deg) translateZ(64px)', bg: 'from-[#9E3B1D] to-[#5E1C0B]' },
-          { key: 'right', transform: 'rotateY(90deg) translateZ(64px)', bg: 'from-[#A84423] to-[#69210E]' },
-          { key: 'left', transform: 'rotateY(-90deg) translateZ(64px)', bg: 'from-[#B84C27] to-[#742610]' },
+          { key: 'front', transform: 'translateZ(64px)', bg: faceGradient },
+          { key: 'back', transform: 'rotateY(180deg) translateZ(64px)', bg: sideGradient },
+          { key: 'right', transform: 'rotateY(90deg) translateZ(64px)', bg: sideGradient },
+          { key: 'left', transform: 'rotateY(-90deg) translateZ(64px)', bg: faceGradient },
         ].map((face) => (
           <div
             key={face.key}
-            style={{ transform: face.transform }}
-            className={`absolute inset-0 rounded-lg bg-gradient-to-b ${face.bg} border border-[#E5AE4E]/65 shadow-inner overflow-hidden backface-hidden`}
+            style={{ transform: face.transform, background: face.bg }}
+            className="absolute inset-0 rounded-lg border border-[#FDE68A]/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.28),inset_0_-12px_20px_rgba(0,0,0,0.3)] overflow-hidden backface-hidden"
           >
+            {/* Under-lid subtle shadow band */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-3 bg-gradient-to-b from-black/30 to-transparent" />
             {/* Vertical & Horizontal Golden Satin Ribbons */}
-            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-6 bg-gradient-to-r from-[#C88A2B] via-[#FEF08A] to-[#A66318] shadow" />
-            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-5 bg-gradient-to-b from-[#FEF08A]/90 via-[#D4942A] to-[#9A5B14] opacity-90" />
+            <div
+              style={{ background: ribbonVerticalGradient }}
+              className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-6 shadow-[0_0_8px_rgba(0,0,0,0.28)]"
+            />
+            <div
+              style={{ background: ribbonHorizontalGradient }}
+              className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-5 opacity-95 shadow-[0_2px_6px_rgba(0,0,0,0.22)]"
+            />
           </div>
         ))}
 
         {/* Cube Bottom Face */}
         <div
-          style={{ transform: 'rotateX(-90deg)' }}
-          className="absolute left-0 top-[64px] w-32 h-32 rounded-lg bg-[#421509] border border-[#C88A2B]/40"
+          style={{ transform: 'rotateX(-90deg)', backgroundColor: palette.side }}
+          className="absolute left-0 top-[64px] w-32 h-32 rounded-lg border border-[#C88A2B]/40"
         />
 
         {/* Interior Glowing Core (shines out when lid opens!) */}
@@ -145,34 +180,43 @@ const Real3DGiftCube: React.FC<{ phase: RevealPhase }> = ({ phase }) => {
           ].map((skirt) => (
             <div
               key={skirt.key}
-              style={{ transform: skirt.transform }}
-              className="absolute inset-0 rounded-md bg-gradient-to-b from-[#D45A32] to-[#8C3318] border border-[#FDE68A]/70 overflow-hidden"
+              style={{ transform: skirt.transform, background: lidSkirtGradient }}
+              className="absolute inset-0 rounded-md border border-[#FEF08A]/65 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] overflow-hidden"
             >
-              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-6 bg-gradient-to-r from-[#C88A2B] via-[#FEF08A] to-[#A66318]" />
+              <div
+                style={{ background: ribbonVerticalGradient }}
+                className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-6"
+              />
             </div>
           ))}
 
           {/* Lid Top Cap (140x140 centered at y = 0 => top: -70px) */}
           <div
-            style={{ transform: 'rotateX(90deg)' }}
-            className="absolute left-0 -top-[70px] w-[140px] h-[140px] rounded-lg bg-gradient-to-br from-[#DF653A] to-[#9E3B1D] border border-[#FDE68A]/80 overflow-hidden"
+            style={{ transform: 'rotateX(90deg)', background: lidTopGradient }}
+            className="absolute left-0 -top-[70px] w-[140px] h-[140px] rounded-lg border border-[#FEF08A]/80 shadow-[inset_0_0_24px_rgba(255,255,255,0.18)] overflow-hidden"
           >
-            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-6 bg-gradient-to-r from-[#C88A2B] via-[#FEF08A] to-[#A66318]" />
-            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-6 bg-gradient-to-b from-[#C88A2B] via-[#FEF08A] to-[#A66318]" />
+            <div
+              style={{ background: ribbonVerticalGradient }}
+              className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-6"
+            />
+            <div
+              style={{ background: ribbonHorizontalGradient }}
+              className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-6"
+            />
           </div>
 
           {/* 3D Crossed Satin Bow on top of the lid */}
           <div
             style={{ transform: 'translateY(-18px) rotateY(35deg)' }}
-            className="absolute left-1/2 -translate-x-1/2 top-0 w-16 h-6 rounded-full border-4 border-[#FEF08A] bg-[#D4942A]/50 shadow-lg"
+            className="absolute left-1/2 -translate-x-1/2 top-0 w-16 h-6 rounded-full border-4 border-[#FEF08A] bg-[#D4942A]/60 shadow-[0_6px_14px_rgba(0,0,0,0.4)]"
           />
           <div
             style={{ transform: 'translateY(-18px) rotateY(-55deg)' }}
-            className="absolute left-1/2 -translate-x-1/2 top-0 w-16 h-6 rounded-full border-4 border-[#FEF08A] bg-[#D4942A]/50 shadow-lg"
+            className="absolute left-1/2 -translate-x-1/2 top-0 w-16 h-6 rounded-full border-4 border-[#FEF08A] bg-[#D4942A]/60 shadow-[0_6px_14px_rgba(0,0,0,0.4)]"
           />
           <div
             style={{ transform: 'translateY(-14px)' }}
-            className="absolute left-1/2 -translate-x-1/2 top-0 w-4 h-4 rounded-full bg-[#FEF08A] shadow-[0_0_12px_rgba(254,240,138,0.9)]"
+            className="absolute left-1/2 -translate-x-1/2 top-0 w-[18px] h-[18px] rounded-full bg-gradient-to-br from-[#FFFBEB] via-[#FEF08A] to-[#D4942A] shadow-[0_0_14px_rgba(254,240,138,0.95)]"
           />
         </motion.div>
       </motion.div>
@@ -180,10 +224,151 @@ const Real3DGiftCube: React.FC<{ phase: RevealPhase }> = ({ phase }) => {
   );
 };
 
+/** Luminous Crystal & Champagne Floating Showcase Stage for the Final Revealed Gift */
+const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const [spotlight, setSpotlight] = useState({ x: 50, y: 38, active: false });
+
+  const lift = useMotionValue(0);
+  const giftY = useTransform(lift, [0, 1], [0, -10]);
+  const shadowScaleX = useTransform(lift, [0, 1], [1, 0.72]);
+  const shadowScaleY = useTransform(lift, [0, 1], [1, 0.76]);
+  const shadowOpacity = useTransform(lift, [0, 1], [0.7, 0.3]);
+  const auraScale = useTransform(lift, [0, 1], [0.95, 1.15]);
+  const auraOpacity = useTransform(lift, [0, 1], [0.5, 0.85]);
+
+  useEffect(() => {
+    const controls = animate(lift, [0, 1, 0], {
+      duration: 3.2,
+      repeat: Infinity,
+      ease: 'easeInOut',
+    });
+    return () => controls.stop();
+  }, [lift]);
+
+  const accent = gift.accentColor || '#C88A2B';
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const py = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    setTilt({
+      rx: (0.5 - py) * 14,
+      ry: (px - 0.5) * 16,
+    });
+    setSpotlight({
+      x: Math.round(px * 100),
+      y: Math.round(py * 100),
+      active: true,
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setTilt({ rx: 0, ry: 0 });
+    setSpotlight((prev) => ({ ...prev, active: false }));
+  };
+
+  return (
+    <motion.div
+      initial={{ y: 12, opacity: 0, scale: 0.94 }}
+      animate={{ y: 0, opacity: 1, scale: 1 }}
+      transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      className="relative mb-5 flex h-52 w-60 sm:w-64 flex-col items-center justify-center overflow-hidden rounded-[28px] border border-[#FDE68A]/35 border-t-[#FEF08A]/65 bg-gradient-to-b from-[#341B10]/80 via-[#1B0D07]/90 to-[#110704]/95 p-4 perspective-1000 shadow-[0_22px_48px_-14px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(254,240,138,0.35)]"
+    >
+      {/* Top specular highlight hairline */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#FEF08A]/75 to-transparent"
+      />
+
+      {/* Interactive cursor spotlight sheen */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+        style={{
+          opacity: spotlight.active ? 1 : 0,
+          background: `radial-gradient(210px circle at ${spotlight.x}% ${spotlight.y}%, rgba(254, 240, 138, 0.22), rgba(229, 174, 78, 0.08) 46%, transparent 74%)`,
+        }}
+      />
+
+      {/* Luminous studio champagne + gift accent radial halo behind product */}
+      <motion.div
+        aria-hidden="true"
+        style={{
+          scale: auraScale,
+          opacity: auraOpacity,
+          background: `radial-gradient(circle, rgba(254,240,138,0.45) 0%, ${accent}38 48%, transparent 74%)`,
+        }}
+        className="pointer-events-none absolute top-4 h-36 w-36 rounded-full blur-2xl will-change-transform"
+      />
+
+      {/* Subtle crystalline orbital ring behind the floating gift */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute top-6 h-32 w-32 rounded-full border border-[#FEF08A]/20 shadow-[0_0_24px_rgba(253,224,71,0.14)]"
+      />
+
+      {/* Levitating HD Gift Artwork */}
+      <motion.div
+        style={{ y: giftY }}
+        className="relative z-10 flex items-center justify-center will-change-transform"
+      >
+        <div
+          style={{
+            transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${spotlight.active ? 1.04 : 1})`,
+            transition: 'transform 160ms ease-out',
+          }}
+          className="preserve-3d"
+        >
+          <GiftIllustration
+            visualKey={gift.visualKey}
+            customImageUrl={gift.customImageUrl}
+            accentColor={accent}
+            size={118}
+          />
+        </div>
+      </motion.div>
+
+      {/* Luminous Crystal & Gold Pedestal + Synchronized Ground Contact Shadow */}
+      <div className="relative z-0 -mt-1 flex flex-col items-center justify-center">
+        {/* Synchronized contact shadow resting directly on the crystal pedestal */}
+        <motion.div
+          aria-hidden="true"
+          style={{
+            scaleX: shadowScaleX,
+            scaleY: shadowScaleY,
+            opacity: shadowOpacity,
+          }}
+          className="relative z-20 h-3 w-28 rounded-full bg-gradient-to-r from-transparent via-black/90 to-transparent blur-[3.5px] will-change-transform"
+        />
+
+        {/* Crystal & Gold Pedestal Top Plate */}
+        <div
+          aria-hidden="true"
+          className="relative z-10 -mt-2 h-6 w-40 rounded-full border border-[#FEF08A]/55 bg-gradient-to-b from-[#FFFDF9]/35 via-[#E5AE4E]/22 to-[#2B150B]/70 backdrop-blur-md shadow-[0_10px_24px_rgba(229,174,78,0.28),inset_0_1px_1px_rgba(255,255,255,0.75)]"
+        >
+          <div className="pointer-events-none absolute inset-x-6 top-0.5 h-px rounded-full bg-gradient-to-r from-transparent via-white/80 to-transparent" />
+        </div>
+
+        {/* Pedestal bottom gold rim reflection */}
+        <motion.div
+          aria-hidden="true"
+          style={{ opacity: auraOpacity }}
+          className="-mt-2.5 h-3 w-32 rounded-full bg-gradient-to-r from-transparent via-[#FDE68A]/35 to-transparent blur-md will-change-transform"
+        />
+      </div>
+    </motion.div>
+  );
+};
+
 export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   leadName,
   gift,
   claimCode,
+  giftTheme,
+  customBoxColor,
   onStartAnother,
 }) => {
   const [phase, setPhase] = useState<RevealPhase>('floating');
@@ -393,7 +578,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       animate={{ opacity: 1, scale: 1 }}
       className="relative w-full max-w-[540px] mx-auto"
     >
-      <div className="relative overflow-hidden rounded-[34px] bg-gradient-to-b from-[#2A160D] via-[#1C0D07] to-[#2C1810] border border-[#C88A2B]/55 shadow-[0_30px_80px_-15px_rgba(34,21,14,0.7)] px-6 py-9 sm:px-9 sm:py-11 text-center text-[#FAF3E8]">
+      <div className="relative overflow-hidden rounded-[34px] bg-gradient-to-b from-[#2A160D] via-[#1C0D07] to-[#2C1810] border border-[#C88A2B]/55 border-t-[#FDE68A]/50 shadow-[0_30px_80px_-15px_rgba(34,21,14,0.72),inset_0_1px_0_rgba(254,240,138,0.22)] px-6 py-9 sm:px-9 sm:py-11 text-center text-[#FAF3E8]">
         {/* Canvas Starburst Sparks Layer */}
         <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full z-20" />
 
@@ -421,7 +606,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
               transition={{ duration: 0.45 }}
               className="relative z-10 py-6 flex flex-col items-center justify-center min-h-[400px]"
             >
-              <Real3DGiftCube phase={phase} />
+              <Real3DGiftCube phase={phase} giftTheme={giftTheme} customBoxColor={customBoxColor} />
 
               <h3 className="mt-5 font-serif text-2xl font-semibold text-[#FFF7E2]">{stageHeadline}</h3>
               <p className="mt-2 text-sm text-amber-200/80">
@@ -445,21 +630,8 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#C88A2B]/60" />
               </div>
 
-              {/* Clean Architectural Pedestal for the Gift */}
-              <motion.div
-                initial={{ y: 8, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.45, delay: 0.08 }}
-                className="relative mb-5 flex h-36 w-36 items-center justify-center rounded-3xl bg-[#FAF4EA] border border-[#C88A2B]/55 shadow-[0_16px_38px_-10px_rgba(0,0,0,0.55)] p-4"
-              >
-                <div className="pointer-events-none absolute inset-1.5 rounded-[18px] border border-[#DFC9AB]/70" />
-                <GiftIllustration
-                  visualKey={gift.visualKey}
-                  customImageUrl={gift.customImageUrl}
-                  accentColor={gift.accentColor}
-                  size={104}
-                />
-              </motion.div>
+              {/* Luminous Crystal & Gold Floating Showcase Pedestal */}
+              <RevealedGiftShowcase gift={gift} />
 
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#D8B478]">
                 {gift.tag}

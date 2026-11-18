@@ -12,6 +12,7 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
   let adminSessionToken;
   let callerSessionToken;
   let testLeadId;
+  const createdQrIds = new Set();
 
   before(async () => {
     await new Promise((resolve) => {
@@ -48,6 +49,18 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
         });
       } catch {
         // Ignore cleanup failure
+      }
+    }
+    if (createdQrIds.size > 0 && adminSessionToken) {
+      for (const qrId of createdQrIds) {
+        try {
+          await fetch(`${baseUrl}/api/qr/${qrId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${adminSessionToken}` },
+          });
+        } catch {
+          // Ignore cleanup failure
+        }
       }
     }
     if (server) {
@@ -611,6 +624,193 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
       assert.strictEqual(deleteRes.status, 200);
       const state = await deleteRes.json();
       assert.strictEqual(state.state.leads.some((l) => l.id === lead.id), false);
+    });
+  });
+
+  describe('6. QR Studio Endpoints, Validation & Zero-Trust RBAC', () => {
+    let createdQrId;
+
+    test('Unauthenticated GET /api/qr, POST /api/qr, and DELETE /api/qr/:id return HTTP 401', async () => {
+      const getRes = await fetch(`${baseUrl}/api/qr`);
+      assert.strictEqual(getRes.status, 401);
+
+      const postRes = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'QR Sin Sesion',
+          targetUrl: 'https://example.com',
+        }),
+      });
+      assert.strictEqual(postRes.status, 401);
+
+      const delRes = await fetch(`${baseUrl}/api/qr/qr-unauth-test`, {
+        method: 'DELETE',
+      });
+      assert.strictEqual(delRes.status, 401);
+    });
+
+    test('AdminCiprian POST /api/qr creates a styled QR code and returns HTTP 201', async () => {
+      const payload = {
+        name: 'QR Mesa VIP Otoño',
+        targetUrl: 'https://royal.ciprian.example/show?mesa=vip',
+        styleId: 'obsidian-dots',
+        dotShape: 'dots',
+        foregroundColor: '#D4942A',
+        backgroundColor: '#14100D',
+        includeLogo: true,
+        frameText: 'Escanea y reclama tu obsequio',
+      };
+
+      const res = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.ok(data.qr);
+      assert.strictEqual(typeof data.qr.id, 'string');
+      assert.strictEqual(data.qr.name, payload.name);
+      assert.strictEqual(data.qr.targetUrl, payload.targetUrl);
+      assert.strictEqual(data.qr.styleId, payload.styleId);
+      assert.strictEqual(data.qr.dotShape, payload.dotShape);
+      assert.strictEqual(data.qr.foregroundColor, payload.foregroundColor);
+      assert.strictEqual(data.qr.backgroundColor, payload.backgroundColor);
+      assert.strictEqual(data.qr.includeLogo, true);
+      assert.strictEqual(data.qr.frameText, payload.frameText);
+      assert.strictEqual(typeof data.qr.createdAt, 'string');
+      assert.ok(Array.isArray(data.qrHistory));
+      assert.ok(data.qrHistory.some((item) => item.id === data.qr.id));
+      assert.strictEqual(data.state.role, 'admin');
+      assert.ok(data.state.qrHistory.some((item) => item.id === data.qr.id));
+
+      createdQrId = data.qr.id;
+      createdQrIds.add(createdQrId);
+    });
+
+    test('Saved QR appears in Admin GET /api/state and Admin GET /api/qr', async () => {
+      const stateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(stateRes.status, 200);
+      const state = await stateRes.json();
+      assert.ok(Array.isArray(state.qrHistory));
+      const inState = state.qrHistory.find((item) => item.id === createdQrId);
+      assert.ok(inState, 'Admin GET /api/state must contain saved QR');
+      assert.strictEqual(inState.styleId, 'obsidian-dots');
+      assert.strictEqual(inState.dotShape, 'dots');
+
+      const qrRes = await fetch(`${baseUrl}/api/qr`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(qrRes.status, 200);
+      const qrData = await qrRes.json();
+      assert.ok(Array.isArray(qrData.qrHistory));
+      const inQr = qrData.qrHistory.find((item) => item.id === createdQrId);
+      assert.ok(inQr, 'Admin GET /api/qr must contain saved QR');
+      assert.strictEqual(inQr.foregroundColor, '#D4942A');
+      assert.strictEqual(inQr.backgroundColor, '#14100D');
+    });
+
+    test('Caller-role GET /api/qr, POST /api/qr, and DELETE /api/qr/:id return HTTP 403 Forbidden', async () => {
+      const getRes = await fetch(`${baseUrl}/api/qr`, {
+        headers: { Authorization: `Bearer ${callerSessionToken}` },
+      });
+      assert.strictEqual(getRes.status, 403);
+
+      const postRes = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${callerSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR No Autorizado',
+          targetUrl: 'https://example.com',
+        }),
+      });
+      assert.strictEqual(postRes.status, 403);
+
+      const delRes = await fetch(`${baseUrl}/api/qr/${createdQrId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${callerSessionToken}` },
+      });
+      assert.strictEqual(delRes.status, 403);
+    });
+
+    test('Caller and unauthenticated GET /api/state receive qrHistory: [] even when Admin saved QR items', async () => {
+      const callerStateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${callerSessionToken}` },
+      });
+      assert.strictEqual(callerStateRes.status, 200);
+      const callerState = await callerStateRes.json();
+      assert.strictEqual(callerState.role, 'caller');
+      assert.deepStrictEqual(callerState.qrHistory, []);
+
+      const publicStateRes = await fetch(`${baseUrl}/api/state`);
+      assert.strictEqual(publicStateRes.status, 200);
+      const publicState = await publicStateRes.json();
+      assert.deepStrictEqual(publicState.qrHistory, []);
+    });
+
+    test('Admin POST /api/qr rejects missing/invalid targetUrl or short name with HTTP 400', async () => {
+      const invalidCases = [
+        { name: 'A', targetUrl: 'https://example.com' },
+        { name: '   ', targetUrl: 'https://example.com' },
+        { name: 'QR Sin URL' },
+        { name: 'QR URL Vacia', targetUrl: '   ' },
+        { name: 'QR XSS Protocol', targetUrl: 'javascript:alert(1)' },
+        { name: 'QR Protocol Relative', targetUrl: '//evil.example.com' },
+        { name: 'QR Malformed URL', targetUrl: 'not-a-valid-url' },
+      ];
+
+      for (const body of invalidCases) {
+        const res = await fetch(`${baseUrl}/api/qr`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        assert.strictEqual(
+          res.status,
+          400,
+          `Expected HTTP 400 for invalid QR payload: ${JSON.stringify(body)}`
+        );
+      }
+    });
+
+    test('Admin DELETE /api/qr/:id deletes saved QR cleanly (HTTP 200) and returns 404 when missing', async () => {
+      const delRes = await fetch(`${baseUrl}/api/qr/${createdQrId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(delRes.status, 200);
+      const delData = await delRes.json();
+      assert.strictEqual(delData.qrHistory.some((item) => item.id === createdQrId), false);
+      assert.strictEqual(delData.state.qrHistory.some((item) => item.id === createdQrId), false);
+      createdQrIds.delete(createdQrId);
+
+      // Confirm via GET /api/qr that it is gone
+      const listRes = await fetch(`${baseUrl}/api/qr`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(listRes.status, 200);
+      const listData = await listRes.json();
+      assert.strictEqual(listData.qrHistory.some((item) => item.id === createdQrId), false);
+
+      // Deleting non-existent ID returns 404
+      const missingRes = await fetch(`${baseUrl}/api/qr/qr-does-not-exist`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(missingRes.status, 404);
     });
   });
 });

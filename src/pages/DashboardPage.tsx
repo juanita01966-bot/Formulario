@@ -15,8 +15,10 @@ import type { AppSettings, AppState, GiftThemeId, LeadCategory } from '../types/
 import {
   createGift,
   createLead,
+  createQrCode,
   deleteGift,
   deleteLead,
+  deleteQrCode,
   DsbAuthError,
   fetchAppState,
   loginStep1,
@@ -27,6 +29,7 @@ import {
   updateSettings,
   verifyDsbSession,
   verifyPinStep2,
+  type CreateQrPayload,
   type UpsertGiftPayload,
 } from '../services/storeClient';
 import { AutumnAtmosphere } from '../components/autumn/AutumnAtmosphere';
@@ -35,6 +38,7 @@ import { KpiGrid, type KpiFilterKey } from '../components/dashboard/KpiGrid';
 import { ProspectsManager } from '../components/dashboard/ProspectsManager';
 import { CallerProspectsView } from '../components/dashboard/CallerProspectsView';
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
+import { QrStudioPanel } from '../components/dashboard/QrStudioPanel';
 import { SettingsPanel } from '../components/dashboard/SettingsPanel';
 
 interface DashboardPageProps {
@@ -195,11 +199,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const handleLockNow = () => {
     logoutDsbSession();
     setUserRole('admin');
+    setActiveTab('overview');
     setPreAuthToken(null);
     setPasswordInput('');
     setPinInput('');
     setAuthError(null);
-    onStateChange({ ...appState, leads: [] });
+    onStateChange({ ...appState, leads: [], qrHistory: [] });
     setSecurityStage('filter1_credentials');
   };
 
@@ -271,6 +276,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       giftTheme,
       customBoxColor: customBoxColor || appState.settings.customBoxColor || '#B84A27',
     });
+    onStateChange(next);
+  };
+
+  const handleCreateQr = async (payload: CreateQrPayload) => {
+    const res = await createQrCode(payload);
+    onStateChange(res.state);
+  };
+
+  const handleDeleteQr = async (id: string) => {
+    const next = await deleteQrCode(id);
     onStateChange(next);
   };
 
@@ -706,6 +721,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   onUpdateGift={handleUpdateGift}
                   onDeleteGift={handleDeleteGift}
                   onResetGifts={handleResetGifts}
+                />
+              )}
+
+              {activeTab === 'qr' && (
+                <QrStudioPanel
+                  qrHistory={appState.qrHistory || []}
+                  defaultUrl={window.location.origin + '/'}
+                  onCreateQr={handleCreateQr}
+                  onDeleteQr={handleDeleteQr}
                 />
               )}
 

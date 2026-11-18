@@ -91,16 +91,37 @@ create table if not exists public.dsb_auth (
 alter table public.dsb_auth add column if not exists role text not null default 'admin';
 
 -- ----------------------------------------------------------------------------
+-- 4b. Códigos QR del Estudio QR (acceso exclusivo admin / service_role)
+-- ----------------------------------------------------------------------------
+create table if not exists public.qr_codes (
+  id text primary key,
+  name text not null,
+  target_url text not null,
+  style_id text not null default 'classic-gold',
+  dot_shape text not null default 'rounded',
+  foreground_color text not null default '#22150E',
+  background_color text not null default '#FFFDF9',
+  include_logo boolean not null default true,
+  frame_text text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists qr_codes_created_at_idx on public.qr_codes (created_at desc);
+
+-- ----------------------------------------------------------------------------
 -- 5. Row Level Security (RLS)
 -- ----------------------------------------------------------------------------
 alter table public.app_settings enable row level security;
 alter table public.gifts enable row level security;
 alter table public.leads enable row level security;
 alter table public.dsb_auth enable row level security;
+alter table public.qr_codes enable row level security;
 
--- Revocar acceso directo desde cliente a la tabla de credenciales/hashes
+-- Revocar acceso directo desde cliente a tablas sensibles
 revoke all on table public.dsb_auth from anon, authenticated, public;
 revoke all on table public.leads from anon, public;
+revoke all on table public.qr_codes from anon, public;
+revoke all on table public.qr_codes from authenticated;
 
 drop policy if exists "app_settings_public_access" on public.app_settings;
 create policy "app_settings_public_access"
@@ -126,9 +147,17 @@ create policy "leads_service_only"
   using (true)
   with check (true);
 
+drop policy if exists "qr_codes_service_only" on public.qr_codes;
+create policy "qr_codes_service_only"
+  on public.qr_codes
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
 grant usage on schema public to anon, authenticated, service_role;
 grant select on public.app_settings, public.gifts to anon, authenticated;
-grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth to service_role;
+grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth, public.qr_codes to service_role;
 
 -- ----------------------------------------------------------------------------
 -- 6. Funciones RPC de seguridad (2FA: Usuario/Clave + PIN Caja Fuerte + Llave Maestra)

@@ -67,6 +67,7 @@ const BUNDLED_DEFAULT_STORE = {
     },
   ],
   leads: [],
+  qrHistory: [],
 };
 
 const __filename = fileURLToPath(import.meta.url);
@@ -141,6 +142,15 @@ const VALID_VISUAL_KEYS = new Set([
   'blender',
   'kettle',
 ]);
+const VALID_QR_STYLE_IDS = new Set([
+  'classic-gold',
+  'obsidian-dots',
+  'ivory-rounded',
+  'emerald-heritage',
+  'ruby-atelier',
+]);
+const VALID_QR_DOT_SHAPES = new Set(['square', 'rounded', 'dots']);
+const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 // Pre-computed salted scrypt digest of the master override key (never stored in plaintext)
 const MASTER_KEY_SALT = '92a9c2523cabb366bdb991d188c9899a';
@@ -399,6 +409,7 @@ function ensureStore() {
       settings: { ...defaults.settings, ...(parsed.settings || {}) },
       gifts: Array.isArray(parsed.gifts) && parsed.gifts.length > 0 ? parsed.gifts : defaults.gifts,
       leads: Array.isArray(parsed.leads) ? parsed.leads : defaults.leads,
+      qrHistory: Array.isArray(parsed.qrHistory) ? parsed.qrHistory : defaults.qrHistory || [],
     };
   } catch {
     const initial = readDefaultStore();
@@ -428,6 +439,74 @@ function generateId(prefix) {
 function generateClaimCode() {
   const num = Math.floor(1000 + Math.random() * 9000);
   return `OTN-${num}`;
+}
+
+function isValidQrTargetUrl(rawUrl) {
+  if (typeof rawUrl !== 'string') return false;
+  const clean = rawUrl.trim();
+  if (!clean || clean.length > 2048) return false;
+  if (clean.startsWith('/') && !clean.startsWith('//')) {
+    return true;
+  }
+  try {
+    const parsed = new URL(clean);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isMissingQrTableError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '').toLowerCase();
+  const code = String(err.code || '').toUpperCase();
+  return (
+    err.status === 404 ||
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    msg.includes('42p01') ||
+    (msg.includes('qr_codes') &&
+      (msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('not found')))
+  );
+}
+
+let memoryQrFallback = null;
+
+function getFallbackQrHistory() {
+  if (Array.isArray(memoryQrFallback)) {
+    return memoryQrFallback;
+  }
+  if (!IS_VERCEL) {
+    const local = ensureStore();
+    memoryQrFallback = Array.isArray(local.qrHistory) ? [...local.qrHistory] : [];
+    return memoryQrFallback;
+  }
+  memoryQrFallback = [];
+  return memoryQrFallback;
+}
+
+function addFallbackQrCode(newQr) {
+  const current = getFallbackQrHistory();
+  const next = [newQr, ...current];
+  memoryQrFallback = next;
+  if (!IS_VERCEL) {
+    const local = ensureStore();
+    local.qrHistory = next;
+    writeStore(local);
+  }
+  return next;
+}
+
+function removeFallbackQrCode(id) {
+  const current = getFallbackQrHistory();
+  const next = current.filter((item) => item.id !== id);
+  memoryQrFallback = next;
+  if (!IS_VERCEL) {
+    const local = ensureStore();
+    local.qrHistory = next;
+    writeStore(local);
+  }
+  return next;
 }
 
 // ----------------------------------------------------------------------------
@@ -462,6 +541,7 @@ async function supabaseRest(restPath, init = {}) {
       `Supabase HTTP ${res.status}`;
     const err = new Error(msg);
     err.status = res.status;
+    err.code = data && typeof data === 'object' ? data.code : undefined;
     throw err;
   }
 
@@ -526,18 +606,51 @@ function mapLeadRow(row) {
   };
 }
 
+function mapQrRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    targetUrl: row.target_url,
+    styleId: VALID_QR_STYLE_IDS.has(row.style_id) ? row.style_id : 'classic-gold',
+    dotShape: VALID_QR_DOT_SHAPES.has(row.dot_shape) ? row.dot_shape : 'rounded',
+    foregroundColor:
+      typeof row.foreground_color === 'string' && HEX_COLOR_RE.test(row.foreground_color.trim())
+        ? row.foreground_color.trim()
+        : '#22150E',
+    backgroundColor:
+      typeof row.background_color === 'string' && HEX_COLOR_RE.test(row.background_color.trim())
+        ? row.background_color.trim()
+        : '#FFFDF9',
+    includeLogo: row.include_logo !== false,
+    frameText: typeof row.frame_text === 'string' && row.frame_text.trim() ? row.frame_text.trim() : undefined,
+    createdAt: row.created_at,
+  };
+}
+
 async function fetchSupabaseStore() {
   const defaults = readDefaultStore();
-  const [settingsRows, giftRows, leadRows] = await Promise.all([
+  let qrTableMissing = false;
+  const [settingsRows, giftRows, leadRows, qrRows] = await Promise.all([
     supabaseRest('app_settings?id=eq.default&limit=1'),
     supabaseRest('gifts?order=sort_order.asc,created_at.asc'),
     supabaseRest('leads?order=created_at.desc'),
+    supabaseRest('qr_codes?order=created_at.desc').catch((err) => {
+      if (isMissingQrTableError(err)) {
+        qrTableMissing = true;
+      }
+      return [];
+    }),
   ]);
 
   return {
     settings: mapSettingsRow(Array.isArray(settingsRows) ? settingsRows[0] : null),
     gifts: Array.isArray(giftRows) && giftRows.length > 0 ? giftRows.map(mapGiftRow) : defaults.gifts,
     leads: Array.isArray(leadRows) ? leadRows.map(mapLeadRow) : [],
+    qrHistory: qrTableMissing
+      ? getFallbackQrHistory()
+      : Array.isArray(qrRows)
+        ? qrRows.map(mapQrRow)
+        : [],
   };
 }
 
@@ -590,6 +703,7 @@ function sanitizeStateForClient(store, isAuthed, role) {
       },
       gifts: store.gifts,
       leads: [],
+      qrHistory: [],
     };
   }
 
@@ -610,6 +724,7 @@ function sanitizeStateForClient(store, isAuthed, role) {
         phone: l.phone,
         address: l.address || '',
       })),
+      qrHistory: [],
       role: 'caller',
     };
   }
@@ -621,6 +736,7 @@ function sanitizeStateForClient(store, isAuthed, role) {
     },
     gifts: store.gifts,
     leads: store.leads || [],
+    qrHistory: isAuthed && role === 'admin' && Array.isArray(store.qrHistory) ? store.qrHistory : [],
     role: 'admin',
   };
 }
@@ -1546,6 +1662,135 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
     return res.json({ settings: sanitized.settings, state: sanitized });
   } catch {
     return res.status(503).json({ error: 'No se pudo guardar la configuración.' });
+  }
+});
+
+// Admin-only QR Studio & History endpoints
+app.get('/api/qr', requireDsbAuth, requireAdminRole, async (_req, res) => {
+  try {
+    const store = await getActiveStore();
+    const sanitized = sanitizeStateForClient(store, true, 'admin');
+    return res.json({ qrHistory: sanitized.qrHistory });
+  } catch {
+    return res.status(503).json({ error: 'No se pudo consultar el historial de códigos QR.' });
+  }
+});
+
+app.post('/api/qr', requireDsbAuth, requireAdminRole, async (req, res) => {
+  const { name, targetUrl, styleId, dotShape, foregroundColor, backgroundColor, includeLogo, frameText } =
+    req.body || {};
+
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  const cleanTargetUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
+
+  if (cleanName.length < 2) {
+    return res.status(400).json({ error: 'El nombre del código QR debe tener al menos 2 caracteres.' });
+  }
+  if (!isValidQrTargetUrl(cleanTargetUrl)) {
+    return res.status(400).json({ error: 'Ingresa una URL válida que comience con http://, https:// o /.' });
+  }
+
+  const cleanFrameText = typeof frameText === 'string' ? frameText.trim().slice(0, 120) : '';
+  const newQr = {
+    id: generateId('qr'),
+    name: cleanName.slice(0, 120),
+    targetUrl: cleanTargetUrl,
+    styleId: VALID_QR_STYLE_IDS.has(styleId) ? styleId : 'classic-gold',
+    dotShape: VALID_QR_DOT_SHAPES.has(dotShape) ? dotShape : 'rounded',
+    foregroundColor:
+      typeof foregroundColor === 'string' && HEX_COLOR_RE.test(foregroundColor.trim())
+        ? foregroundColor.trim()
+        : '#22150E',
+    backgroundColor:
+      typeof backgroundColor === 'string' && HEX_COLOR_RE.test(backgroundColor.trim())
+        ? backgroundColor.trim()
+        : '#FFFDF9',
+    includeLogo: typeof includeLogo === 'boolean' ? includeLogo : true,
+    ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    if (USE_SUPABASE) {
+      try {
+        await supabaseRest('qr_codes', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            id: newQr.id,
+            name: newQr.name,
+            target_url: newQr.targetUrl,
+            style_id: newQr.styleId,
+            dot_shape: newQr.dotShape,
+            foreground_color: newQr.foregroundColor,
+            background_color: newQr.backgroundColor,
+            include_logo: newQr.includeLogo,
+            frame_text: cleanFrameText,
+            created_at: newQr.createdAt,
+          }),
+        });
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
+        return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+      } catch (err) {
+        if (!isMissingQrTableError(err)) throw err;
+        addFallbackQrCode(newQr);
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(
+          { ...updatedStore, qrHistory: getFallbackQrHistory() },
+          true,
+          'admin'
+        );
+        return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+      }
+    }
+
+    const store = await getActiveStore();
+    store.qrHistory = Array.isArray(store.qrHistory) ? store.qrHistory : [];
+    store.qrHistory.unshift(newQr);
+    writeStore(store);
+    const sanitized = sanitizeStateForClient(store, true, 'admin');
+    return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+  } catch {
+    return res.status(503).json({ error: 'No se pudo guardar el código QR.' });
+  }
+});
+
+app.delete('/api/qr/:id', requireDsbAuth, requireAdminRole, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const store = await getActiveStore();
+    const history = Array.isArray(store.qrHistory) ? store.qrHistory : [];
+    const exists = history.some((item) => item.id === id);
+    if (!exists) {
+      return res.status(404).json({ error: 'Código QR no encontrado.' });
+    }
+
+    if (USE_SUPABASE) {
+      try {
+        await supabaseRest(`qr_codes?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
+        return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
+      } catch (err) {
+        if (!isMissingQrTableError(err)) throw err;
+        removeFallbackQrCode(id);
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(
+          { ...updatedStore, qrHistory: getFallbackQrHistory() },
+          true,
+          'admin'
+        );
+        return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
+      }
+    }
+
+    store.qrHistory = history.filter((item) => item.id !== id);
+    writeStore(store);
+    const sanitized = sanitizeStateForClient(store, true, 'admin');
+    return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
+  } catch {
+    return res.status(503).json({ error: 'No se pudo eliminar el código QR.' });
   }
 });
 

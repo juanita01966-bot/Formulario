@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { Check, Edit3, Eye, EyeOff, ImagePlus, Link2, Palette, Plus, RotateCcw, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import type { GiftItem, GiftThemeId, GiftVisualKey } from '../../types/app';
 import { GIFT_THEME_PRESETS, resolveBoxPalette } from '../../shared/giftThemes';
@@ -109,6 +109,245 @@ const EMPTY_DRAFT: UpsertGiftPayload = {
   stockLabel: 'Disponible',
 };
 
+interface GiftCatalogCardProps {
+  gift: GiftItem;
+  index: number;
+  confirmDeleteId: string | null;
+  onToggleActive: (gift: GiftItem) => void;
+  onEdit: (gift: GiftItem) => void;
+  onRequestDelete: (id: string) => void;
+  onConfirmDelete: (id: string) => void;
+  onCancelDelete: () => void;
+}
+
+const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
+  gift,
+  index,
+  confirmDeleteId,
+  onToggleActive,
+  onEdit,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}) => {
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const [spotlight, setSpotlight] = useState({ x: 50, y: 40, active: false });
+
+  // Synchronized 60 FPS GPU floating loop & breathing oval ground shadow
+  const floatDriver = useMotionValue(0);
+  const giftY = useTransform(floatDriver, [0, 1], [0, -7]);
+  const shadowScaleX = useTransform(floatDriver, [0, 1], [1, 0.76]);
+  const shadowScaleY = useTransform(floatDriver, [0, 1], [1, 0.8]);
+  const shadowOpacity = useTransform(floatDriver, [0, 1], [0.38, 0.16]);
+  const auraScale = useTransform(floatDriver, [0, 1], [0.96, 1.1]);
+
+  useEffect(() => {
+    const controls = animate(floatDriver, [0, 1, 0], {
+      duration: 3.1 + (index % 3) * 0.3,
+      repeat: Infinity,
+      ease: 'easeInOut',
+      delay: (index % 4) * 0.25,
+    });
+    return () => controls.stop();
+  }, [floatDriver, index]);
+
+  const handleStageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const py = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    setTilt({
+      rx: (0.5 - py) * 14,
+      ry: (px - 0.5) * 16,
+    });
+    setSpotlight({
+      x: Math.round(px * 100),
+      y: Math.round(py * 100),
+      active: true,
+    });
+  };
+
+  const handleStageMouseLeave = () => {
+    setTilt({ rx: 0, ry: 0 });
+    setSpotlight((prev) => ({ ...prev, active: false }));
+  };
+
+  const accent = gift.accentColor || '#C88A2B';
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.94 }}
+      className={`group/card relative rounded-[24px] border p-3.5 sm:p-4 flex flex-col justify-between transition-all ${
+        gift.active
+          ? 'border-[#DFC9AB]/90 bg-gradient-to-b from-[#FFFDF9] to-[#FCF7EE] shadow-[0_14px_30px_-14px_rgba(34,21,14,0.14),inset_0_1px_0_rgba(255,255,255,0.95)] hover:border-[#C88A2B]/65 hover:shadow-[0_20px_38px_-14px_rgba(140,74,25,0.2)]'
+          : 'border-stone-200/90 bg-stone-50/85 opacity-80'
+      }`}
+    >
+      <div>
+        {/* HD 3D Floating Studio Showcase Pedestal Stage */}
+        <div
+          onMouseMove={handleStageMouseMove}
+          onMouseLeave={handleStageMouseLeave}
+          className={`relative h-40 sm:h-44 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-center ${
+            gift.active
+              ? 'border-[#E6D5BF]/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),inset_0_-10px_24px_rgba(140,74,25,0.06)]'
+              : 'border-stone-200 bg-stone-100/80'
+          }`}
+          style={{
+            background: gift.active
+              ? `radial-gradient(circle at 50% 42%, ${accent}2B 0%, rgba(255, 253, 249, 0.85) 48%, #F4E7D5 100%)`
+              : 'radial-gradient(circle at 50% 45%, rgba(168,162,158,0.18), #F5F5F4 75%)',
+          }}
+        >
+          {/* Interactive cursor radial spotlight */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+            style={{
+              opacity: spotlight.active ? 1 : 0,
+              background: `radial-gradient(200px circle at ${spotlight.x}% ${spotlight.y}%, rgba(255, 255, 255, 0.72), ${accent}1F 48%, transparent 74%)`,
+            }}
+          />
+
+          {/* Top studio light specular line */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent"
+          />
+
+          {/* Top-right floating Active/Hidden toggle */}
+          <div className="absolute top-2.5 right-2.5 z-20">
+            <button
+              type="button"
+              onClick={() => onToggleActive(gift)}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold cursor-pointer backdrop-blur-md transition-all shadow-sm ${
+                gift.active
+                  ? 'bg-emerald-50/95 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                  : 'bg-stone-200/95 text-stone-600 border border-stone-300 hover:bg-stone-300'
+              }`}
+            >
+              {gift.active ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+              {gift.active ? 'Activo' : 'Oculto'}
+            </button>
+          </div>
+
+          {/* Ambient glowing aura synced with float */}
+          <motion.div
+            aria-hidden="true"
+            style={{
+              scale: auraScale,
+              background: `radial-gradient(circle, ${accent}38 0%, transparent 70%)`,
+            }}
+            className="pointer-events-none absolute top-4 h-28 w-28 rounded-full blur-xl will-change-transform"
+          />
+
+          {/* Floating Gift Illustration / HD Photo with 3D Interactive Tilt */}
+          <motion.div
+            style={{ y: giftY }}
+            className="relative z-10 flex items-center justify-center will-change-transform"
+          >
+            <div
+              style={{
+                transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${spotlight.active ? 1.04 : 1})`,
+                transition: 'transform 160ms ease-out',
+              }}
+              className="preserve-3d"
+            >
+              <GiftIllustration
+                visualKey={gift.visualKey}
+                customImageUrl={gift.customImageUrl}
+                accentColor={accent}
+                size={94}
+              />
+            </div>
+          </motion.div>
+
+          {/* Translucent Glass Pedestal Disc & Synchronized Oval Ground Shadow */}
+          <div className="relative z-0 -mt-1 flex flex-col items-center justify-center">
+            <motion.div
+              aria-hidden="true"
+              style={{
+                scaleX: shadowScaleX,
+                scaleY: shadowScaleY,
+                opacity: shadowOpacity,
+              }}
+              className="relative z-10 h-3 w-24 rounded-full bg-gradient-to-r from-transparent via-[#22150E]/75 to-transparent blur-[3px] will-change-transform"
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none -mt-2 h-4 w-32 rounded-full border border-white/85 bg-white/50 backdrop-blur-sm shadow-[0_8px_18px_-6px_rgba(34,21,14,0.16),inset_0_1px_0_rgba(255,255,255,0.95)]"
+            />
+          </div>
+        </div>
+
+        {/* Gift Copy */}
+        <div className="mt-3.5 px-0.5">
+          <div className="flex items-center gap-2">
+            <span
+              className="h-2.5 w-2.5 rounded-full shrink-0 ring-2 ring-white shadow-sm"
+              style={{ backgroundColor: accent }}
+            />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8C4A19]">
+              {gift.tag}
+            </span>
+          </div>
+          <h3 className="mt-1 font-serif text-lg font-bold text-[#22150E] leading-snug">
+            {gift.name}
+          </h3>
+          <p className="mt-1 text-xs text-[#6E5341] leading-relaxed line-clamp-2">
+            {gift.subtitle}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-[#EFE3D2] flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium text-[#8B6F5B] truncate">{gift.stockLabel}</span>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => onEdit(gift)}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#E6D5BF] bg-[#FAF3E8] px-2.5 py-1.5 text-xs font-semibold text-[#22150E] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
+          >
+            <Edit3 className="h-3.5 w-3.5 text-[#B84A27]" />
+            Editar
+          </button>
+
+          {confirmDeleteId === gift.id ? (
+            <div className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-2.5 py-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => onConfirmDelete(gift.id)}
+                className="font-bold text-red-700 cursor-pointer"
+              >
+                Sí
+              </button>
+              <button
+                type="button"
+                onClick={onCancelDelete}
+                className="text-[#6E5341] cursor-pointer"
+              >
+                No
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onRequestDelete(gift.id)}
+              className="rounded-lg p-1.5 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
+              title="Eliminar regalo"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   gifts,
   giftTheme = 'autumn',
@@ -129,6 +368,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   const [driveDetected, setDriveDetected] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const previewUid = useId().replace(/:/g, '');
   const activeCount = gifts.filter((g) => g.active).length;
 
   const openCreateModal = () => {
@@ -193,6 +433,8 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
       setErrorMsg(err instanceof Error ? err.message : 'No se pudo eliminar el regalo.');
     }
   };
+
+  const previewPalette = resolveBoxPalette(giftTheme, customBoxColor, 0);
 
   return (
     <section className="space-y-5">
@@ -264,24 +506,34 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
         <div className="mt-5 rounded-2xl border border-[#E6D5BF] bg-[#FAF3E8]/75 p-4 sm:p-5">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
-              {/* Live 3D Box Mini Preview */}
-              {(() => {
-                const previewPalette = resolveBoxPalette(giftTheme, customBoxColor, 0);
-                return (
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-[#22150E] border border-[#C88A2B]/40 p-1.5 shadow-inner">
-                    <svg viewBox="0 0 130 130" className="w-full h-full" fill="none">
-                      <polygon points="23,58 65,78 65,114 23,94" fill={previewPalette.front} />
-                      <polygon points="65,78 107,58 107,94 65,114" fill={previewPalette.side} />
-                      <polygon points="40,66 48,70 48,106 40,102" fill={previewPalette.ribbonMid} />
-                      <polygon points="82,70 90,66 90,102 82,106" fill={previewPalette.ribbonMid} />
-                      <polygon points="65,26 111,48 65,70 19,48" fill={previewPalette.lid} />
-                      <polygon points="39,38 47,34 93,56 85,60" fill={previewPalette.ribbonStart} />
-                      <polygon points="83,34 91,38 45,60 37,56" fill={previewPalette.ribbonStart} />
-                      <circle cx="65" cy="48" r="6" fill={previewPalette.ribbonStart} />
-                    </svg>
-                  </div>
-                );
-              })()}
+              {/* Live Floating 3D Box Mini Preview */}
+              <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-b from-[#2A160D] to-[#160B06] border border-[#C88A2B]/45 p-1.5 shadow-[inset_0_1px_0_rgba(254,240,138,0.28),0_10px_20px_-8px_rgba(34,21,14,0.45)]">
+                <motion.div
+                  animate={{ y: [0, -3, 0] }}
+                  transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
+                  className="w-full h-full"
+                >
+                  <svg viewBox="0 0 130 130" className="w-full h-full drop-shadow-[0_4px_6px_rgba(0,0,0,0.5)]" fill="none" aria-hidden="true">
+                    <defs>
+                      <linearGradient id={`miniRib-${previewUid}`} x1="20" y1="20" x2="110" y2="110" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stopColor={previewPalette.ribbonStart} />
+                        <stop offset="50%" stopColor={previewPalette.ribbonMid} />
+                        <stop offset="100%" stopColor={previewPalette.ribbonEnd} />
+                      </linearGradient>
+                    </defs>
+                    <polygon points="23,58 65,78 65,114 23,94" fill={previewPalette.front} stroke={previewPalette.ribbonStart} strokeOpacity="0.35" strokeWidth="0.9" />
+                    <polygon points="65,78 107,58 107,94 65,114" fill={previewPalette.side} stroke={previewPalette.ribbonMid} strokeOpacity="0.25" strokeWidth="0.9" />
+                    <polygon points="40,66 48,70 48,106 40,102" fill={`url(#miniRib-${previewUid})`} />
+                    <polygon points="82,70 90,66 90,102 82,106" fill={`url(#miniRib-${previewUid})`} fillOpacity="0.88" />
+                    <polygon points="18,47 65,69 65,78 18,56" fill={previewPalette.lid} />
+                    <polygon points="65,69 112,47 112,56 65,78" fill={previewPalette.side} />
+                    <polygon points="65,26 112,47 65,69 18,47" fill={previewPalette.lid} stroke="#FEF08A" strokeOpacity="0.5" strokeWidth="1" />
+                    <polygon points="39,37 47,33 93,55 85,59" fill={`url(#miniRib-${previewUid})`} />
+                    <polygon points="83,33 91,37 45,59 37,55" fill={`url(#miniRib-${previewUid})`} />
+                    <circle cx="65" cy="46" r="6" fill={`url(#miniRib-${previewUid})`} />
+                  </svg>
+                </motion.div>
+              </div>
               <div>
                 <div className="flex items-center gap-1.5">
                   <Palette className="h-4 w-4 text-[#B84A27]" />
@@ -361,108 +613,20 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           <AnimatePresence mode="popLayout">
-            {gifts.map((gift) => (
-              <motion.div
-                layout
+            {gifts.map((gift, idx) => (
+              <GiftCatalogCard
                 key={gift.id}
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.94 }}
-                className={`relative rounded-2xl border p-4 flex flex-col justify-between transition-all ${
-                  gift.active
-                    ? 'border-[#E6D5BF] bg-white shadow-sm'
-                    : 'border-stone-200 bg-stone-50/80 opacity-75'
-                }`}
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-[#FAF3E8] border border-[#E6D5BF]">
-                      <GiftIllustration
-                        visualKey={gift.visualKey}
-                        customImageUrl={gift.customImageUrl}
-                        accentColor={gift.accentColor}
-                        size={52}
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleToggleActive(gift)}
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold cursor-pointer transition-colors ${
-                        gift.active
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-stone-200 text-stone-600'
-                      }`}
-                    >
-                      {gift.active ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-                      {gift.active ? 'Activo' : 'Oculto'}
-                    </button>
-                  </div>
-
-                  <div className="mt-3.5">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: gift.accentColor }}
-                      />
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8C4A19]">
-                        {gift.tag}
-                      </span>
-                    </div>
-                    <h3 className="mt-1 font-serif text-lg font-bold text-[#22150E] leading-snug">
-                      {gift.name}
-                    </h3>
-                    <p className="mt-1 text-xs text-[#6E5341] leading-relaxed line-clamp-2">
-                      {gift.subtitle}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-[#EFE3D2] flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-[#8B6F5B]">{gift.stockLabel}</span>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => openEditModal(gift)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-[#E6D5BF] bg-[#FAF3E8] px-2.5 py-1 text-xs font-semibold text-[#22150E] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
-                    >
-                      <Edit3 className="h-3.5 w-3.5 text-[#B84A27]" />
-                      Editar
-                    </button>
-
-                    {confirmDeleteId === gift.id ? (
-                      <div className="inline-flex items-center gap-1 rounded-lg bg-red-50 border border-red-200 px-2 py-1 text-[11px]">
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(gift.id)}
-                          className="font-bold text-red-700 cursor-pointer"
-                        >
-                          Sí
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(null)}
-                          className="text-[#6E5341] cursor-pointer"
-                        >
-                          No
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteId(gift.id)}
-                        className="rounded-lg p-1.5 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
-                        title="Eliminar regalo"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
+                gift={gift}
+                index={idx}
+                confirmDeleteId={confirmDeleteId}
+                onToggleActive={handleToggleActive}
+                onEdit={openEditModal}
+                onRequestDelete={(id) => setConfirmDeleteId(id)}
+                onConfirmDelete={handleDelete}
+                onCancelDelete={() => setConfirmDeleteId(null)}
+              />
             ))}
           </AnimatePresence>
         </div>
@@ -499,14 +663,20 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 </button>
               </div>
 
-              {/* Live Preview Strip */}
-              <div className="flex items-center gap-4 rounded-2xl bg-[#FAF3E8] border border-[#E6D5BF] p-3.5">
-                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white border border-[#E6D5BF] shadow-sm">
+              {/* Live Floating Studio Preview Strip */}
+              <div
+                className="flex items-center gap-4 rounded-2xl border border-[#E6D5BF] p-3.5 shadow-inner"
+                style={{
+                  background: `radial-gradient(circle at 14% 50%, ${draft.accentColor || '#C88A2B'}22, #FAF3E8 55%)`,
+                }}
+              >
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-white/80 border border-white shadow-[0_10px_24px_-10px_rgba(34,21,14,0.2)]">
                   <GiftIllustration
                     visualKey={draft.visualKey}
                     customImageUrl={draft.customImageUrl}
                     accentColor={draft.accentColor}
-                    size={54}
+                    size={56}
+                    floating
                   />
                 </div>
                 <div className="min-w-0">

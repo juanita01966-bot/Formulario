@@ -8,12 +8,13 @@ import {
   Gift,
   LayoutDashboard,
   LogOut,
+  QrCode,
   Settings,
   UserCheck,
 } from 'lucide-react';
 import type { AppSettings, Lead } from '../../types/app';
 
-export type DashboardTab = 'overview' | 'gifts' | 'settings';
+export type DashboardTab = 'overview' | 'gifts' | 'qr' | 'settings';
 
 interface DashboardHeaderProps {
   settings: AppSettings;
@@ -30,6 +31,7 @@ interface DashboardHeaderProps {
 const TABS: Array<{ id: DashboardTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Inicio', icon: LayoutDashboard },
   { id: 'gifts', label: 'Regalos', icon: Gift },
+  { id: 'qr', label: 'QR', icon: QrCode },
   { id: 'settings', label: 'Ajustes', icon: Settings },
 ];
 
@@ -244,7 +246,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           {!isCaller && (
             <nav
               aria-label="Navegación del dashboard"
-              className="inline-flex rounded-2xl bg-[#F3E8D9] p-1 border border-[#E3D0B8] self-start sm:self-auto"
+              className="inline-flex flex-wrap max-w-full rounded-2xl bg-[#F3E8D9] p-1 border border-[#E3D0B8] self-start sm:self-auto"
             >
               {TABS.map((tab) => {
                 const Icon = tab.icon;
@@ -254,7 +256,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                     key={tab.id}
                     type="button"
                     onClick={() => onTabChange(tab.id)}
-                    className={`relative flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold transition-colors cursor-pointer ${
+                    className={`relative flex items-center gap-1.5 rounded-xl px-2.5 sm:px-3.5 py-2 text-xs sm:text-sm font-semibold transition-colors cursor-pointer ${
                       isActive ? 'text-[#22150E]' : 'text-[#7B5D4A] hover:text-[#22150E]'
                     }`}
                   >

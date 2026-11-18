@@ -7,6 +7,9 @@ import type {
   Lead,
   LeadCategory,
   LeadQualification,
+  QrCodeRecord,
+  QrDotShape,
+  QrStyleId,
 } from '../types/app';
 
 const STORAGE_KEY = 'royal_konverta_autumn_store_v1';
@@ -27,18 +30,30 @@ function getDsbSessionToken(): string | null {
   }
 }
 
+function isDsbAdminSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!getDsbSessionToken()) return false;
+  try {
+    return window.sessionStorage.getItem(DSB_ROLE_KEY) === 'admin';
+  } catch {
+    return false;
+  }
+}
+
 function cloneDefaults(): AppState {
   const defaults = JSON.parse(JSON.stringify(defaultStoreJson)) as AppState;
   return {
     ...defaults,
     settings: { ...defaults.settings, pinCode: '' },
     leads: [],
+    qrHistory: [],
   };
 }
 
 function readLocalState(): AppState {
   if (typeof window === 'undefined') return cloneDefaults();
   const hasDsbSession = Boolean(getDsbSessionToken());
+  const isAdmin = isDsbAdminSession();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
@@ -52,6 +67,7 @@ function readLocalState(): AppState {
       settings: { ...defaults.settings, ...(parsed.settings || {}), pinCode: '' },
       gifts: Array.isArray(parsed.gifts) && parsed.gifts.length > 0 ? parsed.gifts : defaults.gifts,
       leads: hasDsbSession && Array.isArray(parsed.leads) ? parsed.leads : [],
+      qrHistory: isAdmin && Array.isArray(parsed.qrHistory) ? parsed.qrHistory : [],
     };
   } catch {
     return cloneDefaults();
@@ -61,11 +77,15 @@ function readLocalState(): AppState {
 function writeLocalState(state: AppState, broadcast = true): void {
   if (typeof window === 'undefined') return;
   const hasDsbSession = Boolean(getDsbSessionToken());
+  const stateRole = (state as AppState & { role?: string }).role;
+  const isAdmin =
+    hasDsbSession && (stateRole ? stateRole === 'admin' : isDsbAdminSession());
   const sanitizedState: AppState = {
     settings: { ...state.settings, pinCode: '' },
     gifts: state.gifts,
-    // Never persist other people's leads into browser LocalStorage on the public route
+    // Never persist other people's leads or admin QR history into browser LocalStorage on public/caller routes
     leads: hasDsbSession ? state.leads : [],
+    qrHistory: isAdmin && Array.isArray(state.qrHistory) ? state.qrHistory : [],
   };
 
   try {
@@ -108,6 +128,9 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
 
   if (!res.ok) {
+    if (res.status === 404 && !data.error) {
+      throw new Error(`HTTP ${res.status}`);
+    }
     if (res.status >= 400 && res.status < 500) {
       throw new ApiValidationError(data.error || 'Solicitud inválida.');
     }
@@ -399,6 +422,131 @@ export async function updateSettings(updates: Partial<AppSettings>): Promise<App
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
     const nextState = { ...state, settings: { ...state.settings, ...updates } };
+    writeLocalState(nextState, true);
+    return nextState;
+  }
+}
+
+const VALID_QR_STYLE_IDS = new Set<QrStyleId>([
+  'classic-gold',
+  'obsidian-dots',
+  'ivory-rounded',
+  'emerald-heritage',
+  'ruby-atelier',
+]);
+const VALID_QR_DOT_SHAPES = new Set<QrDotShape>(['square', 'rounded', 'dots']);
+const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function isValidQrTargetUrl(rawUrl: string): boolean {
+  const clean = rawUrl.trim();
+  if (!clean || clean.length > 2048) return false;
+  if (clean.startsWith('/') && !clean.startsWith('//')) return true;
+  try {
+    const parsed = new URL(clean);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export interface CreateQrPayload {
+  name: string;
+  targetUrl: string;
+  styleId?: QrStyleId;
+  dotShape?: QrDotShape;
+  foregroundColor?: string;
+  backgroundColor?: string;
+  includeLogo?: boolean;
+  frameText?: string;
+}
+
+export async function createQrCode(
+  payload: CreateQrPayload
+): Promise<{ qr: QrCodeRecord; state: AppState }> {
+  try {
+    const res = await requestJson<{ qr: QrCodeRecord; qrHistory?: QrCodeRecord[]; state: AppState }>(
+      '/api/qr',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+    writeLocalState(res.state, true);
+    return { qr: res.qr, state: res.state };
+  } catch (err) {
+    if (err instanceof ApiValidationError) throw err;
+
+    if (!isDsbAdminSession()) {
+      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
+    }
+
+    const cleanName = payload.name.trim();
+    const cleanUrl = payload.targetUrl.trim();
+    if (cleanName.length < 2) {
+      throw new ApiValidationError('El nombre del código QR debe tener al menos 2 caracteres.');
+    }
+    if (!isValidQrTargetUrl(cleanUrl)) {
+      throw new ApiValidationError('Ingresa una URL válida que comience con http://, https:// o /.');
+    }
+
+    const cleanFrameText = payload.frameText?.trim().slice(0, 120) || undefined;
+    const qr: QrCodeRecord = {
+      id: generateLocalId('qr'),
+      name: cleanName.slice(0, 120),
+      targetUrl: cleanUrl,
+      styleId:
+        payload.styleId && VALID_QR_STYLE_IDS.has(payload.styleId)
+          ? payload.styleId
+          : 'classic-gold',
+      dotShape:
+        payload.dotShape && VALID_QR_DOT_SHAPES.has(payload.dotShape)
+          ? payload.dotShape
+          : 'rounded',
+      foregroundColor:
+        payload.foregroundColor && HEX_COLOR_RE.test(payload.foregroundColor.trim())
+          ? payload.foregroundColor.trim()
+          : '#22150E',
+      backgroundColor:
+        payload.backgroundColor && HEX_COLOR_RE.test(payload.backgroundColor.trim())
+          ? payload.backgroundColor.trim()
+          : '#FFFDF9',
+      includeLogo: typeof payload.includeLogo === 'boolean' ? payload.includeLogo : true,
+      ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
+      createdAt: new Date().toISOString(),
+    };
+
+    const state = readLocalState();
+    const nextState: AppState = {
+      ...state,
+      qrHistory: [qr, ...(state.qrHistory || [])],
+    };
+    writeLocalState(nextState, true);
+    return { qr, state: nextState };
+  }
+}
+
+export async function deleteQrCode(id: string): Promise<AppState> {
+  try {
+    const res = await requestJson<{ qrHistory?: QrCodeRecord[]; state: AppState }>(
+      `/api/qr/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    writeLocalState(res.state, true);
+    return res.state;
+  } catch (err) {
+    if (err instanceof ApiValidationError) throw err;
+
+    if (!isDsbAdminSession()) {
+      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
+    }
+
+    const state = readLocalState();
+    const nextState: AppState = {
+      ...state,
+      qrHistory: (state.qrHistory || []).filter((item) => item.id !== id),
+    };
     writeLocalState(nextState, true);
     return nextState;
   }
@@ -795,7 +943,7 @@ export function logoutDsbSession(): void {
       const parsed = JSON.parse(raw) as Partial<AppState>;
       window.localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ ...parsed, leads: [] })
+        JSON.stringify({ ...parsed, leads: [], qrHistory: [] })
       );
     }
   } catch {
