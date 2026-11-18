@@ -350,18 +350,33 @@ function ensureAuthStore() {
   }
 }
 
-function writeAuthStore(authData) {
+function writeJsonFileSafely(targetPath, data) {
   if (IS_VERCEL) return;
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    const tmp = `${AUTH_PATH}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(authData, null, 2), 'utf8');
-    fs.renameSync(tmp, AUTH_PATH);
+    const serialized = JSON.stringify(data, null, 2);
+    const tempPath = `${targetPath}.tmp`;
+    try {
+      fs.writeFileSync(tempPath, serialized, 'utf8');
+      fs.renameSync(tempPath, targetPath);
+    } catch {
+      // Fallback for Windows NTFS transient EPERM/EBUSY locks during atomic rename
+      try {
+        fs.rmSync(tempPath, { force: true });
+      } catch {
+        // Ignore temp cleanup failure
+      }
+      fs.writeFileSync(targetPath, serialized, 'utf8');
+    }
   } catch {
     // Ignore write failure on read-only environments
   }
+}
+
+function writeAuthStore(authData) {
+  writeJsonFileSafely(AUTH_PATH, authData);
 }
 
 function signToken(payloadObj, secret) {
@@ -480,17 +495,7 @@ function ensureStore() {
 }
 
 function writeStore(store) {
-  if (IS_VERCEL) return;
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const tempPath = `${STORE_PATH}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(store, null, 2), 'utf8');
-    fs.renameSync(tempPath, STORE_PATH);
-  } catch {
-    // Ignore write failure on read-only filesystems
-  }
+  writeJsonFileSafely(STORE_PATH, store);
 }
 
 function generateId(prefix) {
@@ -1260,6 +1265,152 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
     username: auth.username,
     message: 'Credenciales de seguridad actualizadas correctamente.',
   });
+});
+
+// Master-key protected full reset: wipes all leads, metrics, QR history (and optionally gifts/settings)
+app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, res) => {
+  const bucketKey = getBucketKey(req, 'master');
+  const status = checkRateLimit(bucketKey);
+  if (status.locked) {
+    return res.status(429).json({
+      error: `Autorización maestra bloqueada temporalmente (${status.retryAfterSeconds}s).`,
+      locked: true,
+      retryAfterSeconds: status.retryAfterSeconds,
+    });
+  }
+
+  const { masterPassword, resetCatalogAndSettings } = req.body || {};
+  const masterMatches = verifySecretConstantTime(
+    typeof masterPassword === 'string' ? masterPassword : '',
+    MASTER_KEY_SALT,
+    MASTER_KEY_HASH
+  );
+
+  if (!masterMatches) {
+    const fail = recordFailedAttempt(bucketKey);
+    await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 300)));
+    return res.status(fail.locked ? 429 : 403).json({
+      error: fail.locked
+        ? 'Contraseña maestra inválida. Bloqueo preventivo activado por 15 minutos.'
+        : `Contraseña maestra inválida. Intentos restantes: ${fail.remainingAttempts}.`,
+      locked: fail.locked,
+      retryAfterSeconds: fail.retryAfterSeconds,
+      remainingAttempts: fail.remainingAttempts,
+    });
+  }
+
+  clearAttempts(bucketKey);
+  const shouldResetCatalog = resetCatalogAndSettings !== false;
+
+  try {
+    const defaults = readDefaultStore();
+    memoryQrFallback = [];
+
+    if (USE_SUPABASE) {
+      await supabaseRest('leads?id=not.is.null', { method: 'DELETE' });
+      await supabaseRest('qr_codes?id=not.is.null', { method: 'DELETE' }).catch((err) => {
+        if (!isMissingQrTableError(err)) throw err;
+      });
+
+      if (shouldResetCatalog) {
+        memoryGiftUsageTips.clear();
+        const giftRows = defaults.gifts.map((gift, idx) => {
+          memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
+          return {
+            id: gift.id,
+            name: gift.name,
+            subtitle: gift.subtitle,
+            usage_tip: gift.usageTip || '',
+            tag: gift.tag,
+            visual_key: gift.visualKey,
+            custom_image_url: gift.customImageUrl || null,
+            accent_color: gift.accentColor,
+            active: gift.active,
+            stock_label: gift.stockLabel,
+            sort_order: idx + 1,
+          };
+        });
+        await supabaseWriteWithOptionalColumns(
+          'gifts',
+          'POST',
+          { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          giftRows,
+          ['usage_tip']
+        );
+        const defaultIds = defaults.gifts.map((g) => `"${g.id}"`).join(',');
+        await supabaseRest(`gifts?id=not.in.(${encodeURIComponent(defaultIds)})`, {
+          method: 'DELETE',
+        });
+
+        Object.assign(memorySettingsFallback, {
+          showcaseStyle: defaults.settings.showcaseStyle || 'luminous-gold',
+          randomizeGifts:
+            typeof defaults.settings.randomizeGifts === 'boolean'
+              ? defaults.settings.randomizeGifts
+              : true,
+        });
+        await supabaseWriteWithOptionalColumns(
+          'app_settings',
+          'PATCH',
+          { Prefer: 'return=minimal' },
+          {
+            advisor_name: defaults.settings.advisorName,
+            host_title: defaults.settings.hostTitle,
+            brand_subtitle: defaults.settings.brandSubtitle,
+            default_ticket_amount: defaults.settings.defaultTicketAmount,
+            require_pin: defaults.settings.requirePin,
+            pin_code: defaults.settings.pinCode,
+            gift_theme: defaults.settings.giftTheme || 'autumn',
+            custom_box_color: defaults.settings.customBoxColor || '#C88A2B',
+            showcase_style: defaults.settings.showcaseStyle || 'luminous-gold',
+            randomize_gifts:
+              typeof defaults.settings.randomizeGifts === 'boolean'
+                ? defaults.settings.randomizeGifts
+                : true,
+            updated_at: new Date().toISOString(),
+          },
+          ['showcase_style', 'randomize_gifts']
+        );
+      }
+
+      if (!IS_VERCEL) {
+        const local = ensureStore();
+        local.leads = [];
+        local.qrHistory = [];
+        if (shouldResetCatalog) {
+          local.gifts = defaults.gifts;
+          local.settings = { ...defaults.settings };
+        }
+        writeStore(local);
+      }
+
+      const updatedStore = await getActiveStore();
+      return res.json({
+        ok: true,
+        state: sanitizeStateForClient(updatedStore, true, 'admin'),
+        message: 'Todas las métricas y datos fueron reiniciados a 0.',
+      });
+    }
+
+    const store = ensureStore();
+    store.leads = [];
+    store.qrHistory = [];
+    if (shouldResetCatalog) {
+      store.gifts = defaults.gifts;
+      store.settings = { ...defaults.settings };
+    }
+    writeStore(store);
+
+    return res.json({
+      ok: true,
+      state: sanitizeStateForClient(store, true, 'admin'),
+      message: 'Todas las métricas y datos fueron reiniciados a 0.',
+    });
+  } catch {
+    return res.status(503).json({
+      error: 'No se pudo completar el reinicio general. Intenta de nuevo.',
+    });
+  }
 });
 
 // State read: NEVER exposes leads or PIN without valid DSB session token

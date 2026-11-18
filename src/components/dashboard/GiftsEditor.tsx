@@ -167,12 +167,12 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
 
   // Synchronized 60 FPS GPU floating loop & breathing oval ground shadow
   const floatDriver = useMotionValue(0);
-  const giftY = useTransform(floatDriver, [0, 1], [0, -7]);
-  const shadowScaleX = useTransform(floatDriver, [0, 1], [1, 0.74]);
-  const shadowScaleY = useTransform(floatDriver, [0, 1], [1, 0.78]);
-  const shadowOpacity = useTransform(floatDriver, [0, 1], [0.68, 0.28]);
+  const giftY = useTransform(floatDriver, [0, 1], [2, -11]);
+  const shadowScaleX = useTransform(floatDriver, [0, 1], [1.04, 0.64]);
+  const shadowScaleY = useTransform(floatDriver, [0, 1], [1, 0.68]);
+  const shadowOpacity = useTransform(floatDriver, [0, 1], [0.76, 0.24]);
   const auraScale = useTransform(floatDriver, [0, 1], [0.95, 1.12]);
-  const auraOpacity = useTransform(floatDriver, [0, 1], [0.55, 0.88]);
+  const auraOpacity = useTransform(floatDriver, [0, 1], [0.65, 0.96]);
 
   useEffect(() => {
     const controls = animate(floatDriver, [0, 1, 0], {

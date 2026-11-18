@@ -37,15 +37,15 @@ export const SHOWCASE_STYLE_OPTIONS: ShowcasePedestalTokens[] = [
     spotlightTint: 'rgba(255, 244, 219, 0.16)',
     auraCore: 'rgba(246, 223, 180, 0.24)',
     plinthTopBg:
-      'radial-gradient(120% 95% at 38% 30%, #FBF6ED 0%, #E7D7BE 48%, #B79C79 86%, #8C6D4B 100%)',
-    plinthRimClass: 'border-[#FFF9EE]/75 border-b-[#9A7A54]/70',
+      'radial-gradient(88% 82% at 50% 48%, #4A2B18 0%, #2D180C 58%, #180B05 100%)',
+    plinthRimClass: 'border-[#F4CA73]/65 border-b-[#6B441C]/90',
     plinthSideBg:
-      'linear-gradient(90deg, #4E3924 0%, #8A6B4A 22%, #D4BC9B 45%, #EFE1CA 56%, #9E7D58 78%, #4A3621 100%)',
+      'linear-gradient(90deg, #160A04 0%, #4E2F1B 20%, #9E7342 46%, #DFBE82 54%, #613B22 80%, #140803 100%)',
     plinthTrimBg:
-      'linear-gradient(90deg, #6E4A16 0%, #E5AE4E 35%, #FFF6D6 52%, #C88A2B 75%, #5C3D10 100%)',
-    plinthEmissiveCore: 'rgba(255, 244, 214, 0.72)',
+      'linear-gradient(90deg, #5C3A14 0%, #E5AE4E 35%, #FFF6D6 52%, #C88A2B 75%, #4A2F0D 100%)',
+    plinthEmissiveCore: 'rgba(255, 248, 220, 0.96)',
     plinthUpwashGradient:
-      'linear-gradient(to top, rgba(254, 236, 179, 0.42) 0%, rgba(229, 174, 78, 0.16) 52%, transparent 100%)',
+      'radial-gradient(ellipse 68% 92% at 50% 96%, rgba(255, 245, 200, 0.56) 0%, rgba(244, 202, 115, 0.3) 42%, rgba(200, 138, 43, 0.1) 70%, transparent 100%)',
   },
   {
     id: 'crystal-aurora',
@@ -62,15 +62,15 @@ export const SHOWCASE_STYLE_OPTIONS: ShowcasePedestalTokens[] = [
     spotlightTint: 'rgba(241, 245, 249, 0.15)',
     auraCore: 'rgba(226, 232, 240, 0.2)',
     plinthTopBg:
-      'radial-gradient(120% 95% at 38% 30%, #E2E8F0 0%, #94A3B8 46%, #475569 84%, #1E293B 100%)',
-    plinthRimClass: 'border-white/55 border-b-slate-900/75',
+      'radial-gradient(88% 82% at 50% 48%, #343C47 0%, #1F252D 60%, #111419 100%)',
+    plinthRimClass: 'border-slate-200/55 border-b-slate-900/90',
     plinthSideBg:
-      'linear-gradient(90deg, #1E242B 0%, #3E4854 24%, #7A8696 46%, #94A0B0 55%, #47525F 78%, #1B2027 100%)',
+      'linear-gradient(90deg, #0D1014 0%, #2B333D 22%, #6B7787 46%, #9CA8B8 54%, #37414E 78%, #0B0E12 100%)',
     plinthTrimBg:
       'linear-gradient(90deg, #334155 0%, #CBD5E1 38%, #F8FAFC 52%, #94A3B8 74%, #1E293B 100%)',
-    plinthEmissiveCore: 'rgba(248, 250, 252, 0.65)',
+    plinthEmissiveCore: 'rgba(248, 250, 252, 0.92)',
     plinthUpwashGradient:
-      'linear-gradient(to top, rgba(226, 232, 240, 0.36) 0%, rgba(148, 163, 184, 0.14) 52%, transparent 100%)',
+      'radial-gradient(ellipse 68% 92% at 50% 96%, rgba(248, 250, 252, 0.52) 0%, rgba(203, 213, 225, 0.25) 44%, rgba(148, 163, 184, 0.08) 70%, transparent 100%)',
   },
   {
     id: 'royal-ember',
@@ -87,15 +87,15 @@ export const SHOWCASE_STYLE_OPTIONS: ShowcasePedestalTokens[] = [
     spotlightTint: 'rgba(255, 235, 214, 0.16)',
     auraCore: 'rgba(235, 190, 148, 0.22)',
     plinthTopBg:
-      'radial-gradient(120% 95% at 38% 30%, #D9AD89 0%, #A7704B 48%, #6D4026 84%, #422313 100%)',
-    plinthRimClass: 'border-[#F7DFC9]/65 border-b-[#3A1E0F]/80',
+      'radial-gradient(88% 82% at 50% 48%, #4B2817 0%, #2D160B 60%, #170A05 100%)',
+    plinthRimClass: 'border-[#F7B98A]/60 border-b-[#3A1E0F]/90',
     plinthSideBg:
-      'linear-gradient(90deg, #2D170B 0%, #59331E 22%, #915B3A 45%, #A66E4B 56%, #5D361F 78%, #291409 100%)',
+      'linear-gradient(90deg, #140804 0%, #4E2B19 20%, #9E6842 46%, #C48A5E 54%, #55301C 80%, #120703 100%)',
     plinthTrimBg:
       'linear-gradient(90deg, #4B2814 0%, #C68642 36%, #FCE7C8 52%, #A86B32 74%, #3D1F0E 100%)',
-    plinthEmissiveCore: 'rgba(255, 228, 196, 0.68)',
+    plinthEmissiveCore: 'rgba(255, 235, 205, 0.94)',
     plinthUpwashGradient:
-      'linear-gradient(to top, rgba(251, 191, 134, 0.38) 0%, rgba(198, 134, 66, 0.15) 52%, transparent 100%)',
+      'radial-gradient(ellipse 68% 92% at 50% 96%, rgba(254, 215, 170, 0.54) 0%, rgba(234, 153, 82, 0.28) 44%, rgba(198, 134, 66, 0.09) 70%, transparent 100%)',
   },
 ];
 
@@ -121,83 +121,88 @@ export const StudioPlinthBase: React.FC<{
   const dims =
     size === 'lg'
       ? {
-          wrap: '-mt-2',
-          shadow: '-mb-3.5 h-3.5 w-32 sm:w-40 blur-[5px]',
-          upwash: '-top-14 h-20 w-44 sm:w-52 blur-xl',
-          recessed: 'inset-x-9 top-1.5 h-3 blur-[4px]',
-          top: 'h-9 w-52 sm:w-64',
-          side: '-mt-4 h-6 sm:h-7 w-52 sm:w-64',
-          floor: '-mt-2.5 h-5 w-60 sm:w-72 blur-lg',
+          wrap: '-mt-1',
+          shadow: '-mb-5 h-3.5 w-32 sm:w-36 blur-[5px]',
+          upwash: 'bottom-7 h-40 w-52 sm:w-64 blur-xl',
+          recessed: 'inset-x-10 inset-y-2',
+          top: 'h-11 sm:h-12 w-56 sm:w-64',
+          side: '-mt-6 h-7 sm:h-8 w-56 sm:w-64',
+          floor: '-mt-3 h-5 w-60 sm:w-72 blur-lg',
         }
       : size === 'sm'
         ? {
-            wrap: '-mt-1',
-            shadow: '-mb-2 h-2.5 w-20 blur-[3.5px]',
-            upwash: '-top-9 h-12 w-28 blur-lg',
-            recessed: 'inset-x-5 top-1 h-2 blur-[3px]',
-            top: 'h-5 w-32',
-            side: '-mt-2.5 h-4 w-32',
-            floor: '-mt-1.5 h-3 w-36 blur-md',
+            wrap: '-mt-0.5',
+            shadow: '-mb-3 h-2 w-20 blur-[3px]',
+            upwash: 'bottom-4 h-24 w-32 blur-lg',
+            recessed: 'inset-x-6 inset-y-1',
+            top: 'h-6 w-32 sm:w-36',
+            side: '-mt-3.5 h-4 w-32 sm:w-36',
+            floor: '-mt-2 h-3 w-36 blur-md',
           }
         : {
             wrap: '-mt-0.5',
-            shadow: '-mb-1.5 h-1.5 w-12 blur-[2px]',
-            upwash: '-top-6 h-8 w-16 blur-md',
-            recessed: 'inset-x-3 top-0.5 h-1.5 blur-[2px]',
-            top: 'h-3.5 w-20',
-            side: '-mt-1.5 h-2.5 w-20',
+            shadow: '-mb-2 h-1.5 w-12 blur-[2px]',
+            upwash: 'bottom-3 h-14 w-20 blur-md',
+            recessed: 'inset-x-4 inset-y-0.5',
+            top: 'h-4 w-20',
+            side: '-mt-2 h-3 w-20',
             floor: '-mt-1 h-2 w-24 blur-sm',
           };
 
   return (
     <div className={`relative z-10 flex flex-col items-center justify-center ${dims.wrap}`}>
-      {/* Subtle soft museum uplight gently rising from the top surface of the plinth */}
+      {/* Soft warm museum uplight rising continuously from recessed circular podium lens onto the floating product */}
       <motion.div
         aria-hidden="true"
-        animate={{ opacity: [0.62, 0.92, 0.62] }}
-        transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
-        style={{ background: tokens.plinthUpwashGradient }}
+        animate={{ opacity: [0.68, 1, 0.68], scaleY: [0.95, 1.05, 0.95] }}
+        transition={{ duration: 2.9, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ background: tokens.plinthUpwashGradient, transformOrigin: 'bottom center' }}
         className={`pointer-events-none absolute left-1/2 -translate-x-1/2 z-[15] rounded-t-full ${dims.upwash}`}
       />
 
-      {/* Grounded contact ambient-occlusion shadow directly beneath product */}
+      {/* Grounded inverse contact shadow resting over the center of the spotlight lens */}
       <motion.div
         aria-hidden="true"
         style={{ scaleX: shadowScaleX, scaleY: shadowScaleY, opacity: shadowOpacity }}
-        className={`relative z-30 rounded-full bg-gradient-to-r from-transparent via-black/95 to-transparent will-change-transform ${dims.shadow}`}
+        className={`relative z-30 rounded-[50%] bg-gradient-to-r from-transparent via-black/90 to-transparent will-change-transform ${dims.shadow}`}
       />
 
-      {/* Top flat architectural surface of the circular plinth */}
+      {/* True circular 3D perspective podium deck (ellipse via rounded-[50%], NOT a capsule bar) */}
       <div
         aria-hidden="true"
         style={{ background: tokens.plinthTopBg }}
-        className={`relative z-20 rounded-[999px] border ${tokens.plinthRimClass} shadow-[0_6px_16px_rgba(0,0,0,0.45),inset_0_1px_1px_rgba(255,255,255,0.65)] ${dims.top}`}
+        className={`relative z-20 rounded-[50%] border ${tokens.plinthRimClass} shadow-[0_8px_22px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.45)] ${dims.top}`}
       >
-        {/* Subtle recessed showcase light-well emitting warmth upward from platform */}
-        <div
-          style={{ background: `radial-gradient(ellipse at center, ${tokens.plinthEmissiveCore} 0%, transparent 72%)` }}
-          className={`pointer-events-none absolute rounded-full ${dims.recessed}`}
+        {/* Recessed glowing showcase aperture in center of podium */}
+        <motion.div
+          animate={{ opacity: [0.8, 1, 0.8] }}
+          transition={{ duration: 2.9, repeat: Infinity, ease: 'easeInOut' }}
+          style={{
+            background: `radial-gradient(ellipse at center, ${tokens.plinthEmissiveCore} 0%, rgba(253,224,71,0.5) 45%, transparent 78%)`,
+            boxShadow: '0 0 22px rgba(254, 240, 138, 0.55)',
+          }}
+          className={`pointer-events-none absolute rounded-[50%] blur-[1.5px] ${dims.recessed}`}
         />
-        {/* Subtle studio reflection curve across upper bevel */}
-        <div className="pointer-events-none absolute inset-x-4 top-[1px] h-px rounded-full bg-gradient-to-r from-transparent via-white/80 to-transparent" />
+        {/* Crisp front specular rim along outer turntable curve */}
+        <div className="pointer-events-none absolute inset-x-8 top-[1px] h-px rounded-full bg-gradient-to-r from-transparent via-white/75 to-transparent" />
       </div>
 
-      {/* Extruded 3D cylindrical riser body with realistic lateral studio shading */}
+      {/* Extruded curved cylindrical riser body matching true elliptical front curve */}
       <div
         aria-hidden="true"
         style={{ background: tokens.plinthSideBg }}
-        className={`relative z-10 overflow-hidden rounded-b-[999px] shadow-[0_10px_22px_rgba(0,0,0,0.65)] ${dims.side}`}
+        className={`relative z-10 overflow-hidden rounded-b-[50%] shadow-[0_12px_26px_rgba(0,0,0,0.72)] ${dims.side}`}
       >
         <div
           style={{ background: tokens.plinthTrimBg }}
-          className="absolute inset-x-0 bottom-0 h-[3px] opacity-90"
+          className="absolute inset-x-0 bottom-0 h-[3px] opacity-95"
         />
       </div>
 
-      {/* Soft grounded studio floor shadow beneath plinth */}
+      {/* Deep grounded studio floor shadow beneath podium */}
       <div
         aria-hidden="true"
-        className={`pointer-events-none relative z-0 rounded-full bg-black/80 ${dims.floor}`}
+        className={`pointer-events-none relative z-0 rounded-[50%] bg-black/85 ${dims.floor}`}
       />
     </div>
   );

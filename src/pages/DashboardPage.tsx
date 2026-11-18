@@ -3,10 +3,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowLeft,
+  Check,
   Delete,
   Eye,
   EyeOff,
   KeyRound,
+  RotateCcw,
   ShieldAlert,
   ShieldCheck,
   User,
@@ -23,6 +25,7 @@ import {
   fetchAppState,
   loginStep1,
   logoutDsbSession,
+  resetAllWorkspaceData,
   resetDefaultGifts,
   updateGift,
   updateLead,
@@ -40,6 +43,7 @@ import { CallerProspectsView } from '../components/dashboard/CallerProspectsView
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
 import { QrStudioPanel } from '../components/dashboard/QrStudioPanel';
 import { SettingsPanel } from '../components/dashboard/SettingsPanel';
+import { MasterResetModal } from '../components/dashboard/MasterResetModal';
 
 interface DashboardPageProps {
   appState: AppState;
@@ -57,6 +61,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey>('all');
   const [userRole, setUserRole] = useState<'admin' | 'caller'>('admin');
+  const [masterResetOpen, setMasterResetOpen] = useState(false);
+  const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
 
   // 2-Filter Cybersecurity Gateway State
   const [securityStage, setSecurityStage] = useState<SecurityStage>('checking');
@@ -287,6 +293,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const handleDeleteQr = async (id: string) => {
     const next = await deleteQrCode(id);
     onStateChange(next);
+  };
+
+  const handleConfirmMasterReset = async (
+    masterPassword: string,
+    resetCatalogAndSettings: boolean
+  ) => {
+    const res = await resetAllWorkspaceData(masterPassword, resetCatalogAndSettings);
+    onStateChange(res.state);
+    setKpiFilter('all');
+    setResetSuccessMessage(res.message);
+    window.setTimeout(() => setResetSuccessMessage(null), 4000);
   };
 
   if (securityStage !== 'authenticated') {
@@ -691,6 +708,26 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <>
               {activeTab === 'overview' && (
                 <>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    {resetSuccessMessage ? (
+                      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 shadow-xs">
+                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>{resetSuccessMessage}</span>
+                      </div>
+                    ) : (
+                      <div />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setMasterResetOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-full border border-[#B84A27]/35 bg-[#FFFDF9]/90 px-4 py-2 text-xs font-bold text-[#8C3318] shadow-sm hover:border-[#B84A27]/70 hover:bg-[#FFF5EC] transition-all cursor-pointer"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Reiniciar métricas y todo desde 0
+                    </button>
+                  </div>
+
                   <KpiGrid
                     leads={appState.leads}
                     defaultTicketAmount={appState.settings.defaultTicketAmount}
@@ -737,12 +774,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               )}
 
               {activeTab === 'settings' && (
-                <SettingsPanel settings={appState.settings} onSaveSettings={handleSaveSettings} />
+                <SettingsPanel
+                  settings={appState.settings}
+                  onSaveSettings={handleSaveSettings}
+                  onOpenMasterReset={() => setMasterResetOpen(true)}
+                />
               )}
             </>
           )}
         </main>
       </div>
+
+      {userRole === 'admin' && (
+        <MasterResetModal
+          open={masterResetOpen}
+          onClose={() => setMasterResetOpen(false)}
+          onConfirmReset={handleConfirmMasterReset}
+        />
+      )}
     </div>
   );
 };

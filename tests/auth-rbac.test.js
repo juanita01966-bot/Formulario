@@ -1136,4 +1136,89 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
       initialShowcaseSettings = null;
     });
   });
+
+  describe('8. Master-Key Full Reset (POST /api/admin/reset-all)', () => {
+    test('Unauthenticated and Caller requests to POST /api/admin/reset-all are REJECTED (401 / 403)', async () => {
+      const unauthRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ masterPassword: 'PoloNorte121966@' }),
+      });
+      assert.strictEqual(unauthRes.status, 401);
+
+      const callerRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${callerSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ masterPassword: 'PoloNorte121966@' }),
+      });
+      assert.strictEqual(callerRes.status, 403);
+    });
+
+    test('Admin POST /api/admin/reset-all rejects invalid masterPassword with 403 without wiping leads', async () => {
+      const leadRes = await fetch(`${baseUrl}/api/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Lead Protegido Master',
+          phone: '555-321-7777',
+          address: 'Dallas, TX',
+        }),
+      });
+      assert.strictEqual(leadRes.status, 201);
+
+      const badRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ masterPassword: 'WrongMasterPassword!' }),
+      });
+      assert.strictEqual(badRes.status, 403);
+
+      const stateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      const state = await stateRes.json();
+      assert.ok(state.leads.some((l) => l.name === 'Lead Protegido Master'));
+    });
+
+    test('Admin POST /api/admin/reset-all with valid Master Password clears leads & QR history to 0 cleanly', async () => {
+      const qrRes = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR Temporal Reset',
+          targetUrl: 'https://royal.ciprian.example/reset-test',
+        }),
+      });
+      assert.strictEqual(qrRes.status, 201);
+
+      const okRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: 'PoloNorte121966@',
+          resetCatalogAndSettings: true,
+        }),
+      });
+      assert.strictEqual(okRes.status, 200);
+      const data = await okRes.json();
+      assert.strictEqual(data.ok, true);
+      assert.deepStrictEqual(data.state.leads, []);
+      assert.deepStrictEqual(data.state.qrHistory, []);
+      assert.strictEqual(data.state.gifts.length, 9);
+      assert.strictEqual(data.state.settings.showcaseStyle, 'luminous-gold');
+      assert.strictEqual(data.state.settings.randomizeGifts, true);
+    });
+  });
 });

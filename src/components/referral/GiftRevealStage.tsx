@@ -240,16 +240,17 @@ const RevealedGiftShowcase: React.FC<{
   const [spotlight, setSpotlight] = useState({ x: 50, y: 38, active: false });
 
   const lift = useMotionValue(0);
-  const giftY = useTransform(lift, [0, 1], [0, -4]);
-  const shadowScaleX = useTransform(lift, [0, 1], [1, 0.88]);
-  const shadowScaleY = useTransform(lift, [0, 1], [1, 0.9]);
-  const shadowOpacity = useTransform(lift, [0, 1], [0.78, 0.56]);
-  const auraScale = useTransform(lift, [0, 1], [0.97, 1.05]);
-  const auraOpacity = useTransform(lift, [0, 1], [0.75, 0.95]);
+  const giftY = useTransform(lift, [0, 1], [4, -18]);
+  const giftRotate = useTransform(lift, [0, 0.5, 1], [-1, 0, 1]);
+  const shadowScaleX = useTransform(lift, [0, 1], [1.08, 0.6]);
+  const shadowScaleY = useTransform(lift, [0, 1], [1.05, 0.65]);
+  const shadowOpacity = useTransform(lift, [0, 1], [0.8, 0.24]);
+  const auraScale = useTransform(lift, [0, 1], [0.95, 1.12]);
+  const auraOpacity = useTransform(lift, [0, 1], [0.7, 1]);
 
   useEffect(() => {
     const controls = animate(lift, [0, 1, 0], {
-      duration: 3.2,
+      duration: 2.9,
       repeat: Infinity,
       ease: 'easeInOut',
     });
@@ -316,15 +317,16 @@ const RevealedGiftShowcase: React.FC<{
         className="pointer-events-none absolute top-4 h-52 w-64 rounded-full blur-2xl will-change-transform"
       />
 
-      {/* Frameless Transparent PNG Product Resting on Realistic Studio Plinth */}
+      {/* Floating Transparent PNG Product Bathing in Bottom Podium Spotlight */}
       <motion.div
-        style={{ y: giftY }}
-        className="relative z-20 mb-0 flex items-center justify-center will-change-transform"
+        style={{ y: giftY, rotate: giftRotate }}
+        className="relative z-20 -mb-2 flex items-center justify-center will-change-transform"
       >
         <div
           style={{
             transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${spotlight.active ? 1.04 : 1})`,
             transition: 'transform 160ms ease-out',
+            filter: 'drop-shadow(0 18px 24px rgba(254, 240, 138, 0.22))',
           }}
           className="preserve-3d"
         >
@@ -332,8 +334,8 @@ const RevealedGiftShowcase: React.FC<{
             visualKey={gift.visualKey}
             customImageUrl={gift.customImageUrl}
             accentColor={accent}
-            size={158}
-            className="sm:!w-[174px] sm:!h-[174px]"
+            size={180}
+            className="sm:!w-[198px] sm:!h-[198px]"
             variant="clean"
             alt={gift.name}
           />

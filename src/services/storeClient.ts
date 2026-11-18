@@ -1024,3 +1024,38 @@ export async function updateDsbCredentials(
     message: data.message || 'Credenciales actualizadas.',
   };
 }
+
+export async function resetAllWorkspaceData(
+  masterPassword: string,
+  resetCatalogAndSettings = true
+): Promise<{ ok: boolean; state: AppState; message: string }> {
+  const token = getDsbSessionToken();
+  const res = await fetch('/api/admin/reset-all', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      masterPassword,
+      resetCatalogAndSettings,
+    }),
+  });
+
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    state?: AppState;
+    message?: string;
+  } & AuthErrorResponse;
+
+  if (!res.ok || !data.ok || !data.state) {
+    throw new DsbAuthError(data);
+  }
+
+  writeLocalState(data.state, true);
+  return {
+    ok: true,
+    state: data.state,
+    message: data.message || 'Todas las métricas y datos fueron reiniciados a 0.',
+  };
+}

@@ -1,14 +1,31 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Check, Eye, EyeOff, KeyRound, Lock, Save, ShieldAlert, ShieldCheck, UserCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Lock,
+  RotateCcw,
+  Save,
+  ShieldAlert,
+  ShieldCheck,
+  UserCheck,
+} from 'lucide-react';
 import type { AppSettings } from '../../types/app';
 import { DsbAuthError, updateDsbCredentials } from '../../services/storeClient';
 
 interface SettingsPanelProps {
   settings: AppSettings;
   onSaveSettings: (updates: Partial<AppSettings>) => Promise<void>;
+  onOpenMasterReset?: () => void;
 }
 
-export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSaveSettings }) => {
+export const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  settings,
+  onSaveSettings,
+  onOpenMasterReset,
+}) => {
   const [advisorName, setAdvisorName] = useState(settings.advisorName);
   const [hostTitle, setHostTitle] = useState(settings.hostTitle);
   const [defaultTicketAmount, setDefaultTicketAmount] = useState(String(settings.defaultTicketAmount));
@@ -123,7 +140,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSaveSe
             />
           </div>
 
-          <div className="pt-2 flex items-center gap-3">
+          <div className="pt-2 flex flex-wrap items-center gap-3">
             <button
               type="submit"
               className="inline-flex items-center gap-2 rounded-full bg-[#22150E] px-5 py-2.5 text-sm font-semibold text-[#FAF3E8] hover:bg-[#3A2418] transition-colors cursor-pointer"
@@ -133,6 +150,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSaveSe
             </button>
           </div>
         </form>
+
+        {onOpenMasterReset && (
+          <div className="mt-6 rounded-2xl border border-[#B84A27]/30 bg-[#FFF5EC] p-4 space-y-2.5">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#8C3318]">
+                  Reinicio Total desde 0
+                </h3>
+                <p className="mt-0.5 text-xs text-[#6D4735]">
+                  Limpia todos los prospectos, métricas e historial QR (protegido con Contraseña Maestra).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenMasterReset}
+                className="inline-flex items-center gap-1.5 rounded-full bg-[#B84A27] px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#9D3B1B] transition-colors cursor-pointer"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Poner todo en 0
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Cybersecurity & 2-Filter Credentials Vault */}
