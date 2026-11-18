@@ -66,7 +66,7 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
   const isSelected = selectedIndex === index;
   const anotherSelected = selectedIndex !== null && !isSelected;
   const palette = resolveBoxPalette(giftTheme, customBoxColor, index);
-  const roman = ['I', 'II', 'III', 'IV', 'V', 'VI'][index] || String(index + 1);
+  const roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'][index] || String(index + 1);
 
   // Unique per-card SVG gradient & filter IDs so multi-card renders never collide
   const goldRibId = `goldRib-${uid}`;
@@ -439,7 +439,7 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
   const boxGifts = useMemo(() => {
     const pool = activeGifts.length > 0 ? activeGifts : [];
     if (pool.length === 0) return [];
-    const targetCount = Math.min(6, Math.max(4, pool.length));
+    const targetCount = Math.min(9, Math.max(4, pool.length));
     const orderedPool = randomizeGifts ? cryptoShuffle(pool) : pool;
     const result: GiftItem[] = [];
     for (let i = 0; i < targetCount; i++) {

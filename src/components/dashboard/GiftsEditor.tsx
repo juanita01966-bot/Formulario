@@ -23,6 +23,7 @@ import {
   GiftIllustration,
   OFFICIAL_ROYAL_PNG_GALLERY,
   SHOWCASE_STYLE_OPTIONS,
+  StudioPlinthBase,
   resolveGiftUsageTip,
   resolveShowcaseTokens,
 } from '../gifts/GiftIllustration';
@@ -220,11 +221,11 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
       }`}
     >
       <div>
-        {/* Miniature Luminous Base Floating Showcase Stage */}
+        {/* Miniature Realistic Showroom Plinth Stage */}
         <div
           onMouseMove={handleStageMouseMove}
           onMouseLeave={handleStageMouseLeave}
-          className={`relative h-44 sm:h-48 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-end pb-3.5 pt-4 ${
+          className={`relative h-44 sm:h-48 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-end pb-3 pt-4 ${
             gift.active
               ? `${tokens.stageBorder} shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_12px_26px_-14px_rgba(15,8,4,0.6)]`
               : 'border-stone-300 opacity-70 grayscale-[0.4]'
@@ -235,25 +236,6 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
               : 'radial-gradient(circle at 50% 45%, #44403C, #1C1917 75%)',
           }}
         >
-          {/* Ascending spotlight rays behind product */}
-          {gift.active && (
-            <>
-              <motion.div
-                aria-hidden="true"
-                style={{
-                  opacity: auraOpacity,
-                  background: tokens.rayGradient,
-                  clipPath: 'polygon(24% 100%, 76% 100%, 100% 0%, 0% 0%)',
-                }}
-                className="pointer-events-none absolute bottom-8 left-1/2 -translate-x-1/2 h-32 w-40 blur-lg will-change-transform"
-              />
-              <div
-                aria-hidden="true"
-                className={`pointer-events-none absolute top-4 h-24 w-24 rounded-full border ${tokens.haloBorder}`}
-              />
-            </>
-          )}
-
           {/* Interactive cursor radial spotlight */}
           <div
             aria-hidden="true"
@@ -286,21 +268,23 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
             </button>
           </div>
 
-          {/* Ambient glowing aura synced with float */}
-          <motion.div
-            aria-hidden="true"
-            style={{
-              scale: auraScale,
-              opacity: auraOpacity,
-              background: `radial-gradient(circle, ${tokens.auraCore} 0%, ${accent}30 48%, transparent 74%)`,
-            }}
-            className="pointer-events-none absolute top-4 h-28 w-28 rounded-full blur-xl will-change-transform"
-          />
+          {/* Soft overhead gallery key-light behind product */}
+          {gift.active && (
+            <motion.div
+              aria-hidden="true"
+              style={{
+                scale: auraScale,
+                opacity: auraOpacity,
+                background: `radial-gradient(ellipse at 50% 42%, ${tokens.auraCore} 0%, ${accent}22 50%, transparent 74%)`,
+              }}
+              className="pointer-events-none absolute top-3 h-32 w-36 rounded-full blur-xl will-change-transform"
+            />
+          )}
 
-          {/* Floating Transparent PNG Gift Artwork with 3D Interactive Tilt */}
+          {/* Frameless Transparent PNG Gift Artwork with 3D Interactive Tilt */}
           <motion.div
             style={{ y: giftY }}
-            className="relative z-20 mb-1 flex items-center justify-center will-change-transform"
+            className="relative z-20 mb-0 flex items-center justify-center will-change-transform"
           >
             <div
               style={{
@@ -320,42 +304,14 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
             </div>
           </motion.div>
 
-          {/* Miniature Multi-Layered Luminous Pedestal Base */}
-          <div className="relative z-10 -mt-1 flex flex-col items-center justify-center">
-            <motion.div
-              aria-hidden="true"
-              style={{
-                scaleX: shadowScaleX,
-                scaleY: shadowScaleY,
-                opacity: shadowOpacity,
-              }}
-              className="relative z-30 -mb-1.5 h-2.5 w-20 rounded-full bg-gradient-to-r from-transparent via-black/95 to-transparent blur-[3px] will-change-transform"
-            />
-            <div
-              aria-hidden="true"
-              style={{ background: tokens.glassPlatformBg }}
-              className={`relative z-20 h-5 w-32 rounded-[999px] border ${tokens.glassPlatformBorder} backdrop-blur-sm shadow-[0_6px_16px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.75)]`}
-            >
-              <div className="pointer-events-none absolute inset-x-4 top-0.5 h-px rounded-full bg-gradient-to-r from-transparent via-white/90 to-transparent" />
-            </div>
-            <motion.div
-              aria-hidden="true"
-              style={{
-                opacity: auraOpacity,
-                boxShadow: tokens.plasmaRingShadow,
-              }}
-              className={`relative z-10 -mt-3.5 h-6 w-36 rounded-[999px] border ${tokens.plasmaRingBorder} will-change-transform`}
-            />
-            <motion.div
-              aria-hidden="true"
-              style={{
-                scale: auraScale,
-                opacity: auraOpacity,
-                background: tokens.energyDiscGradient,
-              }}
-              className="pointer-events-none -mt-3 h-5 w-40 rounded-full blur-md will-change-transform"
-            />
-          </div>
+          {/* Realistic Architectural Plinth */}
+          <StudioPlinthBase
+            showcaseStyle={showcaseStyle}
+            size="sm"
+            shadowScaleX={shadowScaleX}
+            shadowScaleY={shadowScaleY}
+            shadowOpacity={shadowOpacity}
+          />
         </div>
 
         {/* Gift Copy */}
@@ -886,37 +842,26 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 className="flex flex-col sm:flex-row sm:items-center gap-4 rounded-2xl border border-[#DFCBB3] bg-[#FAF3E8]/70 p-3.5 shadow-inner"
               >
                 <div
-                  className={`relative flex h-28 w-full sm:w-28 shrink-0 flex-col items-center justify-end overflow-hidden rounded-2xl border pb-2.5 pt-2 ${activeShowcaseTokens.stageBorder} shadow-[0_12px_26px_-10px_rgba(15,8,4,0.55)]`}
+                  className={`relative flex h-28 w-full sm:w-28 shrink-0 flex-col items-center justify-end overflow-hidden rounded-2xl border pb-2 pt-2 ${activeShowcaseTokens.stageBorder} shadow-[0_12px_26px_-10px_rgba(15,8,4,0.55)]`}
                   style={{ background: activeShowcaseTokens.miniStageBg }}
                 >
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 h-20 w-24 blur-md opacity-80"
+                    className="pointer-events-none absolute top-2 h-20 w-20 rounded-full blur-lg opacity-80"
                     style={{
-                      background: activeShowcaseTokens.rayGradient,
-                      clipPath: 'polygon(24% 100%, 76% 100%, 100% 0%, 0% 0%)',
+                      background: `radial-gradient(ellipse at 50% 45%, ${activeShowcaseTokens.auraCore} 0%, transparent 74%)`,
                     }}
                   />
-                  <div className="relative z-20 -mb-1">
+                  <div className="relative z-20 -mb-0.5">
                     <GiftIllustration
                       visualKey={draft.visualKey}
                       customImageUrl={draft.customImageUrl}
                       accentColor={draft.accentColor}
-                      size={66}
+                      size={64}
                       variant="clean"
-                      floating
                     />
                   </div>
-                  <div
-                    aria-hidden="true"
-                    style={{ background: activeShowcaseTokens.glassPlatformBg }}
-                    className={`relative z-10 h-3.5 w-20 rounded-[999px] border ${activeShowcaseTokens.glassPlatformBorder}`}
-                  />
-                  <div
-                    aria-hidden="true"
-                    style={{ boxShadow: activeShowcaseTokens.plasmaRingShadow }}
-                    className={`relative z-0 -mt-2.5 h-4 w-24 rounded-[999px] border ${activeShowcaseTokens.plasmaRingBorder} opacity-85`}
-                  />
+                  <StudioPlinthBase showcaseStyle={showcaseStyle} size="xs" />
                 </div>
 
                 <div className="min-w-0 flex-1 space-y-1">

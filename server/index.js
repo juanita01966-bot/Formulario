@@ -1964,6 +1964,7 @@ app.delete('/api/qr/:id', requireDsbAuth, requireAdminRole, async (req, res) => 
   }
 });
 
+
 if (!IS_VERCEL && fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
   app.use(express.static(DIST_DIR));
   app.get('*', (_req, res) => {

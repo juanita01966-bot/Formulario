@@ -8,7 +8,7 @@ import { QualificationQuiz } from '../components/referral/QualificationQuiz';
 import { CustomLoader } from '../components/referral/CustomLoader';
 import { MysteryCardsMenu } from '../components/referral/MysteryCardsMenu';
 import { GiftRevealStage } from '../components/referral/GiftRevealStage';
-import { WelcomeOrbGuide } from '../components/referral/WelcomeOrbGuide';
+import { WelcomeSceneGate } from '../components/referral/WelcomeSceneGate';
 
 type FlowStep = 'form' | 'quiz' | 'loading' | 'cards' | 'reveal';
 
@@ -133,7 +133,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
         </AnimatePresence>
       </main>
 
-      <WelcomeOrbGuide currentStep={step} leadName={currentLead?.name} />
+      <WelcomeSceneGate />
 
       {/* Strictly public footer with zero reference to /#/dsb */}
       <footer className="relative z-10 mt-8 text-center text-[11px] text-[#8B6F5B]">

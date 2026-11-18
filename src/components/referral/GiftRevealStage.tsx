@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion';
-import { CheckCircle2, MapPin, MessageCircle, RotateCcw, Sparkles, User } from 'lucide-react';
+import { MapPin, MessageCircle, RotateCcw, Sparkles, User } from 'lucide-react';
 import type { GiftItem, GiftThemeId, ShowcaseStyleId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
-import { GiftIllustration, resolveGiftUsageTip, resolveShowcaseTokens } from '../gifts/GiftIllustration';
+import {
+  GiftIllustration,
+  StudioPlinthBase,
+  resolveGiftUsageTip,
+  resolveShowcaseTokens,
+} from '../gifts/GiftIllustration';
 
 interface GiftRevealStageProps {
   leadName: string;
@@ -235,12 +240,12 @@ const RevealedGiftShowcase: React.FC<{
   const [spotlight, setSpotlight] = useState({ x: 50, y: 38, active: false });
 
   const lift = useMotionValue(0);
-  const giftY = useTransform(lift, [0, 1], [0, -10]);
-  const shadowScaleX = useTransform(lift, [0, 1], [1, 0.72]);
-  const shadowScaleY = useTransform(lift, [0, 1], [1, 0.76]);
-  const shadowOpacity = useTransform(lift, [0, 1], [0.74, 0.28]);
-  const auraScale = useTransform(lift, [0, 1], [0.94, 1.16]);
-  const auraOpacity = useTransform(lift, [0, 1], [0.55, 0.9]);
+  const giftY = useTransform(lift, [0, 1], [0, -4]);
+  const shadowScaleX = useTransform(lift, [0, 1], [1, 0.88]);
+  const shadowScaleY = useTransform(lift, [0, 1], [1, 0.9]);
+  const shadowOpacity = useTransform(lift, [0, 1], [0.78, 0.56]);
+  const auraScale = useTransform(lift, [0, 1], [0.97, 1.05]);
+  const auraOpacity = useTransform(lift, [0, 1], [0.75, 0.95]);
 
   useEffect(() => {
     const controls = animate(lift, [0, 1, 0], {
@@ -281,8 +286,8 @@ const RevealedGiftShowcase: React.FC<{
       transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      style={{ background: tokens.stageBg }}
-      className={`relative mb-5 flex h-[282px] sm:h-[304px] w-full max-w-[336px] sm:max-w-[376px] flex-col items-center justify-end overflow-hidden rounded-[28px] border ${tokens.stageBorder} px-4 pt-6 pb-5 perspective-1000 shadow-[0_24px_54px_-14px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.28)]`}
+      style={{ background: tokens.revealGlassBg }}
+      className={`relative mb-5 flex h-[282px] sm:h-[304px] w-full max-w-[336px] sm:max-w-[376px] flex-col items-center justify-end overflow-hidden rounded-[28px] border ${tokens.stageBorder} backdrop-blur-md px-4 pt-6 pb-5 perspective-1000 shadow-[0_24px_54px_-14px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.28)]`}
     >
       {/* Top specular highlight hairline */}
       <div
@@ -300,47 +305,21 @@ const RevealedGiftShowcase: React.FC<{
         }}
       />
 
-      {/* Soft vertical ascending spotlight rays wrapping behind the floating PNG */}
-      <motion.div
-        aria-hidden="true"
-        style={{
-          opacity: auraOpacity,
-          background: tokens.rayGradient,
-          clipPath: 'polygon(24% 100%, 76% 100%, 100% 0%, 0% 0%)',
-        }}
-        className="pointer-events-none absolute bottom-14 left-1/2 -translate-x-1/2 h-52 w-60 blur-xl will-change-transform"
-      />
-      <motion.div
-        aria-hidden="true"
-        style={{
-          opacity: auraOpacity,
-          background: tokens.rayCoreGradient,
-          clipPath: 'polygon(22% 100%, 78% 100%, 96% 0%, 4% 0%)',
-        }}
-        className="pointer-events-none absolute bottom-14 left-1/2 -translate-x-1/2 h-44 w-36 blur-md will-change-transform"
-      />
-
-      {/* Luminous studio radial halo behind floating product */}
+      {/* Soft overhead gallery key-light wash behind the product */}
       <motion.div
         aria-hidden="true"
         style={{
           scale: auraScale,
           opacity: auraOpacity,
-          background: `radial-gradient(circle, ${tokens.auraCore} 0%, ${accent}38 50%, transparent 76%)`,
+          background: `radial-gradient(ellipse at 50% 42%, ${tokens.auraCore} 0%, ${accent}22 48%, transparent 76%)`,
         }}
-        className="pointer-events-none absolute top-9 h-44 w-44 rounded-full blur-2xl will-change-transform"
+        className="pointer-events-none absolute top-4 h-52 w-64 rounded-full blur-2xl will-change-transform"
       />
 
-      {/* Subtle crystalline orbital ring behind the floating gift */}
-      <div
-        aria-hidden="true"
-        className={`pointer-events-none absolute top-11 h-40 w-40 sm:h-44 sm:w-44 rounded-full border ${tokens.haloBorder}`}
-      />
-
-      {/* Levitating Frameless Transparent PNG Product */}
+      {/* Frameless Transparent PNG Product Resting on Realistic Studio Plinth */}
       <motion.div
         style={{ y: giftY }}
-        className="relative z-20 mb-2 flex items-center justify-center will-change-transform"
+        className="relative z-20 mb-0 flex items-center justify-center will-change-transform"
       >
         <div
           style={{
@@ -353,61 +332,22 @@ const RevealedGiftShowcase: React.FC<{
             visualKey={gift.visualKey}
             customImageUrl={gift.customImageUrl}
             accentColor={accent}
-            size={156}
-            className="sm:!w-[172px] sm:!h-[172px]"
+            size={158}
+            className="sm:!w-[174px] sm:!h-[174px]"
             variant="clean"
             alt={gift.name}
           />
         </div>
       </motion.div>
 
-      {/* Multi-layered Luminous Pedestal Base */}
-      <div className="relative z-10 -mt-2 flex flex-col items-center justify-center">
-        {/* 1. Inverse-scaled oval contact shadow right on the luminous glass disc */}
-        <motion.div
-          aria-hidden="true"
-          style={{
-            scaleX: shadowScaleX,
-            scaleY: shadowScaleY,
-            opacity: shadowOpacity,
-          }}
-          className="relative z-30 -mb-2.5 h-3.5 w-32 sm:w-36 rounded-full bg-gradient-to-r from-transparent via-black/95 to-transparent blur-[4px] will-change-transform"
-        />
-
-        {/* 2. Glass platform with bright specular rim */}
-        <div
-          aria-hidden="true"
-          style={{ background: tokens.glassPlatformBg }}
-          className={`relative z-20 h-8 w-48 sm:w-56 rounded-[999px] border ${tokens.glassPlatformBorder} backdrop-blur-md shadow-[0_8px_24px_rgba(0,0,0,0.45),inset_0_1px_1px_rgba(255,255,255,0.82)]`}
-        >
-          <div className="pointer-events-none absolute inset-x-7 top-0.5 h-px rounded-full bg-gradient-to-r from-transparent via-white/95 to-transparent" />
-          {/* Inner concentric plasma ring resting on platform */}
-          <div
-            className={`pointer-events-none absolute inset-x-5 inset-y-1.5 rounded-[999px] border ${tokens.plasmaInnerBorder}`}
-          />
-        </div>
-
-        {/* 3. Concentric luminous neon plasma ring framing the pedestal */}
-        <motion.div
-          aria-hidden="true"
-          style={{
-            opacity: auraOpacity,
-            boxShadow: tokens.plasmaRingShadow,
-          }}
-          className={`relative z-10 -mt-6 h-10 w-60 sm:w-64 rounded-[999px] border-2 ${tokens.plasmaRingBorder} will-change-transform`}
-        />
-
-        {/* 4. Bottom glowing energy disc */}
-        <motion.div
-          aria-hidden="true"
-          style={{
-            scale: auraScale,
-            opacity: auraOpacity,
-            background: tokens.energyDiscGradient,
-          }}
-          className="pointer-events-none -mt-5 h-9 w-64 sm:w-72 rounded-full blur-xl will-change-transform"
-        />
-      </div>
+      {/* Realistic Architectural Stone / Wood Showroom Plinth */}
+      <StudioPlinthBase
+        showcaseStyle={showcaseStyle}
+        size="lg"
+        shadowScaleX={shadowScaleX}
+        shadowScaleY={shadowScaleY}
+        shadowOpacity={shadowOpacity}
+      />
     </motion.div>
   );
 };
@@ -632,9 +572,10 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       className="relative w-full max-w-[560px] mx-auto"
     >
       <div
-        className="relative overflow-hidden rounded-[34px] border border-[#C88A2B]/55 border-t-[#FDE68A]/55 shadow-[0_30px_80px_-15px_rgba(34,21,14,0.78),inset_0_1px_0_rgba(254,240,138,0.24)] px-5 py-8 sm:px-9 sm:py-10 text-center text-[#FAF3E8]"
+        className="relative overflow-hidden rounded-[34px] border border-[#C88A2B]/50 border-t-[#FDE68A]/55 backdrop-blur-xl shadow-[0_30px_80px_-15px_rgba(34,21,14,0.68),inset_0_1px_0_rgba(254,240,138,0.24)] px-5 py-8 sm:px-9 sm:py-10 text-center text-[#FAF3E8]"
         style={{
-          background: 'radial-gradient(ellipse at 50% 18%, #3B1F13 0%, #1C0D07 52%, #110703 100%)',
+          background:
+            'radial-gradient(ellipse at 50% 18%, rgba(59, 31, 19, 0.78) 0%, rgba(28, 13, 7, 0.84) 52%, rgba(17, 7, 3, 0.88) 100%)',
         }}
       >
         {/* Architectural stage horizon rings & diagonal warm studio spotlights */}
@@ -704,13 +645,10 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#C88A2B]/65" />
               </div>
 
-              {/* Luminous Floating Product on Multi-Layered Pedestal */}
+              {/* Realistic Architectural Plinth Showcase */}
               <RevealedGiftShowcase gift={gift} showcaseStyle={showcaseStyle} />
 
-              <p className="inline-flex items-center rounded-full border border-[#C88A2B]/35 bg-[#2A160C]/80 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-[#E8C589]">
-                {gift.tag}
-              </p>
-              <h2 className="mt-2.5 font-serif text-2xl sm:text-[31px] font-semibold text-[#FFFDF9] leading-tight">
+              <h2 className="mt-1 font-serif text-2xl sm:text-[31px] font-semibold text-[#FFFDF9] leading-tight">
                 {gift.name}
               </h2>
               <p className="mt-2 max-w-md text-xs sm:text-sm leading-relaxed text-[#DECAB4]">
@@ -718,7 +656,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
               </p>
 
               {/* Dedicated "Máximo Provecho" Card Strip */}
-              <div className="mt-5 w-full rounded-2xl border border-[#E5AE4E]/30 bg-gradient-to-br from-[#2B170D]/90 via-[#1E0F08]/95 to-[#150A05]/95 px-4 py-3.5 text-left shadow-[inset_0_1px_0_rgba(254,240,138,0.16)]">
+              <div className="mt-5 w-full rounded-2xl border border-[#E5AE4E]/30 bg-gradient-to-br from-[#2B170D]/68 via-[#1E0F08]/74 to-[#150A05]/78 backdrop-blur-md px-4 py-3.5 text-left shadow-[inset_0_1px_0_rgba(254,240,138,0.16)]">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#E5AE4E]/15 border border-[#F4CA73]/40">
                     <Sparkles className="h-3 w-3 text-[#F4CA73]" />
@@ -733,20 +671,14 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
               </div>
 
               {/* Refined Folio & Delivery Information Card */}
-              <div className="mt-4 w-full rounded-2xl bg-[#160B06]/90 border border-[#C88A2B]/35 px-4 sm:px-5 py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="text-center sm:text-left">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#B89B7A]">
-                      Folio de reclamación
-                    </p>
-                    <p className="mt-0.5 font-mono text-xl sm:text-2xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
-                      {claimCode}
-                    </p>
-                  </div>
-                  <div className="inline-flex items-center justify-center gap-2 self-center sm:self-auto rounded-full border border-emerald-400/35 bg-emerald-950/65 px-3.5 py-1.5 text-xs font-semibold text-emerald-200">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                    Confirmado · Royal Prestige
-                  </div>
+              <div className="mt-4 w-full rounded-2xl bg-[#160B06]/68 backdrop-blur-md border border-[#C88A2B]/35 px-4 sm:px-5 py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                <div className="text-center sm:text-left">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#B89B7A]">
+                    Folio de reclamación
+                  </p>
+                  <p className="mt-0.5 font-mono text-xl sm:text-2xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
+                    {claimCode}
+                  </p>
                 </div>
 
                 <div className="mt-3.5 pt-3 border-t border-[#C88A2B]/20 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">

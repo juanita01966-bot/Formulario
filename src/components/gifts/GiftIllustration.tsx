@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, type MotionValue } from 'framer-motion';
 import type { GiftItem, GiftVisualKey, ShowcaseStyleId } from '../../types/app';
 
 export interface ShowcasePedestalTokens {
@@ -8,102 +8,200 @@ export interface ShowcasePedestalTokens {
   subtitle: string;
   swatches: [string, string, string];
   stageBg: string;
+  revealGlassBg: string;
+  miniStageBg: string;
   stageBorder: string;
   spotlightTint: string;
-  rayGradient: string;
-  rayCoreGradient: string;
   auraCore: string;
-  haloBorder: string;
-  plasmaRingBorder: string;
-  plasmaRingShadow: string;
-  plasmaInnerBorder: string;
-  glassPlatformBg: string;
-  glassPlatformBorder: string;
-  energyDiscGradient: string;
-  miniStageBg: string;
+  plinthTopBg: string;
+  plinthRimClass: string;
+  plinthSideBg: string;
+  plinthTrimBg: string;
+  plinthEmissiveCore: string;
+  plinthUpwashGradient: string;
 }
 
 export const SHOWCASE_STYLE_OPTIONS: ShowcasePedestalTokens[] = [
   {
     id: 'luminous-gold',
-    name: 'Dorado Imperial',
-    subtitle: 'Base lumínica en oro 24k, champán y haz cálido de galería',
-    swatches: ['#FEF08A', '#E5AE4E', '#3A1F11'],
-    stageBg: 'radial-gradient(115% 95% at 50% 18%, #3B2012 0%, #1C0E08 55%, #0E0603 100%)',
-    stageBorder: 'border-[#FDE68A]/40 border-t-[#FEF08A]/70',
-    spotlightTint: 'rgba(254, 240, 138, 0.22)',
-    rayGradient:
-      'linear-gradient(to top, rgba(253, 224, 71, 0.34) 0%, rgba(229, 174, 78, 0.14) 55%, transparent 100%)',
-    rayCoreGradient:
-      'linear-gradient(to top, rgba(255, 251, 235, 0.42) 0%, rgba(254, 240, 138, 0.14) 60%, transparent 100%)',
-    auraCore: 'rgba(254, 240, 138, 0.48)',
-    haloBorder: 'border-[#FEF08A]/22',
-    plasmaRingBorder: 'border-[#FDE047]/80',
-    plasmaRingShadow:
-      '0 0 26px rgba(253, 224, 71, 0.56), inset 0 0 14px rgba(254, 240, 138, 0.42)',
-    plasmaInnerBorder: 'border-[#FFFBEB]/55',
-    glassPlatformBg:
-      'linear-gradient(180deg, rgba(255, 251, 235, 0.42) 0%, rgba(229, 174, 78, 0.24) 52%, rgba(36, 17, 9, 0.8) 100%)',
-    glassPlatformBorder: 'border-[#FEF08A]/70',
-    energyDiscGradient:
-      'radial-gradient(ellipse at center, rgba(253, 224, 71, 0.72) 0%, rgba(200, 138, 43, 0.3) 50%, transparent 78%)',
-    miniStageBg: 'radial-gradient(115% 95% at 50% 20%, #341C10 0%, #1B0D07 60%, #100704 100%)',
+    name: 'Travertino & Oro',
+    subtitle: 'Pedestal en mármol travertino cálido, filete en latón cepillado y luz de estudio',
+    swatches: ['#EFE4D1', '#C88A2B', '#2A180E'],
+    stageBg:
+      'radial-gradient(95% 75% at 50% 8%, #472917 0%, #24130A 52%, #130905 100%)',
+    revealGlassBg:
+      'radial-gradient(95% 75% at 50% 8%, rgba(82, 47, 26, 0.48) 0%, rgba(40, 21, 11, 0.56) 54%, rgba(20, 10, 5, 0.64) 100%)',
+    miniStageBg:
+      'radial-gradient(100% 80% at 50% 10%, #402514 0%, #211109 58%, #130905 100%)',
+    stageBorder: 'border-[#DFC498]/35 border-t-[#F6E4C1]/60',
+    spotlightTint: 'rgba(255, 244, 219, 0.16)',
+    auraCore: 'rgba(246, 223, 180, 0.24)',
+    plinthTopBg:
+      'radial-gradient(120% 95% at 38% 30%, #FBF6ED 0%, #E7D7BE 48%, #B79C79 86%, #8C6D4B 100%)',
+    plinthRimClass: 'border-[#FFF9EE]/75 border-b-[#9A7A54]/70',
+    plinthSideBg:
+      'linear-gradient(90deg, #4E3924 0%, #8A6B4A 22%, #D4BC9B 45%, #EFE1CA 56%, #9E7D58 78%, #4A3621 100%)',
+    plinthTrimBg:
+      'linear-gradient(90deg, #6E4A16 0%, #E5AE4E 35%, #FFF6D6 52%, #C88A2B 75%, #5C3D10 100%)',
+    plinthEmissiveCore: 'rgba(255, 244, 214, 0.72)',
+    plinthUpwashGradient:
+      'linear-gradient(to top, rgba(254, 236, 179, 0.42) 0%, rgba(229, 174, 78, 0.16) 52%, transparent 100%)',
   },
   {
     id: 'crystal-aurora',
-    name: 'Cristal Aurora',
-    subtitle: 'Halo cristalino en cian hielo, perla y destello áureo',
-    swatches: ['#67E8F9', '#FEF08A', '#0F2430'],
-    stageBg: 'radial-gradient(115% 95% at 50% 18%, #163341 0%, #0D1B24 55%, #070E14 100%)',
-    stageBorder: 'border-[#A5F3FC]/40 border-t-[#ECFEFF]/75',
-    spotlightTint: 'rgba(103, 232, 249, 0.22)',
-    rayGradient:
-      'linear-gradient(to top, rgba(34, 211, 238, 0.32) 0%, rgba(254, 240, 138, 0.13) 56%, transparent 100%)',
-    rayCoreGradient:
-      'linear-gradient(to top, rgba(236, 254, 255, 0.42) 0%, rgba(165, 243, 252, 0.14) 60%, transparent 100%)',
-    auraCore: 'rgba(103, 232, 249, 0.42)',
-    haloBorder: 'border-[#A5F3FC]/24',
-    plasmaRingBorder: 'border-[#67E8F9]/85',
-    plasmaRingShadow:
-      '0 0 28px rgba(34, 211, 238, 0.54), inset 0 0 14px rgba(254, 240, 138, 0.36)',
-    plasmaInnerBorder: 'border-[#FEF08A]/50',
-    glassPlatformBg:
-      'linear-gradient(180deg, rgba(236, 254, 255, 0.42) 0%, rgba(103, 232, 249, 0.22) 52%, rgba(11, 27, 38, 0.82) 100%)',
-    glassPlatformBorder: 'border-[#A5F3FC]/70',
-    energyDiscGradient:
-      'radial-gradient(ellipse at center, rgba(34, 211, 238, 0.65) 0%, rgba(250, 204, 21, 0.22) 52%, transparent 78%)',
-    miniStageBg: 'radial-gradient(115% 95% at 50% 20%, #15303D 0%, #0C1A23 60%, #070E14 100%)',
+    name: 'Pizarra & Acero',
+    subtitle: 'Pedestal en piedra pizarra mate con bisel de acero cepillado e iluminación neutra',
+    swatches: ['#CBD5E1', '#64748B', '#181C22'],
+    stageBg:
+      'radial-gradient(95% 75% at 50% 8%, #2E343D 0%, #191D23 54%, #0E1014 100%)',
+    revealGlassBg:
+      'radial-gradient(95% 75% at 50% 8%, rgba(54, 62, 74, 0.48) 0%, rgba(28, 33, 41, 0.58) 54%, rgba(15, 18, 23, 0.66) 100%)',
+    miniStageBg:
+      'radial-gradient(100% 80% at 50% 10%, #2A3038 0%, #171A20 58%, #0E1014 100%)',
+    stageBorder: 'border-slate-300/25 border-t-slate-100/50',
+    spotlightTint: 'rgba(241, 245, 249, 0.15)',
+    auraCore: 'rgba(226, 232, 240, 0.2)',
+    plinthTopBg:
+      'radial-gradient(120% 95% at 38% 30%, #E2E8F0 0%, #94A3B8 46%, #475569 84%, #1E293B 100%)',
+    plinthRimClass: 'border-white/55 border-b-slate-900/75',
+    plinthSideBg:
+      'linear-gradient(90deg, #1E242B 0%, #3E4854 24%, #7A8696 46%, #94A0B0 55%, #47525F 78%, #1B2027 100%)',
+    plinthTrimBg:
+      'linear-gradient(90deg, #334155 0%, #CBD5E1 38%, #F8FAFC 52%, #94A3B8 74%, #1E293B 100%)',
+    plinthEmissiveCore: 'rgba(248, 250, 252, 0.65)',
+    plinthUpwashGradient:
+      'linear-gradient(to top, rgba(226, 232, 240, 0.36) 0%, rgba(148, 163, 184, 0.14) 52%, transparent 100%)',
   },
   {
     id: 'royal-ember',
-    name: 'Brasa Real',
-    subtitle: 'Energía ámbar cobrizo y resplandor rubí de alta cocina',
-    swatches: ['#FB923C', '#F43F5E', '#2A0B10'],
-    stageBg: 'radial-gradient(115% 95% at 50% 18%, #3F1517 0%, #200A0D 55%, #0F0406 100%)',
-    stageBorder: 'border-[#FDBA74]/40 border-t-[#FED7AA]/70',
-    spotlightTint: 'rgba(251, 146, 60, 0.22)',
-    rayGradient:
-      'linear-gradient(to top, rgba(249, 115, 22, 0.34) 0%, rgba(244, 63, 94, 0.14) 56%, transparent 100%)',
-    rayCoreGradient:
-      'linear-gradient(to top, rgba(255, 247, 237, 0.4) 0%, rgba(253, 186, 116, 0.15) 60%, transparent 100%)',
-    auraCore: 'rgba(251, 146, 60, 0.44)',
-    haloBorder: 'border-[#FDBA74]/22',
-    plasmaRingBorder: 'border-[#FB923C]/85',
-    plasmaRingShadow:
-      '0 0 28px rgba(244, 63, 94, 0.5), inset 0 0 14px rgba(253, 186, 116, 0.44)',
-    plasmaInnerBorder: 'border-[#FFE4E6]/50',
-    glassPlatformBg:
-      'linear-gradient(180deg, rgba(255, 247, 237, 0.38) 0%, rgba(234, 88, 12, 0.24) 52%, rgba(41, 10, 15, 0.84) 100%)',
-    glassPlatformBorder: 'border-[#FDBA74]/70',
-    energyDiscGradient:
-      'radial-gradient(ellipse at center, rgba(249, 115, 22, 0.68) 0%, rgba(225, 29, 72, 0.28) 52%, transparent 78%)',
-    miniStageBg: 'radial-gradient(115% 95% at 50% 20%, #391315 0%, #1D090C 60%, #0F0406 100%)',
+    name: 'Nogal & Bronce',
+    subtitle: 'Pedestal en madera nogal americana con collarín de bronce bruñido y luz cálida',
+    swatches: ['#A87551', '#784427', '#241109'],
+    stageBg:
+      'radial-gradient(95% 75% at 50% 8%, #412115 0%, #22100A 54%, #110704 100%)',
+    revealGlassBg:
+      'radial-gradient(95% 75% at 50% 8%, rgba(74, 37, 23, 0.48) 0%, rgba(36, 17, 10, 0.58) 54%, rgba(18, 8, 5, 0.66) 100%)',
+    miniStageBg:
+      'radial-gradient(100% 80% at 50% 10%, #3B1E13 0%, #1F0E08 58%, #100704 100%)',
+    stageBorder: 'border-[#C8936E]/35 border-t-[#EBC4A6]/55',
+    spotlightTint: 'rgba(255, 235, 214, 0.16)',
+    auraCore: 'rgba(235, 190, 148, 0.22)',
+    plinthTopBg:
+      'radial-gradient(120% 95% at 38% 30%, #D9AD89 0%, #A7704B 48%, #6D4026 84%, #422313 100%)',
+    plinthRimClass: 'border-[#F7DFC9]/65 border-b-[#3A1E0F]/80',
+    plinthSideBg:
+      'linear-gradient(90deg, #2D170B 0%, #59331E 22%, #915B3A 45%, #A66E4B 56%, #5D361F 78%, #291409 100%)',
+    plinthTrimBg:
+      'linear-gradient(90deg, #4B2814 0%, #C68642 36%, #FCE7C8 52%, #A86B32 74%, #3D1F0E 100%)',
+    plinthEmissiveCore: 'rgba(255, 228, 196, 0.68)',
+    plinthUpwashGradient:
+      'linear-gradient(to top, rgba(251, 191, 134, 0.38) 0%, rgba(198, 134, 66, 0.15) 52%, transparent 100%)',
   },
 ];
 
 export function resolveShowcaseTokens(styleId?: ShowcaseStyleId): ShowcasePedestalTokens {
   return SHOWCASE_STYLE_OPTIONS.find((item) => item.id === styleId) || SHOWCASE_STYLE_OPTIONS[0];
 }
+
+export const StudioPlinthBase: React.FC<{
+  showcaseStyle?: ShowcaseStyleId;
+  size?: 'lg' | 'sm' | 'xs';
+  shadowScaleX?: MotionValue<number> | number;
+  shadowScaleY?: MotionValue<number> | number;
+  shadowOpacity?: MotionValue<number> | number;
+}> = ({
+  showcaseStyle = 'luminous-gold',
+  size = 'lg',
+  shadowScaleX = 1,
+  shadowScaleY = 1,
+  shadowOpacity = 0.72,
+}) => {
+  const tokens = resolveShowcaseTokens(showcaseStyle);
+
+  const dims =
+    size === 'lg'
+      ? {
+          wrap: '-mt-2',
+          shadow: '-mb-3.5 h-3.5 w-32 sm:w-40 blur-[5px]',
+          upwash: '-top-14 h-20 w-44 sm:w-52 blur-xl',
+          recessed: 'inset-x-9 top-1.5 h-3 blur-[4px]',
+          top: 'h-9 w-52 sm:w-64',
+          side: '-mt-4 h-6 sm:h-7 w-52 sm:w-64',
+          floor: '-mt-2.5 h-5 w-60 sm:w-72 blur-lg',
+        }
+      : size === 'sm'
+        ? {
+            wrap: '-mt-1',
+            shadow: '-mb-2 h-2.5 w-20 blur-[3.5px]',
+            upwash: '-top-9 h-12 w-28 blur-lg',
+            recessed: 'inset-x-5 top-1 h-2 blur-[3px]',
+            top: 'h-5 w-32',
+            side: '-mt-2.5 h-4 w-32',
+            floor: '-mt-1.5 h-3 w-36 blur-md',
+          }
+        : {
+            wrap: '-mt-0.5',
+            shadow: '-mb-1.5 h-1.5 w-12 blur-[2px]',
+            upwash: '-top-6 h-8 w-16 blur-md',
+            recessed: 'inset-x-3 top-0.5 h-1.5 blur-[2px]',
+            top: 'h-3.5 w-20',
+            side: '-mt-1.5 h-2.5 w-20',
+            floor: '-mt-1 h-2 w-24 blur-sm',
+          };
+
+  return (
+    <div className={`relative z-10 flex flex-col items-center justify-center ${dims.wrap}`}>
+      {/* Subtle soft museum uplight gently rising from the top surface of the plinth */}
+      <motion.div
+        aria-hidden="true"
+        animate={{ opacity: [0.62, 0.92, 0.62] }}
+        transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ background: tokens.plinthUpwashGradient }}
+        className={`pointer-events-none absolute left-1/2 -translate-x-1/2 z-[15] rounded-t-full ${dims.upwash}`}
+      />
+
+      {/* Grounded contact ambient-occlusion shadow directly beneath product */}
+      <motion.div
+        aria-hidden="true"
+        style={{ scaleX: shadowScaleX, scaleY: shadowScaleY, opacity: shadowOpacity }}
+        className={`relative z-30 rounded-full bg-gradient-to-r from-transparent via-black/95 to-transparent will-change-transform ${dims.shadow}`}
+      />
+
+      {/* Top flat architectural surface of the circular plinth */}
+      <div
+        aria-hidden="true"
+        style={{ background: tokens.plinthTopBg }}
+        className={`relative z-20 rounded-[999px] border ${tokens.plinthRimClass} shadow-[0_6px_16px_rgba(0,0,0,0.45),inset_0_1px_1px_rgba(255,255,255,0.65)] ${dims.top}`}
+      >
+        {/* Subtle recessed showcase light-well emitting warmth upward from platform */}
+        <div
+          style={{ background: `radial-gradient(ellipse at center, ${tokens.plinthEmissiveCore} 0%, transparent 72%)` }}
+          className={`pointer-events-none absolute rounded-full ${dims.recessed}`}
+        />
+        {/* Subtle studio reflection curve across upper bevel */}
+        <div className="pointer-events-none absolute inset-x-4 top-[1px] h-px rounded-full bg-gradient-to-r from-transparent via-white/80 to-transparent" />
+      </div>
+
+      {/* Extruded 3D cylindrical riser body with realistic lateral studio shading */}
+      <div
+        aria-hidden="true"
+        style={{ background: tokens.plinthSideBg }}
+        className={`relative z-10 overflow-hidden rounded-b-[999px] shadow-[0_10px_22px_rgba(0,0,0,0.65)] ${dims.side}`}
+      >
+        <div
+          style={{ background: tokens.plinthTrimBg }}
+          className="absolute inset-x-0 bottom-0 h-[3px] opacity-90"
+        />
+      </div>
+
+      {/* Soft grounded studio floor shadow beneath plinth */}
+      <div
+        aria-hidden="true"
+        className={`pointer-events-none relative z-0 rounded-full bg-black/80 ${dims.floor}`}
+      />
+    </div>
+  );
+};
 
 export const OFFICIAL_ROYAL_PNG_GALLERY: Array<{
   id: string;
