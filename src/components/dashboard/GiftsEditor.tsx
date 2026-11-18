@@ -192,15 +192,44 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
           onMouseLeave={handleStageMouseLeave}
           className={`relative h-40 sm:h-44 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-center ${
             gift.active
-              ? 'border-[#E6D5BF]/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),inset_0_-10px_24px_rgba(140,74,25,0.06)]'
+              ? 'border-[#DFC9AB] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),inset_0_-14px_26px_rgba(140,74,25,0.1)]'
               : 'border-stone-200 bg-stone-100/80'
           }`}
           style={{
             background: gift.active
-              ? `radial-gradient(circle at 50% 42%, ${accent}2B 0%, rgba(255, 253, 249, 0.85) 48%, #F4E7D5 100%)`
+              ? `radial-gradient(110% 85% at 50% 24%, #FFFDF9 0%, #FBF0DF 48%, #EFE0CB 100%)`
               : 'radial-gradient(circle at 50% 45%, rgba(168,162,158,0.18), #F5F5F4 75%)',
           }}
         >
+          {/* Dimensional boutique vitrine backdrop: accent radial bloom + perspective horizon + halo rings */}
+          {gift.active && (
+            <>
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  background: `radial-gradient(circle at 50% 44%, ${accent}2A 0%, ${accent}0D 42%, transparent 72%)`,
+                }}
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -top-10 -left-8 h-48 w-24 rotate-[26deg] bg-gradient-to-r from-transparent via-white/55 to-transparent blur-sm"
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#DFC9AB]/45 via-[#EAD8BE]/20 to-transparent border-t border-white/50"
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[54%] h-28 w-28 rounded-full border border-[#C88A2B]/20"
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[54%] h-36 w-36 rounded-full border border-dashed border-[#C88A2B]/15"
+              />
+            </>
+          )}
+
           {/* Interactive cursor radial spotlight */}
           <div
             aria-hidden="true"

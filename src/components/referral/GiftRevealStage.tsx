@@ -578,7 +578,28 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       animate={{ opacity: 1, scale: 1 }}
       className="relative w-full max-w-[540px] mx-auto"
     >
-      <div className="relative overflow-hidden rounded-[34px] bg-gradient-to-b from-[#2A160D] via-[#1C0D07] to-[#2C1810] border border-[#C88A2B]/55 border-t-[#FDE68A]/50 shadow-[0_30px_80px_-15px_rgba(34,21,14,0.72),inset_0_1px_0_rgba(254,240,138,0.22)] px-6 py-9 sm:px-9 sm:py-11 text-center text-[#FAF3E8]">
+      <div
+        className="relative overflow-hidden rounded-[34px] border border-[#C88A2B]/55 border-t-[#FDE68A]/55 shadow-[0_30px_80px_-15px_rgba(34,21,14,0.78),inset_0_1px_0_rgba(254,240,138,0.24)] px-6 py-9 sm:px-9 sm:py-11 text-center text-[#FAF3E8]"
+        style={{
+          background: 'radial-gradient(ellipse at 50% 18%, #3B1F13 0%, #1C0D07 52%, #110703 100%)',
+        }}
+      >
+        {/* Architectural stage horizon rings & diagonal warm studio spotlights */}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 540 620"
+          className="pointer-events-none absolute inset-0 h-full w-full opacity-25"
+          preserveAspectRatio="none"
+        >
+          <circle cx="270" cy="240" r="140" stroke="#F4CA73" strokeOpacity="0.24" strokeWidth="0.9" fill="none" />
+          <circle cx="270" cy="240" r="205" stroke="#C88A2B" strokeOpacity="0.16" strokeDasharray="4 6" strokeWidth="0.9" fill="none" />
+          <line x1="0" y1="365" x2="540" y2="365" stroke="#F4CA73" strokeOpacity="0.16" strokeWidth="1" />
+        </svg>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-16 left-1/4 h-72 w-28 -skew-x-12 bg-gradient-to-b from-[#FEF08A]/12 via-[#E5AE4E]/4 to-transparent blur-xl"
+        />
+
         {/* Canvas Starburst Sparks Layer */}
         <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full z-20" />
 

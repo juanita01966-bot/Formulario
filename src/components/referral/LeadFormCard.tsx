@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, Check, ChevronRight, MapPin, Phone, Share2, User } from 'lucide-react';
+import { AlertCircle, Building2, Check, ChevronRight, Globe, MapPin, Phone, Share2, User } from 'lucide-react';
 import type { AppSettings, GiftThemeId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
+import { OTHER_CITY_VALUE, US_STATES } from '../../shared/usLocations';
+import { LocationDropdown } from './LocationDropdown';
 import { TermsModal } from './TermsModal';
 
 interface LeadFormCardProps {
@@ -143,22 +145,65 @@ function StylizedHeroGift3D({
 export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [selectedStateCode, setSelectedStateCode] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
+  const [customCity, setCustomCity] = useState('');
   const [address, setAddress] = useState('');
   const [accepted, setAccepted] = useState(false);
-  const [touched, setTouched] = useState({ name: false, phone: false, address: false });
+  const [touched, setTouched] = useState({
+    name: false,
+    phone: false,
+    state: false,
+    city: false,
+    customCity: false,
+  });
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
+  const selectedState = useMemo(
+    () => US_STATES.find((s) => s.code === selectedStateCode) || null,
+    [selectedStateCode]
+  );
+
+  const stateItems = useMemo(
+    () =>
+      US_STATES.map((s) => ({
+        value: s.code,
+        label: s.name,
+        badge: s.code,
+      })),
+    []
+  );
+
+  const cityItems = useMemo(() => {
+    if (!selectedState) return [];
+    return [
+      ...selectedState.cities.map((c) => ({
+        value: c,
+        label: c,
+      })),
+      {
+        value: OTHER_CITY_VALUE,
+        label: 'Otra ciudad en este estado...',
+      },
+    ];
+  }, [selectedState]);
+
+  const isOtherCity = selectedCity === OTHER_CITY_VALUE;
+  const resolvedCity = isOtherCity ? customCity.trim() : selectedCity.trim();
+
   const nameValid = name.trim().length >= 3;
   const phoneDigits = phone.replace(/\D/g, '');
   const phoneValid = phoneDigits.length >= 8 && phoneDigits.length <= 15;
-  const addressValid = address.trim().length >= 5;
+  const stateValid = Boolean(selectedState);
+  const cityValid = resolvedCity.length >= 2;
 
   const showNameError = touched.name && !nameValid;
   const showPhoneError = touched.phone && !phoneValid;
-  const showAddressError = touched.address && !addressValid;
+  const showStateError = touched.state && !stateValid;
+  const showCityError = (touched.city || (isOtherCity && touched.customCity)) && !cityValid;
 
   const rawHostTitle = settings.hostTitle?.trim() || 'The Ciprian Company';
   const cleanHostTitle =
@@ -166,21 +211,37 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
       ? 'The Ciprian Company'
       : rawHostTitle;
 
+  const handleStateChange = (nextCode: string) => {
+    setSelectedStateCode(nextCode);
+    setSelectedCity('');
+    setCustomCity('');
+    setTouched((prev) => ({ ...prev, state: true, city: false, customCity: false }));
+  };
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setTouched({ name: true, phone: true, address: true });
+    setTouched({
+      name: true,
+      phone: true,
+      state: true,
+      city: true,
+      customCity: true,
+    });
     setSubmitError(null);
 
-    if (!nameValid || !phoneValid || !addressValid || !accepted) {
+    if (!nameValid || !phoneValid || !stateValid || !cityValid || !accepted) {
       return;
     }
+
+    const locationLabel = selectedState ? `${resolvedCity}, ${selectedState.name}` : resolvedCity;
+    const composedAddress = address.trim() ? `${address.trim()} · ${locationLabel}` : locationLabel;
 
     setSubmitting(true);
     try {
       await onSubmit({
         name: name.trim(),
         phone: phone.trim(),
-        address: address.trim(),
+        address: composedAddress,
         acceptedTerms: accepted,
       });
     } catch (err) {
@@ -222,12 +283,12 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
         {/* Outer subtle champagne glow */}
         <div className="pointer-events-none -inset-1 absolute rounded-[36px] bg-gradient-to-br from-[#E5AE4E]/35 via-[#B84A27]/15 to-[#4B644A]/25 blur-xl opacity-75" />
 
-        <div className="relative overflow-hidden rounded-[28px] sm:rounded-[32px] bg-[#FFFDF9]/72 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-5 py-6 sm:px-9 sm:py-9">
-          {/* Inner hairline architectural frame */}
-          <div className="pointer-events-none absolute inset-2 sm:inset-2.5 rounded-[22px] sm:rounded-[24px] border border-[#E6D5BF]/60" />
-
-          {/* Top seasonal golden line */}
-          <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#4B644A]" />
+        <div className="relative rounded-[28px] sm:rounded-[32px] bg-[#FFFDF9]/72 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-5 py-6 sm:px-9 sm:py-9">
+          {/* Clipped decorative border & top foil stripe so dropdowns inside can overflow freely */}
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px] sm:rounded-[32px]">
+            <div className="absolute inset-2 sm:inset-2.5 rounded-[22px] sm:rounded-[24px] border border-[#E6D5BF]/60" />
+            <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#4B644A]" />
+          </div>
 
           {/* Circular Company Logo Medallion */}
           <motion.div
@@ -354,7 +415,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                   id="lead-phone"
                   type="tel"
                   autoComplete="tel"
-                  placeholder="Teléfono (ej. 55 1234 5678)"
+                  placeholder="Teléfono (ej. 305 555 0148)"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   onBlur={() => setTouched((prev) => ({ ...prev, phone: true }))}
@@ -380,18 +441,115 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
               </AnimatePresence>
             </div>
 
-            {/* Address input */}
+            {/* US State & City of Residence Dropdowns */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <LocationDropdown
+                  id="lead-state"
+                  label="Estado de residencia (EE. UU.)"
+                  placeholder="Estado de residencia"
+                  searchPlaceholder="Buscar estado..."
+                  value={selectedStateCode}
+                  items={stateItems}
+                  hasError={showStateError}
+                  icon={<Globe className="h-[18px] w-[18px]" />}
+                  onChange={handleStateChange}
+                  onBlurValidate={() => setTouched((prev) => ({ ...prev, state: true }))}
+                />
+                <AnimatePresence>
+                  {showStateError && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      className="mt-1.5 pl-2 text-xs font-medium text-red-600"
+                    >
+                      Selecciona tu estado de residencia.
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <div>
+                <LocationDropdown
+                  id="lead-city"
+                  label="Ciudad de residencia"
+                  placeholder={selectedState ? 'Ciudad de residencia' : 'Primero elige un estado'}
+                  searchPlaceholder="Buscar ciudad..."
+                  value={selectedCity}
+                  items={cityItems}
+                  disabled={!selectedState}
+                  hasError={showCityError && !isOtherCity}
+                  icon={<Building2 className="h-[18px] w-[18px]" />}
+                  onChange={(val) => {
+                    setSelectedCity(val);
+                    if (val !== OTHER_CITY_VALUE) setCustomCity('');
+                    setTouched((prev) => ({ ...prev, city: true }));
+                  }}
+                  onBlurValidate={() => setTouched((prev) => ({ ...prev, city: true }))}
+                />
+                <AnimatePresence>
+                  {showCityError && !isOtherCity && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      className="mt-1.5 pl-2 text-xs font-medium text-red-600"
+                    >
+                      Selecciona tu ciudad de residencia.
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+
+            {/* Custom City input when user selects "Otra ciudad en este estado..." */}
+            <AnimatePresence>
+              {isOtherCity && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                >
+                  <div
+                    className={`group relative flex items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
+                      showCityError
+                        ? 'border-red-500 ring-2 ring-red-500/15 bg-red-50/30'
+                        : 'border-[#DFCBB3] focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10'
+                    }`}
+                  >
+                    <span className="pl-4 pr-2.5 text-[#8C6E58] group-focus-within:text-[#B84A27] transition-colors">
+                      <Building2 className="h-[18px] w-[18px]" />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder={`Escribe tu ciudad en ${selectedState?.name || 'EE. UU.'}`}
+                      value={customCity}
+                      onChange={(e) => setCustomCity(e.target.value)}
+                      onBlur={() => setTouched((prev) => ({ ...prev, customCity: true }))}
+                      className="w-full bg-transparent py-3.5 pr-4 text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
+                    />
+                    {showCityError && (
+                      <span className="pr-3.5 text-red-500" aria-hidden="true">
+                        <AlertCircle className="h-5 w-5 fill-red-500 text-white" />
+                      </span>
+                    )}
+                  </div>
+                  {showCityError && (
+                    <p className="mt-1.5 pl-2 text-xs font-medium text-red-600">
+                      Escribe el nombre de tu ciudad de residencia.
+                    </p>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Optional Housing Address input (no specific street example required) */}
             <div>
               <label htmlFor="lead-address" className="sr-only">
-                Dirección completa
+                Dirección de vivienda (opcional)
               </label>
-              <div
-                className={`group relative flex items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
-                  showAddressError
-                    ? 'border-red-500 ring-2 ring-red-500/15 bg-red-50/30'
-                    : 'border-[#DFCBB3] focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10'
-                }`}
-              >
+              <div className="group relative flex items-center rounded-2xl border border-[#DFCBB3] bg-[#FCF8F2] transition-all duration-200 focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10">
                 <span className="pl-4 pr-2.5 text-[#8C6E58] group-focus-within:text-[#B84A27] transition-colors">
                   <MapPin className="h-[18px] w-[18px]" />
                 </span>
@@ -399,30 +557,12 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                   id="lead-address"
                   type="text"
                   autoComplete="street-address"
-                  placeholder="Dirección completa (Calle, número, ciudad)"
+                  placeholder="Dirección de vivienda (opcional)"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  onBlur={() => setTouched((prev) => ({ ...prev, address: true }))}
                   className="w-full bg-transparent py-3.5 pr-4 text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
                 />
-                {showAddressError && (
-                  <span className="pr-3.5 text-red-500" aria-hidden="true">
-                    <AlertCircle className="h-5 w-5 fill-red-500 text-white" />
-                  </span>
-                )}
               </div>
-              <AnimatePresence>
-                {showAddressError && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    className="mt-1.5 pl-2 text-xs font-medium text-red-600"
-                  >
-                    Ingresa tu dirección para coordinar la entrega.
-                  </motion.p>
-                )}
-              </AnimatePresence>
             </div>
 
             {/* Consent Checkbox */}

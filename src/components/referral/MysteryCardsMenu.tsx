@@ -132,8 +132,35 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
         damping: 22,
         delay: selectedIndex === null ? index * 0.055 : 0,
       }}
-      className="group relative flex flex-col items-center justify-between overflow-hidden rounded-[22px] border border-[#C88A2B]/35 border-t-[#FDE68A]/50 bg-gradient-to-b from-[#331B11]/92 via-[#201009]/95 to-[#120804]/98 p-3.5 sm:p-4 backdrop-blur-md perspective-1000 cursor-pointer shadow-[0_14px_30px_-12px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(254,240,138,0.22)] hover:border-[#F4CA73]/75 hover:border-t-[#FEF08A]/80 hover:shadow-[0_20px_40px_-10px_rgba(229,174,78,0.32),inset_0_1px_0_rgba(254,240,138,0.4)] transition-[border-color,box-shadow] duration-300 focus:outline-none"
+      className="group relative flex flex-col items-center justify-between overflow-hidden rounded-[22px] border border-[#C88A2B]/40 border-t-[#FDE68A]/55 p-3.5 sm:p-4 backdrop-blur-md perspective-1000 cursor-pointer shadow-[0_16px_34px_-12px_rgba(0,0,0,0.78),inset_0_1px_0_rgba(254,240,138,0.24)] hover:border-[#F4CA73]/80 hover:border-t-[#FEF08A]/85 hover:shadow-[0_22px_44px_-10px_rgba(229,174,78,0.36),inset_0_1px_0_rgba(254,240,138,0.45)] transition-[border-color,box-shadow] duration-300 focus:outline-none"
+      style={{
+        background:
+          'radial-gradient(120% 90% at 50% 18%, rgba(229, 174, 78, 0.16) 0%, rgba(48, 25, 15, 0.94) 52%, rgba(15, 7, 4, 0.99) 100%)',
+      }}
     >
+      {/* Subtle luxury micro-grid & concentric studio rings inside each tile */}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 200 220"
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.22]"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <pattern id={`tileGrid-${uid}`} width="20" height="20" patternUnits="userSpaceOnUse">
+            <circle cx="10" cy="10" r="0.7" fill="#FDE68A" fillOpacity="0.45" />
+          </pattern>
+        </defs>
+        <rect width="200" height="220" fill={`url(#tileGrid-${uid})`} />
+        <circle cx="100" cy="86" r="56" stroke="#F4CA73" strokeOpacity="0.22" strokeWidth="0.8" fill="none" />
+        <circle cx="100" cy="86" r="76" stroke="#C88A2B" strokeOpacity="0.14" strokeDasharray="3 4" strokeWidth="0.7" fill="none" />
+      </svg>
+
+      {/* Diagonal satin gallery sheen across card background */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-10 -left-10 h-44 w-28 rotate-[28deg] bg-gradient-to-r from-transparent via-[#FEF08A]/[0.08] to-transparent blur-sm"
+      />
+
       {/* Dynamic cursor-tracked radial spotlight sheen */}
       <div
         aria-hidden="true"
@@ -428,7 +455,39 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
         </div>
 
         {/* Dedicated 3D HD Floating Showcase Gallery */}
-        <div className="relative overflow-hidden rounded-[26px] border border-[#C88A2B]/50 border-t-[#FDE68A]/55 bg-gradient-to-b from-[#1E100A] via-[#130905] to-[#23120B] p-4 sm:p-5 shadow-[0_22px_48px_-16px_rgba(24,11,5,0.65),inset_0_2px_28px_rgba(0,0,0,0.7)]">
+        <div
+          className="relative overflow-hidden rounded-[26px] border border-[#C88A2B]/55 border-t-[#FDE68A]/60 p-4 sm:p-5 shadow-[0_24px_52px_-16px_rgba(24,11,5,0.72),inset_0_2px_28px_rgba(0,0,0,0.7)]"
+          style={{
+            background:
+              'radial-gradient(ellipse at 50% 0%, #3E2114 0%, #1F1009 46%, #110703 100%)',
+          }}
+        >
+          {/* Architectural 3D Perspective Stage Horizon & Radial Depth */}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 640 360"
+            className="pointer-events-none absolute inset-0 h-full w-full opacity-35"
+            preserveAspectRatio="none"
+          >
+            <line x1="0" y1="220" x2="640" y2="220" stroke="#F4CA73" strokeOpacity="0.16" strokeWidth="1" />
+            <line x1="320" y1="220" x2="40" y2="360" stroke="#F4CA73" strokeOpacity="0.14" strokeWidth="0.9" />
+            <line x1="320" y1="220" x2="180" y2="360" stroke="#F4CA73" strokeOpacity="0.14" strokeWidth="0.9" />
+            <line x1="320" y1="220" x2="320" y2="360" stroke="#F4CA73" strokeOpacity="0.18" strokeWidth="0.9" />
+            <line x1="320" y1="220" x2="460" y2="360" stroke="#F4CA73" strokeOpacity="0.14" strokeWidth="0.9" />
+            <line x1="320" y1="220" x2="600" y2="360" stroke="#F4CA73" strokeOpacity="0.14" strokeWidth="0.9" />
+            <circle cx="320" cy="145" r="190" stroke="#E5AE4E" strokeOpacity="0.1" strokeDasharray="5 6" fill="none" />
+          </svg>
+
+          {/* Diagonal volumetric light shafts */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-12 left-1/4 h-64 w-32 -skew-x-12 bg-gradient-to-b from-[#FEF08A]/12 via-[#E5AE4E]/5 to-transparent blur-xl"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-12 right-1/4 h-64 w-28 skew-x-12 bg-gradient-to-b from-[#FDE68A]/10 via-[#C88A2B]/4 to-transparent blur-xl"
+          />
+
           {/* Top specular rim hairline */}
           <div
             aria-hidden="true"
@@ -438,16 +497,16 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
           {/* Top studio champagne spotlight cone */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 -top-4 -translate-x-1/2 h-36 w-4/5 blur-2xl opacity-50"
+            className="pointer-events-none absolute left-1/2 -top-4 -translate-x-1/2 h-40 w-4/5 blur-2xl opacity-55"
             style={{
-              background: 'radial-gradient(ellipse at top, rgba(253, 230, 138, 0.52), rgba(200, 138, 43, 0.14) 55%, transparent 78%)',
+              background: 'radial-gradient(ellipse at top, rgba(253, 230, 138, 0.55), rgba(200, 138, 43, 0.16) 55%, transparent 78%)',
             }}
           />
 
           {/* Subtle bottom warm floor bounce glow */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 h-24 w-3/4 blur-2xl opacity-30"
+            className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 h-24 w-3/4 blur-2xl opacity-35"
             style={{
               background: 'radial-gradient(ellipse at bottom, rgba(229, 174, 78, 0.45), transparent 75%)',
             }}
