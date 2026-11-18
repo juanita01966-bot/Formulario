@@ -1,6 +1,223 @@
 import React, { useEffect, useId, useState } from 'react';
 import { motion } from 'framer-motion';
-import type { GiftVisualKey } from '../../types/app';
+import type { GiftItem, GiftVisualKey, ShowcaseStyleId } from '../../types/app';
+
+export interface ShowcasePedestalTokens {
+  id: ShowcaseStyleId;
+  name: string;
+  subtitle: string;
+  swatches: [string, string, string];
+  stageBg: string;
+  stageBorder: string;
+  spotlightTint: string;
+  rayGradient: string;
+  rayCoreGradient: string;
+  auraCore: string;
+  haloBorder: string;
+  plasmaRingBorder: string;
+  plasmaRingShadow: string;
+  plasmaInnerBorder: string;
+  glassPlatformBg: string;
+  glassPlatformBorder: string;
+  energyDiscGradient: string;
+  miniStageBg: string;
+}
+
+export const SHOWCASE_STYLE_OPTIONS: ShowcasePedestalTokens[] = [
+  {
+    id: 'luminous-gold',
+    name: 'Dorado Imperial',
+    subtitle: 'Base lumínica en oro 24k, champán y haz cálido de galería',
+    swatches: ['#FEF08A', '#E5AE4E', '#3A1F11'],
+    stageBg: 'radial-gradient(115% 95% at 50% 18%, #3B2012 0%, #1C0E08 55%, #0E0603 100%)',
+    stageBorder: 'border-[#FDE68A]/40 border-t-[#FEF08A]/70',
+    spotlightTint: 'rgba(254, 240, 138, 0.22)',
+    rayGradient:
+      'linear-gradient(to top, rgba(253, 224, 71, 0.34) 0%, rgba(229, 174, 78, 0.14) 55%, transparent 100%)',
+    rayCoreGradient:
+      'linear-gradient(to top, rgba(255, 251, 235, 0.42) 0%, rgba(254, 240, 138, 0.14) 60%, transparent 100%)',
+    auraCore: 'rgba(254, 240, 138, 0.48)',
+    haloBorder: 'border-[#FEF08A]/22',
+    plasmaRingBorder: 'border-[#FDE047]/80',
+    plasmaRingShadow:
+      '0 0 26px rgba(253, 224, 71, 0.56), inset 0 0 14px rgba(254, 240, 138, 0.42)',
+    plasmaInnerBorder: 'border-[#FFFBEB]/55',
+    glassPlatformBg:
+      'linear-gradient(180deg, rgba(255, 251, 235, 0.42) 0%, rgba(229, 174, 78, 0.24) 52%, rgba(36, 17, 9, 0.8) 100%)',
+    glassPlatformBorder: 'border-[#FEF08A]/70',
+    energyDiscGradient:
+      'radial-gradient(ellipse at center, rgba(253, 224, 71, 0.72) 0%, rgba(200, 138, 43, 0.3) 50%, transparent 78%)',
+    miniStageBg: 'radial-gradient(115% 95% at 50% 20%, #341C10 0%, #1B0D07 60%, #100704 100%)',
+  },
+  {
+    id: 'crystal-aurora',
+    name: 'Cristal Aurora',
+    subtitle: 'Halo cristalino en cian hielo, perla y destello áureo',
+    swatches: ['#67E8F9', '#FEF08A', '#0F2430'],
+    stageBg: 'radial-gradient(115% 95% at 50% 18%, #163341 0%, #0D1B24 55%, #070E14 100%)',
+    stageBorder: 'border-[#A5F3FC]/40 border-t-[#ECFEFF]/75',
+    spotlightTint: 'rgba(103, 232, 249, 0.22)',
+    rayGradient:
+      'linear-gradient(to top, rgba(34, 211, 238, 0.32) 0%, rgba(254, 240, 138, 0.13) 56%, transparent 100%)',
+    rayCoreGradient:
+      'linear-gradient(to top, rgba(236, 254, 255, 0.42) 0%, rgba(165, 243, 252, 0.14) 60%, transparent 100%)',
+    auraCore: 'rgba(103, 232, 249, 0.42)',
+    haloBorder: 'border-[#A5F3FC]/24',
+    plasmaRingBorder: 'border-[#67E8F9]/85',
+    plasmaRingShadow:
+      '0 0 28px rgba(34, 211, 238, 0.54), inset 0 0 14px rgba(254, 240, 138, 0.36)',
+    plasmaInnerBorder: 'border-[#FEF08A]/50',
+    glassPlatformBg:
+      'linear-gradient(180deg, rgba(236, 254, 255, 0.42) 0%, rgba(103, 232, 249, 0.22) 52%, rgba(11, 27, 38, 0.82) 100%)',
+    glassPlatformBorder: 'border-[#A5F3FC]/70',
+    energyDiscGradient:
+      'radial-gradient(ellipse at center, rgba(34, 211, 238, 0.65) 0%, rgba(250, 204, 21, 0.22) 52%, transparent 78%)',
+    miniStageBg: 'radial-gradient(115% 95% at 50% 20%, #15303D 0%, #0C1A23 60%, #070E14 100%)',
+  },
+  {
+    id: 'royal-ember',
+    name: 'Brasa Real',
+    subtitle: 'Energía ámbar cobrizo y resplandor rubí de alta cocina',
+    swatches: ['#FB923C', '#F43F5E', '#2A0B10'],
+    stageBg: 'radial-gradient(115% 95% at 50% 18%, #3F1517 0%, #200A0D 55%, #0F0406 100%)',
+    stageBorder: 'border-[#FDBA74]/40 border-t-[#FED7AA]/70',
+    spotlightTint: 'rgba(251, 146, 60, 0.22)',
+    rayGradient:
+      'linear-gradient(to top, rgba(249, 115, 22, 0.34) 0%, rgba(244, 63, 94, 0.14) 56%, transparent 100%)',
+    rayCoreGradient:
+      'linear-gradient(to top, rgba(255, 247, 237, 0.4) 0%, rgba(253, 186, 116, 0.15) 60%, transparent 100%)',
+    auraCore: 'rgba(251, 146, 60, 0.44)',
+    haloBorder: 'border-[#FDBA74]/22',
+    plasmaRingBorder: 'border-[#FB923C]/85',
+    plasmaRingShadow:
+      '0 0 28px rgba(244, 63, 94, 0.5), inset 0 0 14px rgba(253, 186, 116, 0.44)',
+    plasmaInnerBorder: 'border-[#FFE4E6]/50',
+    glassPlatformBg:
+      'linear-gradient(180deg, rgba(255, 247, 237, 0.38) 0%, rgba(234, 88, 12, 0.24) 52%, rgba(41, 10, 15, 0.84) 100%)',
+    glassPlatformBorder: 'border-[#FDBA74]/70',
+    energyDiscGradient:
+      'radial-gradient(ellipse at center, rgba(249, 115, 22, 0.68) 0%, rgba(225, 29, 72, 0.28) 52%, transparent 78%)',
+    miniStageBg: 'radial-gradient(115% 95% at 50% 20%, #391315 0%, #1D090C 60%, #0F0406 100%)',
+  },
+];
+
+export function resolveShowcaseTokens(styleId?: ShowcaseStyleId): ShowcasePedestalTokens {
+  return SHOWCASE_STYLE_OPTIONS.find((item) => item.id === styleId) || SHOWCASE_STYLE_OPTIONS[0];
+}
+
+export const OFFICIAL_ROYAL_PNG_GALLERY: Array<{
+  id: string;
+  label: string;
+  url: string;
+  visualKey: GiftVisualKey;
+  accentColor: string;
+}> = [
+  {
+    id: 'gift-utensils-6',
+    label: 'Utensilios 6 Piezas',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_ccc0c9bc-Photoroom.png',
+    visualKey: 'cutlery',
+    accentColor: '#C88A2B',
+  },
+  {
+    id: 'gift-utensil-holder',
+    label: 'Recipiente Utensilios',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_b86f199c-Photoroom.png',
+    visualKey: 'pot',
+    accentColor: '#8C6E58',
+  },
+  {
+    id: 'gift-bowls-3',
+    label: '3 Tazones Mezclar',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_17872483-Photoroom.png',
+    visualKey: 'bowls',
+    accentColor: '#B84A27',
+  },
+  {
+    id: 'gift-santoku-5',
+    label: 'Cuchillo Santoku 5"',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_a69260c7-Photoroom.png',
+    visualKey: 'knife',
+    accentColor: '#8C3B20',
+  },
+  {
+    id: 'gift-cleaver-7',
+    label: 'Hacha Cocina 7"',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_4eb72c8b-Photoroom.png',
+    visualKey: 'knife',
+    accentColor: '#5B4636',
+  },
+  {
+    id: 'gift-icecream-2',
+    label: '2 Copas Helado',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_0f9b4d38-Photoroom.png',
+    visualKey: 'bowls',
+    accentColor: '#C88A2B',
+  },
+  {
+    id: 'gift-mugs-2',
+    label: '2 Tazas Pared Doble',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_c2f45d1c-Photoroom.png',
+    visualKey: 'kettle',
+    accentColor: '#7C4327',
+  },
+  {
+    id: 'gift-bamboo-large',
+    label: 'Tabla Bambú Grande',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_ba6c52cc-Photoroom.png',
+    visualKey: 'bamboo',
+    accentColor: '#A66328',
+  },
+  {
+    id: 'gift-warmer-pro',
+    label: 'Warmer Pro Térmico',
+    url: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_621e0247-Photoroom.png',
+    visualKey: 'thermo',
+    accentColor: '#4B644A',
+  },
+];
+
+export function resolveGiftUsageTip(gift: Pick<GiftItem, 'usageTip' | 'visualKey' | 'name'>): string {
+  const custom = gift.usageTip?.trim();
+  if (custom) return custom;
+
+  const lower = (gift.name || '').toLowerCase();
+  if (lower.includes('recipiente') || lower.includes('organizador')) {
+    return 'Mantén tus espátulas y cucharones favoritos secos, ordenados y siempre a la mano junto a la estufa.';
+  }
+  if (lower.includes('copa') || lower.includes('helado')) {
+    return 'Enfría las copas 5 minutos antes de servir para mantener helados, mousses o frutas fríos por más tiempo.';
+  }
+  if (lower.includes('hacha')) {
+    return 'Aprovecha su hoja ancha para trozar carnes con firmeza y trasladar ingredientes picados de la tabla a la olla.';
+  }
+  if (lower.includes('taza')) {
+    return 'Disfruta café, té o chocolate a temperatura ideal sin quemarte las manos ni generar condensación.';
+  }
+
+  switch (gift.visualKey) {
+    case 'cutlery':
+      return 'Úsalos para voltear, servir pastas, guisos y caldos sin rayar ni dañar tus ollas o sartenes.';
+    case 'bowls':
+      return 'Prepara masas, marina carnes y conserva ensaladas frescas por más días gracias a su sello hermético.';
+    case 'knife':
+      return 'Sus alvéolos evitan que el alimento se pegue al rebanar verduras finas, quesos o filetes con corte limpio.';
+    case 'thermo':
+      return 'Mantén tus tortillas suaves y comidas calientes en la mesa o en reuniones gracias a su batería recargable portátil.';
+    case 'bamboo':
+      return 'Corta con seguridad cuidando el filo de tus cuchillos y usa su canal lateral para recoger jugos al asar carnes.';
+    case 'skillet':
+      return 'Sella carnes y saltea vegetales a temperatura uniforme usando menos aceite gracias a su acero quirúrgico.';
+    case 'pot':
+      return 'Prepara caldos, arroces y cocciones saludables conservando el sabor natural y nutrientes de cada ingrediente.';
+    case 'blender':
+      return 'Prepara jugos verdes, salsas cremosas y smoothies en segundos aprovechando su potencia de extracción.';
+    case 'kettle':
+      return 'Disfruta tus bebidas favoritas conservando su temperatura ideal en cada sorbo.';
+    default:
+      return 'Disfruta la calidad en acero inoxidable y diseño Royal Prestige para elevar tus preparaciones diarias.';
+  }
+}
 
 export const GIFT_VISUAL_OPTIONS: Array<{
   key: GiftVisualKey;
@@ -26,6 +243,8 @@ interface GiftIllustrationProps {
   className?: string;
   floating?: boolean;
   floatDelay?: number;
+  variant?: 'clean' | 'framed';
+  alt?: string;
 }
 
 export const GiftIllustration: React.FC<GiftIllustrationProps> = ({
@@ -36,6 +255,8 @@ export const GiftIllustration: React.FC<GiftIllustrationProps> = ({
   className = '',
   floating = false,
   floatDelay = 0,
+  variant = 'clean',
+  alt = 'Regalo de cocina Royal Prestige',
 }) => {
   const [imgFailed, setImgFailed] = useState(false);
   const rawId = useId();
@@ -60,34 +281,44 @@ export const GiftIllustration: React.FC<GiftIllustrationProps> = ({
   const showCustomImage = Boolean(customImageUrl && !imgFailed);
 
   const artwork = showCustomImage ? (
-    <div
-      style={{ width: size, height: size }}
-      className={`group/giftimg relative inline-flex shrink-0 items-center justify-center rounded-2xl ${className}`}
-    >
-      {/* Ambient studio rim glow behind custom image */}
+    variant === 'framed' ? (
       <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -inset-1.5 rounded-3xl opacity-45 blur-md transition-opacity duration-300 group-hover/giftimg:opacity-75"
-        style={{
-          background: `radial-gradient(circle at 50% 45%, ${accentColor}55, transparent 72%)`,
-        }}
-      />
-      {/* Frameless HD floating showcase container */}
-      <div className="relative h-full w-full overflow-hidden rounded-2xl bg-gradient-to-b from-white/95 to-[#FAF3E8]/90 ring-1 ring-white/75 shadow-[0_14px_28px_-8px_rgba(24,12,6,0.42),0_4px_10px_-2px_rgba(200,138,43,0.22),inset_0_1px_0_rgba(255,255,255,0.9)]">
-        <img
-          src={customImageUrl}
-          alt="Regalo de cocina"
-          referrerPolicy="no-referrer"
-          onError={() => setImgFailed(true)}
-          className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover/giftimg:scale-[1.06]"
-        />
-        {/* Subtle specular glass edge sheen */}
+        style={{ width: size, height: size }}
+        className={`group/giftimg relative inline-flex shrink-0 items-center justify-center rounded-2xl ${className}`}
+      >
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/30 via-transparent to-black/10 ring-1 ring-inset ring-white/40"
+          className="pointer-events-none absolute -inset-1.5 rounded-3xl opacity-45 blur-md transition-opacity duration-300 group-hover/giftimg:opacity-75"
+          style={{
+            background: `radial-gradient(circle at 50% 45%, ${accentColor}55, transparent 72%)`,
+          }}
+        />
+        <div className="relative h-full w-full overflow-hidden rounded-2xl bg-gradient-to-b from-white/95 to-[#FAF3E8]/90 p-1.5 ring-1 ring-white/75 shadow-[0_14px_28px_-8px_rgba(24,12,6,0.42),0_4px_10px_-2px_rgba(200,138,43,0.22),inset_0_1px_0_rgba(255,255,255,0.9)]">
+          <img
+            src={customImageUrl}
+            alt={alt}
+            referrerPolicy="no-referrer"
+            draggable={false}
+            onError={() => setImgFailed(true)}
+            className="h-full w-full object-contain bg-transparent select-none drop-shadow-[0_12px_20px_rgba(0,0,0,0.35)] transition-transform duration-300 ease-out group-hover/giftimg:scale-[1.06]"
+          />
+        </div>
+      </div>
+    ) : (
+      <div
+        style={{ width: size, height: size }}
+        className={`group/giftimg relative inline-flex shrink-0 items-center justify-center bg-transparent overflow-visible ${className}`}
+      >
+        <img
+          src={customImageUrl}
+          alt={alt}
+          referrerPolicy="no-referrer"
+          draggable={false}
+          onError={() => setImgFailed(true)}
+          className="h-full w-full object-contain bg-transparent select-none drop-shadow-[0_18px_28px_rgba(0,0,0,0.62)] transition-transform duration-300 ease-out group-hover/giftimg:scale-[1.06]"
         />
       </div>
-    </div>
+    )
   ) : (
     <svg
       width={size}

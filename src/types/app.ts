@@ -34,10 +34,13 @@ export type GiftThemeId =
   | 'ruby-velvet'
   | 'custom';
 
+export type ShowcaseStyleId = 'luminous-gold' | 'crystal-aurora' | 'royal-ember';
+
 export interface GiftItem {
   id: string;
   name: string;
   subtitle: string;
+  usageTip?: string;
   tag: string;
   visualKey: GiftVisualKey;
   customImageUrl?: string;
@@ -74,6 +77,8 @@ export interface AppSettings {
   pinCode: string;
   giftTheme?: GiftThemeId;
   customBoxColor?: string;
+  showcaseStyle?: ShowcaseStyleId;
+  randomizeGifts?: boolean;
 }
 
 export type QrStyleId =

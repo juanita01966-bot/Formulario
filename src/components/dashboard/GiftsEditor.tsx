@@ -1,9 +1,31 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion';
-import { Check, Edit3, Eye, EyeOff, ImagePlus, Link2, Palette, Plus, RotateCcw, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import type { GiftItem, GiftThemeId, GiftVisualKey } from '../../types/app';
+import {
+  Check,
+  Edit3,
+  Eye,
+  EyeOff,
+  ImagePlus,
+  Link2,
+  Palette,
+  Plus,
+  RotateCcw,
+  Shuffle,
+  Sparkles,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
+import type { GiftItem, GiftThemeId, GiftVisualKey, ShowcaseStyleId } from '../../types/app';
 import { GIFT_THEME_PRESETS, resolveBoxPalette } from '../../shared/giftThemes';
-import { GIFT_VISUAL_OPTIONS, GiftIllustration } from '../gifts/GiftIllustration';
+import {
+  GIFT_VISUAL_OPTIONS,
+  GiftIllustration,
+  OFFICIAL_ROYAL_PNG_GALLERY,
+  SHOWCASE_STYLE_OPTIONS,
+  resolveGiftUsageTip,
+  resolveShowcaseTokens,
+} from '../gifts/GiftIllustration';
 import type { UpsertGiftPayload } from '../../services/storeClient';
 
 /**
@@ -82,7 +104,13 @@ interface GiftsEditorProps {
   gifts: GiftItem[];
   giftTheme?: GiftThemeId;
   customBoxColor?: string;
+  showcaseStyle?: ShowcaseStyleId;
+  randomizeGifts?: boolean;
   onUpdateGiftTheme?: (giftTheme: GiftThemeId, customBoxColor?: string) => Promise<void>;
+  onUpdateShowcaseSettings?: (updates: {
+    showcaseStyle?: ShowcaseStyleId;
+    randomizeGifts?: boolean;
+  }) => Promise<void>;
   onCreateGift: (payload: UpsertGiftPayload) => Promise<void>;
   onUpdateGift: (id: string, updates: Partial<UpsertGiftPayload>) => Promise<void>;
   onDeleteGift: (id: string) => Promise<void>;
@@ -101,6 +129,7 @@ const ACCENT_PRESETS = [
 const EMPTY_DRAFT: UpsertGiftPayload = {
   name: '',
   subtitle: '',
+  usageTip: '',
   tag: 'Edición Otoño',
   visualKey: 'skillet',
   customImageUrl: '',
@@ -112,6 +141,7 @@ const EMPTY_DRAFT: UpsertGiftPayload = {
 interface GiftCatalogCardProps {
   gift: GiftItem;
   index: number;
+  showcaseStyle?: ShowcaseStyleId;
   confirmDeleteId: string | null;
   onToggleActive: (gift: GiftItem) => void;
   onEdit: (gift: GiftItem) => void;
@@ -123,6 +153,7 @@ interface GiftCatalogCardProps {
 const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
   gift,
   index,
+  showcaseStyle = 'luminous-gold',
   confirmDeleteId,
   onToggleActive,
   onEdit,
@@ -136,10 +167,11 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
   // Synchronized 60 FPS GPU floating loop & breathing oval ground shadow
   const floatDriver = useMotionValue(0);
   const giftY = useTransform(floatDriver, [0, 1], [0, -7]);
-  const shadowScaleX = useTransform(floatDriver, [0, 1], [1, 0.76]);
-  const shadowScaleY = useTransform(floatDriver, [0, 1], [1, 0.8]);
-  const shadowOpacity = useTransform(floatDriver, [0, 1], [0.38, 0.16]);
-  const auraScale = useTransform(floatDriver, [0, 1], [0.96, 1.1]);
+  const shadowScaleX = useTransform(floatDriver, [0, 1], [1, 0.74]);
+  const shadowScaleY = useTransform(floatDriver, [0, 1], [1, 0.78]);
+  const shadowOpacity = useTransform(floatDriver, [0, 1], [0.68, 0.28]);
+  const auraScale = useTransform(floatDriver, [0, 1], [0.95, 1.12]);
+  const auraOpacity = useTransform(floatDriver, [0, 1], [0.55, 0.88]);
 
   useEffect(() => {
     const controls = animate(floatDriver, [0, 1, 0], {
@@ -172,6 +204,8 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
   };
 
   const accent = gift.accentColor || '#C88A2B';
+  const tokens = resolveShowcaseTokens(showcaseStyle);
+  const usageTip = resolveGiftUsageTip(gift);
 
   return (
     <motion.div
@@ -186,46 +220,36 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
       }`}
     >
       <div>
-        {/* HD 3D Floating Studio Showcase Pedestal Stage */}
+        {/* Miniature Luminous Base Floating Showcase Stage */}
         <div
           onMouseMove={handleStageMouseMove}
           onMouseLeave={handleStageMouseLeave}
-          className={`relative h-40 sm:h-44 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-center ${
+          className={`relative h-44 sm:h-48 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-end pb-3.5 pt-4 ${
             gift.active
-              ? 'border-[#DFC9AB] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),inset_0_-14px_26px_rgba(140,74,25,0.1)]'
-              : 'border-stone-200 bg-stone-100/80'
+              ? `${tokens.stageBorder} shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_12px_26px_-14px_rgba(15,8,4,0.6)]`
+              : 'border-stone-300 opacity-70 grayscale-[0.4]'
           }`}
           style={{
             background: gift.active
-              ? `radial-gradient(110% 85% at 50% 24%, #FFFDF9 0%, #FBF0DF 48%, #EFE0CB 100%)`
-              : 'radial-gradient(circle at 50% 45%, rgba(168,162,158,0.18), #F5F5F4 75%)',
+              ? tokens.miniStageBg
+              : 'radial-gradient(circle at 50% 45%, #44403C, #1C1917 75%)',
           }}
         >
-          {/* Dimensional boutique vitrine backdrop: accent radial bloom + perspective horizon + halo rings */}
+          {/* Ascending spotlight rays behind product */}
           {gift.active && (
             <>
-              <div
+              <motion.div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0"
                 style={{
-                  background: `radial-gradient(circle at 50% 44%, ${accent}2A 0%, ${accent}0D 42%, transparent 72%)`,
+                  opacity: auraOpacity,
+                  background: tokens.rayGradient,
+                  clipPath: 'polygon(24% 100%, 76% 100%, 100% 0%, 0% 0%)',
                 }}
+                className="pointer-events-none absolute bottom-8 left-1/2 -translate-x-1/2 h-32 w-40 blur-lg will-change-transform"
               />
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute -top-10 -left-8 h-48 w-24 rotate-[26deg] bg-gradient-to-r from-transparent via-white/55 to-transparent blur-sm"
-              />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#DFC9AB]/45 via-[#EAD8BE]/20 to-transparent border-t border-white/50"
-              />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[54%] h-28 w-28 rounded-full border border-[#C88A2B]/20"
-              />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[54%] h-36 w-36 rounded-full border border-dashed border-[#C88A2B]/15"
+                className={`pointer-events-none absolute top-4 h-24 w-24 rounded-full border ${tokens.haloBorder}`}
               />
             </>
           )}
@@ -236,25 +260,25 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
             className="pointer-events-none absolute inset-0 transition-opacity duration-200"
             style={{
               opacity: spotlight.active ? 1 : 0,
-              background: `radial-gradient(200px circle at ${spotlight.x}% ${spotlight.y}%, rgba(255, 255, 255, 0.72), ${accent}1F 48%, transparent 74%)`,
+              background: `radial-gradient(200px circle at ${spotlight.x}% ${spotlight.y}%, ${tokens.spotlightTint}, transparent 72%)`,
             }}
           />
 
           {/* Top studio light specular line */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent"
+            className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent"
           />
 
           {/* Top-right floating Active/Hidden toggle */}
-          <div className="absolute top-2.5 right-2.5 z-20">
+          <div className="absolute top-2.5 right-2.5 z-30">
             <button
               type="button"
               onClick={() => onToggleActive(gift)}
               className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold cursor-pointer backdrop-blur-md transition-all shadow-sm ${
                 gift.active
-                  ? 'bg-emerald-50/95 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
-                  : 'bg-stone-200/95 text-stone-600 border border-stone-300 hover:bg-stone-300'
+                  ? 'bg-emerald-950/85 text-emerald-200 border border-emerald-400/40 hover:bg-emerald-900'
+                  : 'bg-stone-900/90 text-stone-300 border border-stone-500/40 hover:bg-stone-800'
               }`}
             >
               {gift.active ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
@@ -267,15 +291,16 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
             aria-hidden="true"
             style={{
               scale: auraScale,
-              background: `radial-gradient(circle, ${accent}38 0%, transparent 70%)`,
+              opacity: auraOpacity,
+              background: `radial-gradient(circle, ${tokens.auraCore} 0%, ${accent}30 48%, transparent 74%)`,
             }}
             className="pointer-events-none absolute top-4 h-28 w-28 rounded-full blur-xl will-change-transform"
           />
 
-          {/* Floating Gift Illustration / HD Photo with 3D Interactive Tilt */}
+          {/* Floating Transparent PNG Gift Artwork with 3D Interactive Tilt */}
           <motion.div
             style={{ y: giftY }}
-            className="relative z-10 flex items-center justify-center will-change-transform"
+            className="relative z-20 mb-1 flex items-center justify-center will-change-transform"
           >
             <div
               style={{
@@ -288,13 +313,15 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
                 visualKey={gift.visualKey}
                 customImageUrl={gift.customImageUrl}
                 accentColor={accent}
-                size={94}
+                size={96}
+                variant="clean"
+                alt={gift.name}
               />
             </div>
           </motion.div>
 
-          {/* Translucent Glass Pedestal Disc & Synchronized Oval Ground Shadow */}
-          <div className="relative z-0 -mt-1 flex flex-col items-center justify-center">
+          {/* Miniature Multi-Layered Luminous Pedestal Base */}
+          <div className="relative z-10 -mt-1 flex flex-col items-center justify-center">
             <motion.div
               aria-hidden="true"
               style={{
@@ -302,11 +329,31 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
                 scaleY: shadowScaleY,
                 opacity: shadowOpacity,
               }}
-              className="relative z-10 h-3 w-24 rounded-full bg-gradient-to-r from-transparent via-[#22150E]/75 to-transparent blur-[3px] will-change-transform"
+              className="relative z-30 -mb-1.5 h-2.5 w-20 rounded-full bg-gradient-to-r from-transparent via-black/95 to-transparent blur-[3px] will-change-transform"
             />
             <div
               aria-hidden="true"
-              className="pointer-events-none -mt-2 h-4 w-32 rounded-full border border-white/85 bg-white/50 backdrop-blur-sm shadow-[0_8px_18px_-6px_rgba(34,21,14,0.16),inset_0_1px_0_rgba(255,255,255,0.95)]"
+              style={{ background: tokens.glassPlatformBg }}
+              className={`relative z-20 h-5 w-32 rounded-[999px] border ${tokens.glassPlatformBorder} backdrop-blur-sm shadow-[0_6px_16px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.75)]`}
+            >
+              <div className="pointer-events-none absolute inset-x-4 top-0.5 h-px rounded-full bg-gradient-to-r from-transparent via-white/90 to-transparent" />
+            </div>
+            <motion.div
+              aria-hidden="true"
+              style={{
+                opacity: auraOpacity,
+                boxShadow: tokens.plasmaRingShadow,
+              }}
+              className={`relative z-10 -mt-3.5 h-6 w-36 rounded-[999px] border ${tokens.plasmaRingBorder} will-change-transform`}
+            />
+            <motion.div
+              aria-hidden="true"
+              style={{
+                scale: auraScale,
+                opacity: auraOpacity,
+                background: tokens.energyDiscGradient,
+              }}
+              className="pointer-events-none -mt-3 h-5 w-40 rounded-full blur-md will-change-transform"
             />
           </div>
         </div>
@@ -328,6 +375,17 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
           <p className="mt-1 text-xs text-[#6E5341] leading-relaxed line-clamp-2">
             {gift.subtitle}
           </p>
+
+          {/* Concise Usage Tip Callout */}
+          <div className="mt-2.5 rounded-xl border border-[#EAD9C2] bg-[#FAF4EA] px-2.5 py-2">
+            <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[#9A5B1F]">
+              <Sparkles className="h-2.5 w-2.5 text-[#C88A2B] shrink-0" />
+              Máximo provecho
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-[#594133] line-clamp-2">
+              {usageTip}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -381,7 +439,10 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   gifts,
   giftTheme = 'autumn',
   customBoxColor = '#B84A27',
+  showcaseStyle = 'luminous-gold',
+  randomizeGifts = true,
   onUpdateGiftTheme,
+  onUpdateShowcaseSettings,
   onCreateGift,
   onUpdateGift,
   onDeleteGift,
@@ -394,6 +455,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [savingShowcase, setSavingShowcase] = useState(false);
   const [driveDetected, setDriveDetected] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -413,6 +475,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     setDraft({
       name: gift.name,
       subtitle: gift.subtitle,
+      usageTip: gift.usageTip || '',
       tag: gift.tag,
       visualKey: gift.visualKey,
       customImageUrl: gift.customImageUrl || '',
@@ -421,6 +484,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
       stockLabel: gift.stockLabel,
     });
     setErrorMsg(null);
+    setDriveDetected(Boolean(gift.customImageUrl?.includes('drive.google.com')));
     setModalOpen(true);
   };
 
@@ -463,7 +527,24 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     }
   };
 
+  const handleShowcaseUpdate = async (updates: {
+    showcaseStyle?: ShowcaseStyleId;
+    randomizeGifts?: boolean;
+  }) => {
+    if (!onUpdateShowcaseSettings || savingShowcase) return;
+    setErrorMsg(null);
+    setSavingShowcase(true);
+    try {
+      await onUpdateShowcaseSettings(updates);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'No se pudo actualizar la visualización.');
+    } finally {
+      setSavingShowcase(false);
+    }
+  };
+
   const previewPalette = resolveBoxPalette(giftTheme, customBoxColor, 0);
+  const activeShowcaseTokens = resolveShowcaseTokens(showcaseStyle);
 
   return (
     <section className="space-y-5">
@@ -493,7 +574,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                   }}
                   className="font-bold text-[#8C3318] hover:underline cursor-pointer"
                 >
-                  Confirmar restaurar 5 originales
+                  Confirmar restaurar 9 originales
                 </button>
                 <button
                   type="button"
@@ -642,6 +723,113 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
           </div>
         </div>
 
+        {/* Visualización & Aleatoriedad Control Strip */}
+        <div className="mt-4 rounded-2xl border border-[#E6D5BF] bg-gradient-to-br from-[#FFFDF9] to-[#FAF3E8] p-4 sm:p-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="h-4 w-4 text-[#C88A2B]" />
+                <h3 className="text-sm font-bold text-[#22150E]">
+                  Visualización &amp; Aleatoriedad
+                </h3>
+              </div>
+              <p className="text-xs text-[#6E5341] mt-0.5">
+                Elige la iluminación de la base lumínica donde flotan los premios y controla la selección aleatoria anti-abuso.
+              </p>
+            </div>
+
+            {/* Selección Aleatoria Anti-Abuso Toggle */}
+            <button
+              type="button"
+              disabled={savingShowcase || !onUpdateShowcaseSettings}
+              onClick={() => handleShowcaseUpdate({ randomizeGifts: !randomizeGifts })}
+              className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer disabled:opacity-60 ${
+                randomizeGifts
+                  ? 'border-emerald-300 bg-emerald-50/90 text-emerald-950 shadow-sm'
+                  : 'border-[#DFCBB3] bg-white text-[#4E382B] hover:bg-[#FAF3E8]'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                    randomizeGifts
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-stone-200 text-stone-600'
+                  }`}
+                >
+                  <Shuffle className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold leading-tight">
+                    Selección Aleatoria Anti-Abuso
+                  </p>
+                  <p className="text-[10.5px] opacity-80 leading-snug">
+                    {randomizeGifts
+                      ? 'Activa · Mezcla cajas y sortea al tocar para evitar trucos'
+                      : 'Desactivada · Orden fijo según catálogo'}
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  randomizeGifts
+                    ? 'bg-emerald-700 text-white'
+                    : 'bg-stone-200 text-stone-700'
+                }`}
+              >
+                {randomizeGifts ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          </div>
+
+          <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {SHOWCASE_STYLE_OPTIONS.map((styleOpt) => {
+              const active = showcaseStyle === styleOpt.id;
+              return (
+                <button
+                  key={styleOpt.id}
+                  type="button"
+                  disabled={savingShowcase || !onUpdateShowcaseSettings}
+                  onClick={() => handleShowcaseUpdate({ showcaseStyle: styleOpt.id })}
+                  className={`flex items-center justify-between gap-3 rounded-xl border p-3 text-left transition-all cursor-pointer disabled:opacity-60 ${
+                    active
+                      ? 'border-[#C88A2B] bg-white ring-2 ring-[#C88A2B]/25 shadow-sm'
+                      : 'border-[#E6D5BF] bg-[#FFFDF9]/85 hover:bg-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-black/15 shadow-inner"
+                      style={{ background: styleOpt.miniStageBg }}
+                    >
+                      <span
+                        className="h-3.5 w-6 rounded-full border"
+                        style={{
+                          borderColor: styleOpt.swatches[0],
+                          boxShadow: `0 0 10px ${styleOpt.swatches[0]}`,
+                        }}
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-[#22150E] leading-tight">
+                        {styleOpt.name}
+                      </p>
+                      <p className="text-[10px] text-[#7B5D4A] mt-0.5 line-clamp-2">
+                        {styleOpt.subtitle}
+                      </p>
+                    </div>
+                  </div>
+                  {active && (
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C88A2B] text-white">
+                      <Check className="h-3 w-3" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           <AnimatePresence mode="popLayout">
             {gifts.map((gift, idx) => (
@@ -649,6 +837,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 key={gift.id}
                 gift={gift}
                 index={idx}
+                showcaseStyle={showcaseStyle}
                 confirmDeleteId={confirmDeleteId}
                 onToggleActive={handleToggleActive}
                 onEdit={openEditModal}
@@ -692,31 +881,62 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 </button>
               </div>
 
-              {/* Live Floating Studio Preview Strip */}
+              {/* Live Floating Luminous Base Preview Strip */}
               <div
-                className="flex items-center gap-4 rounded-2xl border border-[#E6D5BF] p-3.5 shadow-inner"
-                style={{
-                  background: `radial-gradient(circle at 14% 50%, ${draft.accentColor || '#C88A2B'}22, #FAF3E8 55%)`,
-                }}
+                className="flex flex-col sm:flex-row sm:items-center gap-4 rounded-2xl border border-[#DFCBB3] bg-[#FAF3E8]/70 p-3.5 shadow-inner"
               >
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-white/80 border border-white shadow-[0_10px_24px_-10px_rgba(34,21,14,0.2)]">
-                  <GiftIllustration
-                    visualKey={draft.visualKey}
-                    customImageUrl={draft.customImageUrl}
-                    accentColor={draft.accentColor}
-                    size={56}
-                    floating
+                <div
+                  className={`relative flex h-28 w-full sm:w-28 shrink-0 flex-col items-center justify-end overflow-hidden rounded-2xl border pb-2.5 pt-2 ${activeShowcaseTokens.stageBorder} shadow-[0_12px_26px_-10px_rgba(15,8,4,0.55)]`}
+                  style={{ background: activeShowcaseTokens.miniStageBg }}
+                >
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 h-20 w-24 blur-md opacity-80"
+                    style={{
+                      background: activeShowcaseTokens.rayGradient,
+                      clipPath: 'polygon(24% 100%, 76% 100%, 100% 0%, 0% 0%)',
+                    }}
+                  />
+                  <div className="relative z-20 -mb-1">
+                    <GiftIllustration
+                      visualKey={draft.visualKey}
+                      customImageUrl={draft.customImageUrl}
+                      accentColor={draft.accentColor}
+                      size={66}
+                      variant="clean"
+                      floating
+                    />
+                  </div>
+                  <div
+                    aria-hidden="true"
+                    style={{ background: activeShowcaseTokens.glassPlatformBg }}
+                    className={`relative z-10 h-3.5 w-20 rounded-[999px] border ${activeShowcaseTokens.glassPlatformBorder}`}
+                  />
+                  <div
+                    aria-hidden="true"
+                    style={{ boxShadow: activeShowcaseTokens.plasmaRingShadow }}
+                    className={`relative z-0 -mt-2.5 h-4 w-24 rounded-[999px] border ${activeShowcaseTokens.plasmaRingBorder} opacity-85`}
                   />
                 </div>
-                <div className="min-w-0">
+
+                <div className="min-w-0 flex-1 space-y-1">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-[#8C4A19]">
                     {draft.tag || 'Edición Otoño'}
                   </p>
                   <p className="font-serif text-base font-bold text-[#22150E] truncate">
                     {draft.name || 'Vista previa del regalo'}
                   </p>
-                  <p className="text-xs text-[#6E5341] truncate">
+                  <p className="text-xs text-[#6E5341] line-clamp-2">
                     {draft.subtitle || 'Descripción visible cuando se abra la caja.'}
+                  </p>
+                  <p className="pt-0.5 text-[11px] text-[#8C4A19] line-clamp-2">
+                    <span className="font-bold">Máximo provecho:</span>{' '}
+                    {draft.usageTip?.trim() ||
+                      resolveGiftUsageTip({
+                        name: draft.name,
+                        visualKey: draft.visualKey,
+                        usageTip: draft.usageTip,
+                      })}
                   </p>
                 </div>
               </div>
@@ -756,12 +976,25 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 />
               </div>
 
-              {/* Image source selector: Desktop upload, Google Drive / Link, or SVG preset */}
+              <div>
+                <label className="block text-xs font-semibold text-[#594133] mb-1">
+                  Cómo sacarle el máximo provecho (Mensaje corto)
+                </label>
+                <textarea
+                  rows={2}
+                  value={draft.usageTip || ''}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, usageTip: e.target.value }))}
+                  placeholder="Ej. Úsalo para sellar carnes y saltear vegetales conservando sus jugos y sabor natural."
+                  className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                />
+              </div>
+
+              {/* Image source selector: Official PNG Gallery, Desktop upload, Google Drive / Link, or SVG preset */}
               <div className="rounded-2xl border border-[#E6D5BF] bg-[#FCF8F2] p-3.5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-xs font-bold text-[#4E382B] flex items-center gap-1.5">
                     <ImagePlus className="w-3.5 h-3.5 text-[#B84A27]" />
-                    Imagen del regalo (Escritorio, Google Drive o Link)
+                    Imagen sin fondo (Galería Oficial, Escritorio o Link)
                   </label>
                   {draft.customImageUrl ? (
                     <button
@@ -777,7 +1010,59 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                   ) : null}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-2.5 items-center">
+                {/* Galería Oficial Sin Fondo (9 PNGs Royal Prestige) */}
+                <div>
+                  <p className="text-[11px] font-semibold text-[#6E5341] mb-1.5">
+                    Galería Oficial Sin Fondo (9 PNGs Royal Prestige)
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {OFFICIAL_ROYAL_PNG_GALLERY.map((item) => {
+                      const isSelected = draft.customImageUrl === item.url;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setDriveDetected(false);
+                            setDraft((prev) => ({
+                              ...prev,
+                              customImageUrl: item.url,
+                              visualKey: item.visualKey,
+                              accentColor: item.accentColor,
+                            }));
+                          }}
+                          className={`group/png flex flex-col items-center gap-1 rounded-xl border p-1.5 text-center transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-[#C88A2B] bg-amber-50/80 ring-2 ring-[#C88A2B]/30 shadow-sm'
+                              : 'border-[#E6D5BF] bg-white hover:bg-[#FAF3E8]'
+                          }`}
+                        >
+                          <div
+                            className="relative flex h-11 w-full items-center justify-center rounded-lg overflow-hidden"
+                            style={{ background: activeShowcaseTokens.miniStageBg }}
+                          >
+                            <img
+                              src={item.url}
+                              alt={item.label}
+                              draggable={false}
+                              className="h-9 w-9 object-contain bg-transparent select-none drop-shadow-[0_6px_10px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover/png:scale-110"
+                            />
+                            {isSelected && (
+                              <span className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#E5AE4E] text-[#1E110A]">
+                                <Check className="h-2.5 w-2.5" />
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[9.5px] font-semibold text-[#4E382B] leading-tight line-clamp-2">
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-2.5 items-center pt-1">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -828,7 +1113,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
 
                 {draft.customImageUrl?.startsWith('data:') ? (
                   <p className="text-[11px] font-medium text-emerald-700">
-                    Imagen local cargada desde tu equipo y optimizada para la ruleta 3D.
+                    Imagen local cargada desde tu equipo y optimizada para la base lumínica.
                   </p>
                 ) : driveDetected ? (
                   <p className="text-[11px] font-medium text-amber-800">
@@ -836,7 +1121,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                   </p>
                 ) : (
                   <p className="text-[11px] text-[#7D6353]">
-                    Opcional: si subes una foto o pegas un enlace de Drive/Web, reemplazará a la ilustración SVG.
+                    Selecciona un producto oficial sin fondo arriba, sube un PNG transparente o pega un enlace web/Drive.
                   </p>
                 )}
               </div>

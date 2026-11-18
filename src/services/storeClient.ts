@@ -10,6 +10,7 @@ import type {
   QrCodeRecord,
   QrDotShape,
   QrStyleId,
+  ShowcaseStyleId,
 } from '../types/app';
 
 const STORAGE_KEY = 'royal_konverta_autumn_store_v1';
@@ -107,6 +108,16 @@ function generateClaimCode(): string {
   return `OTN-${num}`;
 }
 
+function cryptoRandomIndex(length: number): number {
+  if (length <= 1) return 0;
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    const arr = new Uint32Array(1);
+    window.crypto.getRandomValues(arr);
+    return arr[0] % length;
+  }
+  return Math.floor(Math.random() * length);
+}
+
 class ApiValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -181,7 +192,7 @@ export async function createLead(
     const activeGifts = state.gifts.filter((g) => g.active);
     const chosenGift =
       state.gifts.find((g) => g.id === payload.giftId) ||
-      activeGifts[Math.floor(Math.random() * activeGifts.length)] ||
+      (activeGifts.length > 0 ? activeGifts[cryptoRandomIndex(activeGifts.length)] : null) ||
       state.gifts[0] ||
       null;
 
@@ -305,9 +316,16 @@ export async function deleteLead(id: string): Promise<AppState> {
   }
 }
 
+const VALID_SHOWCASE_STYLES = new Set<ShowcaseStyleId>([
+  'luminous-gold',
+  'crystal-aurora',
+  'royal-ember',
+]);
+
 export interface UpsertGiftPayload {
   name: string;
   subtitle: string;
+  usageTip?: string;
   tag: string;
   visualKey: GiftVisualKey;
   customImageUrl?: string;
@@ -330,6 +348,7 @@ export async function createGift(payload: UpsertGiftPayload): Promise<{ gift: Gi
     const gift: GiftItem = {
       id: generateLocalId('gift'),
       ...payload,
+      usageTip: payload.usageTip?.trim() || '',
       customImageUrl: payload.customImageUrl?.trim() || undefined,
     };
     const nextState = { ...state, gifts: [...state.gifts, gift] };
@@ -360,6 +379,10 @@ export async function updateGift(
     const nextGift: GiftItem = {
       ...state.gifts[index],
       ...updates,
+      usageTip:
+        updates.usageTip !== undefined
+          ? updates.usageTip.trim()
+          : state.gifts[index].usageTip || '',
       customImageUrl:
         updates.customImageUrl === ''
           ? undefined
@@ -421,7 +444,22 @@ export async function updateSettings(updates: Partial<AppSettings>): Promise<App
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
-    const nextState = { ...state, settings: { ...state.settings, ...updates } };
+    const nextSettings: AppSettings = {
+      ...state.settings,
+      ...updates,
+      pinCode: '',
+      showcaseStyle:
+        updates.showcaseStyle && VALID_SHOWCASE_STYLES.has(updates.showcaseStyle)
+          ? updates.showcaseStyle
+          : state.settings.showcaseStyle || 'luminous-gold',
+      randomizeGifts:
+        typeof updates.randomizeGifts === 'boolean'
+          ? updates.randomizeGifts
+          : typeof state.settings.randomizeGifts === 'boolean'
+            ? state.settings.randomizeGifts
+            : true,
+    };
+    const nextState = { ...state, settings: nextSettings };
     writeLocalState(nextState, true);
     return nextState;
   }

@@ -1,5 +1,11 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 // Set test environment before importing the app
 process.env.NODE_ENV = 'test';
@@ -13,6 +19,8 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
   let callerSessionToken;
   let testLeadId;
   const createdQrIds = new Set();
+  const createdGiftIds = new Set();
+  let initialShowcaseSettings = null;
 
   before(async () => {
     await new Promise((resolve) => {
@@ -41,12 +49,33 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
   });
 
   after(async () => {
-    if (testLeadId && adminSessionToken) {
+    if (adminSessionToken) {
+      if (testLeadId) {
+        try {
+          await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${adminSessionToken}` },
+          });
+        } catch {
+          // Ignore cleanup failure
+        }
+      }
       try {
-        await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-          method: 'DELETE',
+        const stateRes = await fetch(`${baseUrl}/api/state`, {
           headers: { Authorization: `Bearer ${adminSessionToken}` },
         });
+        if (stateRes.ok) {
+          const currentState = await stateRes.json();
+          const leftoverLeads = (currentState.leads || []).filter(
+            (l) => l.name === 'Cliente Prueba RBAC' || l.name === 'Lead para Borrar'
+          );
+          for (const lead of leftoverLeads) {
+            await fetch(`${baseUrl}/api/leads/${lead.id}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${adminSessionToken}` },
+            });
+          }
+        }
       } catch {
         // Ignore cleanup failure
       }
@@ -61,6 +90,32 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
         } catch {
           // Ignore cleanup failure
         }
+      }
+    }
+    if (createdGiftIds.size > 0 && adminSessionToken) {
+      for (const giftId of createdGiftIds) {
+        try {
+          await fetch(`${baseUrl}/api/gifts/${giftId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${adminSessionToken}` },
+          });
+        } catch {
+          // Ignore cleanup failure
+        }
+      }
+    }
+    if (initialShowcaseSettings && adminSessionToken) {
+      try {
+        await fetch(`${baseUrl}/api/settings`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(initialShowcaseSettings),
+        });
+      } catch {
+        // Ignore cleanup failure
       }
     }
     if (server) {
@@ -811,6 +866,274 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
         headers: { Authorization: `Bearer ${adminSessionToken}` },
       });
       assert.strictEqual(missingRes.status, 404);
+    });
+  });
+
+  describe('7. Royal Prestige Catalog, UsageTips, ShowcaseStyle & Randomization RBAC', () => {
+    const EXPECTED_GIFT_IDS = [
+      'gift-utensils-6',
+      'gift-utensil-holder',
+      'gift-bowls-3',
+      'gift-santoku-5',
+      'gift-cleaver-7',
+      'gift-icecream-2',
+      'gift-mugs-2',
+      'gift-bamboo-large',
+      'gift-warmer-pro',
+    ];
+
+    test('Default store and GET /api/state return the 9 Royal Prestige PNG prizes with usageTip and showcaseStyle / randomizeGifts defaults', async () => {
+      const defaultStore = JSON.parse(
+        fs.readFileSync(path.join(PROJECT_ROOT, 'src', 'shared', 'defaultStore.json'), 'utf8')
+      );
+      assert.strictEqual(defaultStore.settings.showcaseStyle, 'luminous-gold');
+      assert.strictEqual(defaultStore.settings.randomizeGifts, true);
+      assert.strictEqual(defaultStore.gifts.length, 9);
+      assert.deepStrictEqual(
+        defaultStore.gifts.map((g) => g.id),
+        EXPECTED_GIFT_IDS
+      );
+
+      for (const routeHeaders of [undefined, { Authorization: `Bearer ${adminSessionToken}` }]) {
+        const res = await fetch(`${baseUrl}/api/state`, routeHeaders ? { headers: routeHeaders } : undefined);
+        assert.strictEqual(res.status, 200);
+        const state = await res.json();
+
+        assert.strictEqual(state.settings.showcaseStyle, 'luminous-gold');
+        assert.strictEqual(state.settings.randomizeGifts, true);
+        assert.ok(Array.isArray(state.gifts));
+        assert.strictEqual(state.gifts.length, 9);
+        assert.deepStrictEqual(
+          state.gifts.map((g) => g.id),
+          EXPECTED_GIFT_IDS
+        );
+
+        for (const gift of state.gifts) {
+          assert.strictEqual(gift.active, true, `Gift ${gift.id} must be active`);
+          assert.strictEqual(typeof gift.usageTip, 'string', `Gift ${gift.id} must include usageTip`);
+          assert.ok(gift.usageTip.trim().length >= 15, `Gift ${gift.id} usageTip must be meaningful`);
+          assert.strictEqual(typeof gift.customImageUrl, 'string', `Gift ${gift.id} must include customImageUrl`);
+          assert.ok(
+            gift.customImageUrl.startsWith('/sin%20fondo/') && gift.customImageUrl.endsWith('-Photoroom.png'),
+            `Gift ${gift.id} customImageUrl must point to transparent PNG in /sin%20fondo/: ${gift.customImageUrl}`
+          );
+        }
+      }
+    });
+
+    test('Unauthenticated gift mutations and PATCH /api/settings are REJECTED with HTTP 401', async () => {
+      const createGiftRes = await fetch(`${baseUrl}/api/gifts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Regalo Sin Sesion',
+          usageTip: 'No autorizado',
+        }),
+      });
+      assert.strictEqual(createGiftRes.status, 401);
+
+      const updateGiftRes = await fetch(`${baseUrl}/api/gifts/gift-utensils-6`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usageTip: 'Intento sin sesion' }),
+      });
+      assert.strictEqual(updateGiftRes.status, 401);
+
+      const deleteGiftRes = await fetch(`${baseUrl}/api/gifts/gift-utensils-6`, {
+        method: 'DELETE',
+      });
+      assert.strictEqual(deleteGiftRes.status, 401);
+
+      const settingsRes = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ showcaseStyle: 'crystal-aurora', randomizeGifts: false }),
+      });
+      assert.strictEqual(settingsRes.status, 401);
+    });
+
+    test('Caller-role gift mutations with usageTip and PATCH /api/settings showcaseStyle/randomizeGifts are REJECTED with HTTP 403', async () => {
+      const createGiftRes = await fetch(`${baseUrl}/api/gifts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${callerSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'Regalo Caller Con Tip',
+          usageTip: 'Tip bloqueado para caller',
+        }),
+      });
+      assert.strictEqual(createGiftRes.status, 403);
+
+      const updateGiftRes = await fetch(`${baseUrl}/api/gifts/gift-utensils-6`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${callerSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ usageTip: 'Tip modificado por caller' }),
+      });
+      assert.strictEqual(updateGiftRes.status, 403);
+
+      const settingsRes = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${callerSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ showcaseStyle: 'crystal-aurora', randomizeGifts: false }),
+      });
+      assert.strictEqual(settingsRes.status, 403);
+    });
+
+    test('AdminCiprian can create, update with usageTip, verify in GET /api/state, and delete a gift cleanly', async () => {
+      const createPayload = {
+        name: 'Set Gourmet Prueba QA',
+        subtitle: 'Obsequio temporal para pruebas de integración.',
+        usageTip: 'Úsalo para cocinar al vapor conservando nutrientes y sabor.',
+        tag: 'QA Edition',
+        visualKey: 'pot',
+        customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_ccc0c9bc-Photoroom.png',
+        accentColor: '#C88A2B',
+        stockLabel: 'Prueba',
+      };
+
+      const createRes = await fetch(`${baseUrl}/api/gifts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(createPayload),
+      });
+      assert.strictEqual(createRes.status, 201);
+      const created = await createRes.json();
+      assert.ok(created.gift);
+      assert.strictEqual(typeof created.gift.id, 'string');
+      assert.strictEqual(created.gift.name, createPayload.name);
+      assert.strictEqual(created.gift.usageTip, createPayload.usageTip);
+      assert.strictEqual(created.gift.customImageUrl, createPayload.customImageUrl);
+      assert.ok(created.state.gifts.some((g) => g.id === created.gift.id));
+
+      const giftId = created.gift.id;
+      createdGiftIds.add(giftId);
+
+      const updatedTip = 'Tip actualizado QA: precalienta 2 minutos antes de sellar carnes.';
+      const patchRes = await fetch(`${baseUrl}/api/gifts/${giftId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          usageTip: updatedTip,
+          subtitle: 'Descripción actualizada por AdminCiprian.',
+        }),
+      });
+      assert.strictEqual(patchRes.status, 200);
+      const patched = await patchRes.json();
+      assert.strictEqual(patched.gift.id, giftId);
+      assert.strictEqual(patched.gift.usageTip, updatedTip);
+      assert.strictEqual(patched.gift.subtitle, 'Descripción actualizada por AdminCiprian.');
+
+      const publicStateRes = await fetch(`${baseUrl}/api/state`);
+      assert.strictEqual(publicStateRes.status, 200);
+      const publicState = await publicStateRes.json();
+      const verifiedGift = publicState.gifts.find((g) => g.id === giftId);
+      assert.ok(verifiedGift);
+      assert.strictEqual(verifiedGift.usageTip, updatedTip);
+
+      // Clean up test-created gift
+      const deleteRes = await fetch(`${baseUrl}/api/gifts/${giftId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(deleteRes.status, 200);
+      const deleted = await deleteRes.json();
+      assert.strictEqual(deleted.state.gifts.some((g) => g.id === giftId), false);
+      assert.strictEqual(deleted.state.gifts.length, 9);
+      createdGiftIds.delete(giftId);
+    });
+
+    test('AdminCiprian can update showcaseStyle and randomizeGifts via PATCH /api/settings and restore defaults cleanly', async () => {
+      const initialRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(initialRes.status, 200);
+      const initialState = await initialRes.json();
+      initialShowcaseSettings = {
+        showcaseStyle: initialState.settings.showcaseStyle || 'luminous-gold',
+        randomizeGifts:
+          typeof initialState.settings.randomizeGifts === 'boolean' ? initialState.settings.randomizeGifts : true,
+      };
+
+      const auroraRes = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          showcaseStyle: 'crystal-aurora',
+          randomizeGifts: false,
+        }),
+      });
+      assert.strictEqual(auroraRes.status, 200);
+      const auroraData = await auroraRes.json();
+      assert.strictEqual(auroraData.settings.showcaseStyle, 'crystal-aurora');
+      assert.strictEqual(auroraData.settings.randomizeGifts, false);
+
+      const emberRes = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          showcaseStyle: 'royal-ember',
+        }),
+      });
+      assert.strictEqual(emberRes.status, 200);
+      const emberData = await emberRes.json();
+      assert.strictEqual(emberData.settings.showcaseStyle, 'royal-ember');
+      assert.strictEqual(emberData.settings.randomizeGifts, false);
+
+      // Invalid showcaseStyle value must not corrupt persisted setting
+      const invalidRes = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          showcaseStyle: 'invalid-style-attempt',
+        }),
+      });
+      assert.strictEqual(invalidRes.status, 200);
+      const invalidData = await invalidRes.json();
+      assert.strictEqual(invalidData.settings.showcaseStyle, 'royal-ember');
+
+      const publicStateRes = await fetch(`${baseUrl}/api/state`);
+      assert.strictEqual(publicStateRes.status, 200);
+      const publicState = await publicStateRes.json();
+      assert.strictEqual(publicState.settings.showcaseStyle, 'royal-ember');
+      assert.strictEqual(publicState.settings.randomizeGifts, false);
+
+      // Restore original defaults
+      const restoreRes = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(initialShowcaseSettings),
+      });
+      assert.strictEqual(restoreRes.status, 200);
+      const restored = await restoreRes.json();
+      assert.strictEqual(restored.settings.showcaseStyle, 'luminous-gold');
+      assert.strictEqual(restored.settings.randomizeGifts, true);
+      initialShowcaseSettings = null;
     });
   });
 });

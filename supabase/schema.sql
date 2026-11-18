@@ -19,8 +19,15 @@ create table if not exists public.app_settings (
   pin_code text not null default '2026',
   gift_theme text not null default 'autumn',
   custom_box_color text not null default '#C88A2B',
+  showcase_style text not null default 'luminous-gold',
+  randomize_gifts boolean not null default true,
   updated_at timestamptz not null default now()
 );
+
+alter table public.app_settings add column if not exists gift_theme text not null default 'autumn';
+alter table public.app_settings add column if not exists custom_box_color text not null default '#C88A2B';
+alter table public.app_settings add column if not exists showcase_style text not null default 'luminous-gold';
+alter table public.app_settings add column if not exists randomize_gifts boolean not null default true;
 
 -- ----------------------------------------------------------------------------
 -- 2. Catálogo de obsequios exclusivos
@@ -29,6 +36,7 @@ create table if not exists public.gifts (
   id text primary key,
   name text not null,
   subtitle text not null default '',
+  usage_tip text not null default '',
   tag text not null default '',
   visual_key text not null default 'cutlery',
   custom_image_url text,
@@ -38,6 +46,8 @@ create table if not exists public.gifts (
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.gifts add column if not exists usage_tip text not null default '';
 
 create index if not exists gifts_sort_order_idx on public.gifts (sort_order asc, created_at asc);
 
@@ -566,7 +576,9 @@ insert into public.app_settings (
   require_pin,
   pin_code,
   gift_theme,
-  custom_box_color
+  custom_box_color,
+  showcase_style,
+  randomize_gifts
 )
 values (
   'default',
@@ -577,16 +589,23 @@ values (
   false,
   '',
   'autumn',
-  '#C88A2B'
+  '#C88A2B',
+  'luminous-gold',
+  true
 )
 on conflict (id) do nothing;
+
+delete from public.gifts
+where id in ('gift-cutlery', 'gift-bowls', 'gift-sandokan', 'gift-warner', 'gift-bamboo');
 
 insert into public.gifts (
   id,
   name,
   subtitle,
+  usage_tip,
   tag,
   visual_key,
+  custom_image_url,
   accent_color,
   active,
   stock_label,
@@ -594,61 +613,133 @@ insert into public.gifts (
 )
 values
   (
-    'gift-cutlery',
-    'Cubiertos Acero Inox',
-    'Juego de cubiertos en acero inoxidable de grado quirúrgico con acabado espejo.',
-    'Colección Mesa de Otoño',
+    'gift-utensils-6',
+    'Juego de Utensilios de 6 Piezas',
+    'Set de 6 utensilios profesionales Royal Prestige en acero inoxidable de grado quirúrgico.',
+    'Úsalos para voltear, servir pastas, guisos y caldos sin rayar ni dañar tus ollas o sartenes.',
+    'Colección Acero · $300 USD',
     'cutlery',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_ccc0c9bc-Photoroom.png',
     '#C88A2B',
     true,
-    'Edición Limitada',
+    'Edición Exclusiva',
     1
   ),
   (
-    'gift-bowls',
-    'Set 2 Tazones',
-    'Set de 2 tazones térmicos de acero inoxidable con base antideslizante y sello hermético.',
-    'Favorito del Chef',
-    'bowls',
-    '#B84A27',
+    'gift-utensil-holder',
+    'Recipiente para Utensilios',
+    'Cilindro organizador Royal Prestige en acero inoxidable cepillado con base firme (MISC SP0145).',
+    'Mantén tus espátulas y cucharones favoritos secos, ordenados y siempre a la mano junto a la estufa.',
+    'Organización · $99 USD',
+    'pot',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_b86f199c-Photoroom.png',
+    '#8C6E58',
     true,
     'Disponible',
     2
   ),
   (
-    'gift-sandokan',
-    'Cuchillo Sandokan',
-    'Cuchillo de chef especializado Sandokan con filo alveolado de alta precisión.',
-    'Corte Maestro',
-    'knife',
-    '#8C3B20',
+    'gift-bowls-3',
+    'Juego de 3 Tazones para Mezclar',
+    'Set de 3 tazones herméticos en acero inoxidable con base antideslizante y tapas selladoras (PREM PR4902).',
+    'Prepara masas, marina carnes y conserva ensaladas frescas por más días gracias a su sello hermético.',
+    'Favorito del Chef · $500 USD',
+    'bowls',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_17872483-Photoroom.png',
+    '#B84A27',
     true,
     'Alta Demanda',
     3
   ),
   (
-    'gift-warner',
-    'Contenedor Térmico Warner Pro',
-    'Contenedor térmico profesional de doble pared para conservar alimentos calientes o fríos.',
-    'Especial Cosecha',
-    'thermo',
-    '#4B644A',
+    'gift-santoku-5',
+    'Cuchillo Santoku 5"',
+    'Cuchillo de precisión alveolado de 5 pulgadas con acero forjado Royal Prestige (MISC SP0296).',
+    'Sus alvéolos evitan que el alimento se pegue al rebanar verduras finas, quesos o filetes con corte limpio.',
+    'Corte Maestro · $550 USD',
+    'knife',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_a69260c7-Photoroom.png',
+    '#8C3B20',
     true,
-    'Disponible',
+    'Edición Limitada',
     4
   ),
   (
-    'gift-bamboo',
-    'Tabla Bambú',
-    'Tabla de corte artesanal en bambú orgánico prensado con canal colector de jugos.',
-    'Madera Noble',
-    'bamboo',
-    '#A66328',
+    'gift-cleaver-7',
+    'Hacha de Cocina de 7"',
+    'Hacha profesional de 7 pulgadas en acero balanceado de alto desempeño Royal Prestige (MRCH CU0825).',
+    'Aprovecha su hoja ancha para trozar carnes con firmeza y trasladar ingredientes picados de la tabla a la olla.',
+    'Precision Cut · $450 USD',
+    'knife',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_4eb72c8b-Photoroom.png',
+    '#5B4636',
     true,
     'Disponible',
     5
+  ),
+  (
+    'gift-icecream-2',
+    'Juego de 2 Copas para Helado',
+    'Dúo de copas térmicas de acero pulido espejo diseñadas para postres y sorbetes (MISC SP0252).',
+    'Enfría las copas 5 minutos antes de servir para mantener helados, mousses o frutas fríos por más tiempo.',
+    'Mesa Gourmet · $199 USD',
+    'bowls',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_0f9b4d38-Photoroom.png',
+    '#C88A2B',
+    true,
+    'Disponible',
+    6
+  ),
+  (
+    'gift-mugs-2',
+    'Juego de 2 Tazas con Pared Doble',
+    'Par de tazas térmicas de doble pared en acero inoxidable Royal Prestige (MISC SP0136).',
+    'Disfruta café, té o chocolate a temperatura ideal sin quemarte las manos ni generar condensación.',
+    'Experiencia Térmica · $200 USD',
+    'kettle',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_c2f45d1c-Photoroom.png',
+    '#7C4327',
+    true,
+    'Disponible',
+    7
+  ),
+  (
+    'gift-bamboo-large',
+    'Tabla de Bambú Grande',
+    'Tabla de corte artesanal en bambú orgánico prensado con canal colector de jugos (PREM PR0008).',
+    'Corta con seguridad cuidando el filo de tus cuchillos y usa su canal lateral para recoger jugos al asar carnes.',
+    'Madera Noble · $300 USD',
+    'bamboo',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_ba6c52cc-Photoroom.png',
+    '#A66328',
+    true,
+    'Disponible',
+    8
+  ),
+  (
+    'gift-warmer-pro',
+    'Royal Prestige Warmer Pro',
+    'Contenedor térmico eléctrico portátil para conservar tortillas y platillos calientes (PREM PE4000).',
+    'Mantén tus tortillas suaves y comidas calientes en la mesa o en reuniones gracias a su batería recargable portátil.',
+    'Edición Estrella · $600 USD',
+    'thermo',
+    '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_621e0247-Photoroom.png',
+    '#4B644A',
+    true,
+    'Edición Estrella',
+    9
   )
-on conflict (id) do nothing;
+on conflict (id) do update set
+  name = excluded.name,
+  subtitle = excluded.subtitle,
+  usage_tip = excluded.usage_tip,
+  tag = excluded.tag,
+  visual_key = excluded.visual_key,
+  custom_image_url = excluded.custom_image_url,
+  accent_color = excluded.accent_color,
+  active = excluded.active,
+  stock_label = excluded.stock_label,
+  sort_order = excluded.sort_order;
 
 insert into public.dsb_auth (
   id,

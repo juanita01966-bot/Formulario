@@ -8,16 +8,38 @@ interface MysteryCardsMenuProps {
   activeGifts: GiftItem[];
   giftTheme?: GiftThemeId;
   customBoxColor?: string;
+  randomizeGifts?: boolean;
   onSelectGift: (gift: GiftItem, cardIndex: number) => void;
 }
 
-function shuffleArray<T>(items: T[]): T[] {
+function cryptoRandomInt(max: number): number {
+  if (max <= 1) return 0;
+  const cryptoObj = typeof window !== 'undefined' ? window.crypto : globalThis.crypto;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    const range = 0x100000000;
+    const limit = range - (range % max);
+    const buf = new Uint32Array(1);
+    let value = 0;
+    do {
+      cryptoObj.getRandomValues(buf);
+      value = buf[0];
+    } while (value >= limit);
+    return value % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+
+function cryptoShuffle<T>(items: readonly T[]): T[] {
   const arr = [...items];
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = cryptoRandomInt(i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+function cryptoRandomPick<T>(items: readonly T[]): T {
+  return items[cryptoRandomInt(items.length)];
 }
 
 interface GiftBox3DTileProps {
@@ -406,6 +428,7 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
   activeGifts,
   giftTheme,
   customBoxColor,
+  randomizeGifts = true,
   onSelectGift,
 }) => {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -417,20 +440,22 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
     const pool = activeGifts.length > 0 ? activeGifts : [];
     if (pool.length === 0) return [];
     const targetCount = Math.min(6, Math.max(4, pool.length));
-    const shuffled = shuffleArray(pool);
+    const orderedPool = randomizeGifts ? cryptoShuffle(pool) : pool;
     const result: GiftItem[] = [];
     for (let i = 0; i < targetCount; i++) {
-      result.push(shuffled[i % shuffled.length]);
+      result.push(orderedPool[i % orderedPool.length]);
     }
-    return shuffleArray(result);
+    return randomizeGifts ? cryptoShuffle(result) : result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [giftIdsKey]);
+  }, [giftIdsKey, randomizeGifts]);
 
-  const handleBoxPick = (gift: GiftItem, idx: number) => {
+  const handleBoxPick = (tileGift: GiftItem, idx: number) => {
     if (selectedIndex !== null) return;
     setSelectedIndex(idx);
+    const awardedGift =
+      randomizeGifts && activeGifts.length > 0 ? cryptoRandomPick(activeGifts) : tileGift;
     window.setTimeout(() => {
-      onSelectGift(gift, idx);
+      onSelectGift(awardedGift, idx);
     }, 340);
   };
 
@@ -450,7 +475,9 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
             {firstName}, elige una <span className="gold-foil-text">cajita de regalo</span>
           </h2>
           <p className="mt-2 text-sm text-[#5C4332]">
-            Toca cualquiera de las cajas dentro del recuadro para elevarla, girarla y descubrir tu obsequio exclusivo.
+            {randomizeGifts
+              ? 'Cada cajita mezcla premios Royal Prestige al azar. Toca cualquiera para elevarla, girarla y descubrir tu obsequio exclusivo.'
+              : 'Toca cualquiera de las cajas dentro del recuadro para elevarla, girarla y descubrir tu obsequio exclusivo.'}
           </p>
         </div>
 
@@ -519,7 +546,7 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
           >
             {boxGifts.map((gift, index) => (
               <GiftBox3DTile
-                key={`${gift.id}-${index}`}
+                key={`mystery-box-${index}`}
                 index={index}
                 selectedIndex={selectedIndex}
                 giftTheme={giftTheme}

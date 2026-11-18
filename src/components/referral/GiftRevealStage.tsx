@@ -1,16 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion';
-import { CheckCircle2, MessageCircle, RotateCcw } from 'lucide-react';
-import type { GiftItem, GiftThemeId } from '../../types/app';
+import { CheckCircle2, MapPin, MessageCircle, RotateCcw, Sparkles, User } from 'lucide-react';
+import type { GiftItem, GiftThemeId, ShowcaseStyleId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
-import { GiftIllustration } from '../gifts/GiftIllustration';
+import { GiftIllustration, resolveGiftUsageTip, resolveShowcaseTokens } from '../gifts/GiftIllustration';
 
 interface GiftRevealStageProps {
   leadName: string;
+  leadAddress?: string;
   gift: GiftItem;
   claimCode: string;
   giftTheme?: GiftThemeId;
   customBoxColor?: string;
+  showcaseStyle?: ShowcaseStyleId;
   onStartAnother: () => void;
 }
 
@@ -224,8 +226,11 @@ const Real3DGiftCube: React.FC<{
   );
 };
 
-/** Luminous Crystal & Champagne Floating Showcase Stage for the Final Revealed Gift */
-const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
+/** Luminous Floating Product on Multi-Layered Pedestal Stage for the Final Revealed Gift */
+const RevealedGiftShowcase: React.FC<{
+  gift: GiftItem;
+  showcaseStyle?: ShowcaseStyleId;
+}> = ({ gift, showcaseStyle = 'luminous-gold' }) => {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const [spotlight, setSpotlight] = useState({ x: 50, y: 38, active: false });
 
@@ -233,9 +238,9 @@ const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
   const giftY = useTransform(lift, [0, 1], [0, -10]);
   const shadowScaleX = useTransform(lift, [0, 1], [1, 0.72]);
   const shadowScaleY = useTransform(lift, [0, 1], [1, 0.76]);
-  const shadowOpacity = useTransform(lift, [0, 1], [0.7, 0.3]);
-  const auraScale = useTransform(lift, [0, 1], [0.95, 1.15]);
-  const auraOpacity = useTransform(lift, [0, 1], [0.5, 0.85]);
+  const shadowOpacity = useTransform(lift, [0, 1], [0.74, 0.28]);
+  const auraScale = useTransform(lift, [0, 1], [0.94, 1.16]);
+  const auraOpacity = useTransform(lift, [0, 1], [0.55, 0.9]);
 
   useEffect(() => {
     const controls = animate(lift, [0, 1, 0], {
@@ -247,6 +252,7 @@ const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
   }, [lift]);
 
   const accent = gift.accentColor || '#C88A2B';
+  const tokens = resolveShowcaseTokens(showcaseStyle);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -275,12 +281,13 @@ const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
       transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      className="relative mb-5 flex h-52 w-60 sm:w-64 flex-col items-center justify-center overflow-hidden rounded-[28px] border border-[#FDE68A]/35 border-t-[#FEF08A]/65 bg-gradient-to-b from-[#341B10]/80 via-[#1B0D07]/90 to-[#110704]/95 p-4 perspective-1000 shadow-[0_22px_48px_-14px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(254,240,138,0.35)]"
+      style={{ background: tokens.stageBg }}
+      className={`relative mb-5 flex h-[282px] sm:h-[304px] w-full max-w-[336px] sm:max-w-[376px] flex-col items-center justify-end overflow-hidden rounded-[28px] border ${tokens.stageBorder} px-4 pt-6 pb-5 perspective-1000 shadow-[0_24px_54px_-14px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.28)]`}
     >
       {/* Top specular highlight hairline */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#FEF08A]/75 to-transparent"
+        className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/75 to-transparent"
       />
 
       {/* Interactive cursor spotlight sheen */}
@@ -289,31 +296,51 @@ const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
         className="pointer-events-none absolute inset-0 transition-opacity duration-200"
         style={{
           opacity: spotlight.active ? 1 : 0,
-          background: `radial-gradient(210px circle at ${spotlight.x}% ${spotlight.y}%, rgba(254, 240, 138, 0.22), rgba(229, 174, 78, 0.08) 46%, transparent 74%)`,
+          background: `radial-gradient(230px circle at ${spotlight.x}% ${spotlight.y}%, ${tokens.spotlightTint}, transparent 72%)`,
         }}
       />
 
-      {/* Luminous studio champagne + gift accent radial halo behind product */}
+      {/* Soft vertical ascending spotlight rays wrapping behind the floating PNG */}
+      <motion.div
+        aria-hidden="true"
+        style={{
+          opacity: auraOpacity,
+          background: tokens.rayGradient,
+          clipPath: 'polygon(24% 100%, 76% 100%, 100% 0%, 0% 0%)',
+        }}
+        className="pointer-events-none absolute bottom-14 left-1/2 -translate-x-1/2 h-52 w-60 blur-xl will-change-transform"
+      />
+      <motion.div
+        aria-hidden="true"
+        style={{
+          opacity: auraOpacity,
+          background: tokens.rayCoreGradient,
+          clipPath: 'polygon(22% 100%, 78% 100%, 96% 0%, 4% 0%)',
+        }}
+        className="pointer-events-none absolute bottom-14 left-1/2 -translate-x-1/2 h-44 w-36 blur-md will-change-transform"
+      />
+
+      {/* Luminous studio radial halo behind floating product */}
       <motion.div
         aria-hidden="true"
         style={{
           scale: auraScale,
           opacity: auraOpacity,
-          background: `radial-gradient(circle, rgba(254,240,138,0.45) 0%, ${accent}38 48%, transparent 74%)`,
+          background: `radial-gradient(circle, ${tokens.auraCore} 0%, ${accent}38 50%, transparent 76%)`,
         }}
-        className="pointer-events-none absolute top-4 h-36 w-36 rounded-full blur-2xl will-change-transform"
+        className="pointer-events-none absolute top-9 h-44 w-44 rounded-full blur-2xl will-change-transform"
       />
 
       {/* Subtle crystalline orbital ring behind the floating gift */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute top-6 h-32 w-32 rounded-full border border-[#FEF08A]/20 shadow-[0_0_24px_rgba(253,224,71,0.14)]"
+        className={`pointer-events-none absolute top-11 h-40 w-40 sm:h-44 sm:w-44 rounded-full border ${tokens.haloBorder}`}
       />
 
-      {/* Levitating HD Gift Artwork */}
+      {/* Levitating Frameless Transparent PNG Product */}
       <motion.div
         style={{ y: giftY }}
-        className="relative z-10 flex items-center justify-center will-change-transform"
+        className="relative z-20 mb-2 flex items-center justify-center will-change-transform"
       >
         <div
           style={{
@@ -326,14 +353,17 @@ const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
             visualKey={gift.visualKey}
             customImageUrl={gift.customImageUrl}
             accentColor={accent}
-            size={118}
+            size={156}
+            className="sm:!w-[172px] sm:!h-[172px]"
+            variant="clean"
+            alt={gift.name}
           />
         </div>
       </motion.div>
 
-      {/* Luminous Crystal & Gold Pedestal + Synchronized Ground Contact Shadow */}
-      <div className="relative z-0 -mt-1 flex flex-col items-center justify-center">
-        {/* Synchronized contact shadow resting directly on the crystal pedestal */}
+      {/* Multi-layered Luminous Pedestal Base */}
+      <div className="relative z-10 -mt-2 flex flex-col items-center justify-center">
+        {/* 1. Inverse-scaled oval contact shadow right on the luminous glass disc */}
         <motion.div
           aria-hidden="true"
           style={{
@@ -341,22 +371,41 @@ const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
             scaleY: shadowScaleY,
             opacity: shadowOpacity,
           }}
-          className="relative z-20 h-3 w-28 rounded-full bg-gradient-to-r from-transparent via-black/90 to-transparent blur-[3.5px] will-change-transform"
+          className="relative z-30 -mb-2.5 h-3.5 w-32 sm:w-36 rounded-full bg-gradient-to-r from-transparent via-black/95 to-transparent blur-[4px] will-change-transform"
         />
 
-        {/* Crystal & Gold Pedestal Top Plate */}
+        {/* 2. Glass platform with bright specular rim */}
         <div
           aria-hidden="true"
-          className="relative z-10 -mt-2 h-6 w-40 rounded-full border border-[#FEF08A]/55 bg-gradient-to-b from-[#FFFDF9]/35 via-[#E5AE4E]/22 to-[#2B150B]/70 backdrop-blur-md shadow-[0_10px_24px_rgba(229,174,78,0.28),inset_0_1px_1px_rgba(255,255,255,0.75)]"
+          style={{ background: tokens.glassPlatformBg }}
+          className={`relative z-20 h-8 w-48 sm:w-56 rounded-[999px] border ${tokens.glassPlatformBorder} backdrop-blur-md shadow-[0_8px_24px_rgba(0,0,0,0.45),inset_0_1px_1px_rgba(255,255,255,0.82)]`}
         >
-          <div className="pointer-events-none absolute inset-x-6 top-0.5 h-px rounded-full bg-gradient-to-r from-transparent via-white/80 to-transparent" />
+          <div className="pointer-events-none absolute inset-x-7 top-0.5 h-px rounded-full bg-gradient-to-r from-transparent via-white/95 to-transparent" />
+          {/* Inner concentric plasma ring resting on platform */}
+          <div
+            className={`pointer-events-none absolute inset-x-5 inset-y-1.5 rounded-[999px] border ${tokens.plasmaInnerBorder}`}
+          />
         </div>
 
-        {/* Pedestal bottom gold rim reflection */}
+        {/* 3. Concentric luminous neon plasma ring framing the pedestal */}
         <motion.div
           aria-hidden="true"
-          style={{ opacity: auraOpacity }}
-          className="-mt-2.5 h-3 w-32 rounded-full bg-gradient-to-r from-transparent via-[#FDE68A]/35 to-transparent blur-md will-change-transform"
+          style={{
+            opacity: auraOpacity,
+            boxShadow: tokens.plasmaRingShadow,
+          }}
+          className={`relative z-10 -mt-6 h-10 w-60 sm:w-64 rounded-[999px] border-2 ${tokens.plasmaRingBorder} will-change-transform`}
+        />
+
+        {/* 4. Bottom glowing energy disc */}
+        <motion.div
+          aria-hidden="true"
+          style={{
+            scale: auraScale,
+            opacity: auraOpacity,
+            background: tokens.energyDiscGradient,
+          }}
+          className="pointer-events-none -mt-5 h-9 w-64 sm:w-72 rounded-full blur-xl will-change-transform"
         />
       </div>
     </motion.div>
@@ -365,10 +414,12 @@ const RevealedGiftShowcase: React.FC<{ gift: GiftItem }> = ({ gift }) => {
 
 export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   leadName,
+  leadAddress,
   gift,
   claimCode,
   giftTheme,
   customBoxColor,
+  showcaseStyle = 'luminous-gold',
   onStartAnother,
 }) => {
   const [phase, setPhase] = useState<RevealPhase>('floating');
@@ -561,8 +612,10 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   }, []);
 
   const firstName = leadName.trim().split(/\s+/)[0] || 'Invitado';
+  const cleanAddress = leadAddress?.trim() || '';
+  const usageTip = resolveGiftUsageTip(gift);
   const whatsappText = encodeURIComponent(
-    `Hola! Acabo de activar mi experiencia en The Ciprian Company. Mi nombre es ${leadName}, destapé el regalo "${gift.name}" con código ${claimCode}.`
+    `Hola! Acabo de activar mi experiencia en The Ciprian Company. Mi nombre es ${leadName}${cleanAddress ? ` (${cleanAddress})` : ''}, destapé el regalo "${gift.name}" con código ${claimCode}.`
   );
 
   const stageHeadline =
@@ -576,10 +629,10 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="relative w-full max-w-[540px] mx-auto"
+      className="relative w-full max-w-[560px] mx-auto"
     >
       <div
-        className="relative overflow-hidden rounded-[34px] border border-[#C88A2B]/55 border-t-[#FDE68A]/55 shadow-[0_30px_80px_-15px_rgba(34,21,14,0.78),inset_0_1px_0_rgba(254,240,138,0.24)] px-6 py-9 sm:px-9 sm:py-11 text-center text-[#FAF3E8]"
+        className="relative overflow-hidden rounded-[34px] border border-[#C88A2B]/55 border-t-[#FDE68A]/55 shadow-[0_30px_80px_-15px_rgba(34,21,14,0.78),inset_0_1px_0_rgba(254,240,138,0.24)] px-5 py-8 sm:px-9 sm:py-10 text-center text-[#FAF3E8]"
         style={{
           background: 'radial-gradient(ellipse at 50% 18%, #3B1F13 0%, #1C0D07 52%, #110703 100%)',
         }}
@@ -643,40 +696,72 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
               className="relative z-10 flex flex-col items-center text-center"
             >
               {/* Bespoke Concierge Certificate Header */}
-              <div className="flex items-center justify-center gap-3 w-full max-w-xs mb-5">
-                <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#C88A2B]/60" />
-                <span className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-[#E5AE4E]">
-                  Certificado de Obsequio
+              <div className="flex items-center justify-center gap-3 w-full max-w-sm mb-5">
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#C88A2B]/65" />
+                <span className="text-[10.5px] font-bold uppercase tracking-[0.2em] text-[#E5AE4E] whitespace-nowrap">
+                  Certificado Oficial · The Ciprian Company
                 </span>
-                <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#C88A2B]/60" />
+                <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#C88A2B]/65" />
               </div>
 
-              {/* Luminous Crystal & Gold Floating Showcase Pedestal */}
-              <RevealedGiftShowcase gift={gift} />
+              {/* Luminous Floating Product on Multi-Layered Pedestal */}
+              <RevealedGiftShowcase gift={gift} showcaseStyle={showcaseStyle} />
 
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#D8B478]">
+              <p className="inline-flex items-center rounded-full border border-[#C88A2B]/35 bg-[#2A160C]/80 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-[#E8C589]">
                 {gift.tag}
               </p>
-              <h2 className="mt-1.5 font-serif text-2xl sm:text-[30px] font-semibold text-[#FFFDF9] leading-tight">
+              <h2 className="mt-2.5 font-serif text-2xl sm:text-[31px] font-semibold text-[#FFFDF9] leading-tight">
                 {gift.name}
               </h2>
-              <p className="mt-2 max-w-md text-xs sm:text-sm leading-relaxed text-[#D8C5B0]">
+              <p className="mt-2 max-w-md text-xs sm:text-sm leading-relaxed text-[#DECAB4]">
                 {gift.subtitle}
               </p>
 
-              {/* Editorial Voucher Ticket Strip */}
-              <div className="mt-6 w-full rounded-2xl bg-[#160B06]/85 border border-[#C88A2B]/35 px-5 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="text-center sm:text-left">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#B89B7A]">
-                    Folio de cortesía · {firstName}
-                  </p>
-                  <p className="mt-0.5 font-mono text-xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
-                    {claimCode}
-                  </p>
+              {/* Dedicated "Máximo Provecho" Card Strip */}
+              <div className="mt-5 w-full rounded-2xl border border-[#E5AE4E]/30 bg-gradient-to-br from-[#2B170D]/90 via-[#1E0F08]/95 to-[#150A05]/95 px-4 py-3.5 text-left shadow-[inset_0_1px_0_rgba(254,240,138,0.16)]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#E5AE4E]/15 border border-[#F4CA73]/40">
+                    <Sparkles className="h-3 w-3 text-[#F4CA73]" />
+                  </span>
+                  <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-[#F4CA73]">
+                    Cómo sacarle el máximo provecho
+                  </span>
                 </div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-950/60 px-3.5 py-1.5 text-xs font-medium text-emerald-200">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                  Confirmado en catálogo
+                <p className="text-xs sm:text-[13px] leading-relaxed text-[#F5E7D6]">
+                  {usageTip}
+                </p>
+              </div>
+
+              {/* Refined Folio & Delivery Information Card */}
+              <div className="mt-4 w-full rounded-2xl bg-[#160B06]/90 border border-[#C88A2B]/35 px-4 sm:px-5 py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-center sm:text-left">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#B89B7A]">
+                      Folio de reclamación
+                    </p>
+                    <p className="mt-0.5 font-mono text-xl sm:text-2xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
+                      {claimCode}
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center justify-center gap-2 self-center sm:self-auto rounded-full border border-emerald-400/35 bg-emerald-950/65 px-3.5 py-1.5 text-xs font-semibold text-emerald-200">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    Confirmado · Royal Prestige
+                  </div>
+                </div>
+
+                <div className="mt-3.5 pt-3 border-t border-[#C88A2B]/20 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  <div className="flex items-center gap-2 text-[#E8D5BE] min-w-0">
+                    <User className="h-3.5 w-3.5 text-[#C88A2B] shrink-0" />
+                    <span className="text-[#A88D71] shrink-0">Titular:</span>
+                    <span className="font-semibold text-[#FFFDF9] truncate">{leadName}</span>
+                  </div>
+                  {cleanAddress && (
+                    <div className="flex items-center gap-2 text-[#E8D5BE] min-w-0">
+                      <MapPin className="h-3.5 w-3.5 text-[#C88A2B] shrink-0" />
+                      <span className="text-[#A88D71] shrink-0">Ubicación:</span>
+                      <span className="font-semibold text-[#FFFDF9] truncate">{cleanAddress}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -13,57 +13,117 @@ const BUNDLED_DEFAULT_STORE = {
     defaultTicketAmount: 2792,
     requirePin: false,
     pinCode: '',
+    showcaseStyle: 'luminous-gold',
+    randomizeGifts: true,
   },
   gifts: [
     {
-      id: 'gift-cutlery',
-      name: 'Cubiertos Acero Inox',
-      subtitle: 'Juego de cubiertos en acero inoxidable de grado quirúrgico con acabado espejo.',
-      tag: 'Colección Mesa de Otoño',
+      id: 'gift-utensils-6',
+      name: 'Juego de Utensilios de 6 Piezas',
+      subtitle: 'Set de 6 utensilios profesionales Royal Prestige en acero inoxidable de grado quirúrgico.',
+      usageTip: 'Úsalos para voltear, servir pastas, guisos y caldos sin rayar ni dañar tus ollas o sartenes.',
+      tag: 'Colección Acero · $300 USD',
       visualKey: 'cutlery',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_ccc0c9bc-Photoroom.png',
       accentColor: '#C88A2B',
       active: true,
-      stockLabel: 'Edición Limitada',
+      stockLabel: 'Edición Exclusiva',
     },
     {
-      id: 'gift-bowls',
-      name: 'Set 2 Tazones',
-      subtitle: 'Set de 2 tazones térmicos de acero inoxidable con base antideslizante y sello hermético.',
-      tag: 'Favorito del Chef',
-      visualKey: 'bowls',
-      accentColor: '#B84A27',
+      id: 'gift-utensil-holder',
+      name: 'Recipiente para Utensilios',
+      subtitle: 'Cilindro organizador Royal Prestige en acero inoxidable cepillado con base firme (MISC SP0145).',
+      usageTip: 'Mantén tus espátulas y cucharones favoritos secos, ordenados y siempre a la mano junto a la estufa.',
+      tag: 'Organización · $99 USD',
+      visualKey: 'pot',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_b86f199c-Photoroom.png',
+      accentColor: '#8C6E58',
       active: true,
       stockLabel: 'Disponible',
     },
     {
-      id: 'gift-sandokan',
-      name: 'Cuchillo Sandokan',
-      subtitle: 'Cuchillo de chef especializado Sandokan con filo alveolado de alta precisión.',
-      tag: 'Corte Maestro',
-      visualKey: 'knife',
-      accentColor: '#8C3B20',
+      id: 'gift-bowls-3',
+      name: 'Juego de 3 Tazones para Mezclar',
+      subtitle: 'Set de 3 tazones herméticos en acero inoxidable con base antideslizante y tapas selladoras (PREM PR4902).',
+      usageTip: 'Prepara masas, marina carnes y conserva ensaladas frescas por más días gracias a su sello hermético.',
+      tag: 'Favorito del Chef · $500 USD',
+      visualKey: 'bowls',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_17872483-Photoroom.png',
+      accentColor: '#B84A27',
       active: true,
       stockLabel: 'Alta Demanda',
     },
     {
-      id: 'gift-warner',
-      name: 'Contenedor Térmico Warner Pro',
-      subtitle: 'Contenedor térmico profesional de doble pared para conservar alimentos calientes o fríos.',
-      tag: 'Especial Cosecha',
-      visualKey: 'thermo',
-      accentColor: '#4B644A',
+      id: 'gift-santoku-5',
+      name: 'Cuchillo Santoku 5"',
+      subtitle: 'Cuchillo de precisión alveolado de 5 pulgadas con acero forjado Royal Prestige (MISC SP0296).',
+      usageTip: 'Sus alvéolos evitan que el alimento se pegue al rebanar verduras finas, quesos o filetes con corte limpio.',
+      tag: 'Corte Maestro · $550 USD',
+      visualKey: 'knife',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_a69260c7-Photoroom.png',
+      accentColor: '#8C3B20',
+      active: true,
+      stockLabel: 'Edición Limitada',
+    },
+    {
+      id: 'gift-cleaver-7',
+      name: 'Hacha de Cocina de 7"',
+      subtitle: 'Hacha profesional de 7 pulgadas en acero balanceado de alto desempeño Royal Prestige (MRCH CU0825).',
+      usageTip: 'Aprovecha su hoja ancha para trozar carnes con firmeza y trasladar ingredientes picados de la tabla a la olla.',
+      tag: 'Precision Cut · $450 USD',
+      visualKey: 'knife',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_4eb72c8b-Photoroom.png',
+      accentColor: '#5B4636',
       active: true,
       stockLabel: 'Disponible',
     },
     {
-      id: 'gift-bamboo',
-      name: 'Tabla Bambú',
-      subtitle: 'Tabla de corte artesanal en bambú orgánico prensado con canal colector de jugos.',
-      tag: 'Madera Noble',
+      id: 'gift-icecream-2',
+      name: 'Juego de 2 Copas para Helado',
+      subtitle: 'Dúo de copas térmicas de acero pulido espejo diseñadas para postres y sorbetes (MISC SP0252).',
+      usageTip: 'Enfría las copas 5 minutos antes de servir para mantener helados, mousses o frutas fríos por más tiempo.',
+      tag: 'Mesa Gourmet · $199 USD',
+      visualKey: 'bowls',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_0f9b4d38-Photoroom.png',
+      accentColor: '#C88A2B',
+      active: true,
+      stockLabel: 'Disponible',
+    },
+    {
+      id: 'gift-mugs-2',
+      name: 'Juego de 2 Tazas con Pared Doble',
+      subtitle: 'Par de tazas térmicas de doble pared en acero inoxidable Royal Prestige (MISC SP0136).',
+      usageTip: 'Disfruta café, té o chocolate a temperatura ideal sin quemarte las manos ni generar condensación.',
+      tag: 'Experiencia Térmica · $200 USD',
+      visualKey: 'kettle',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_c2f45d1c-Photoroom.png',
+      accentColor: '#7C4327',
+      active: true,
+      stockLabel: 'Disponible',
+    },
+    {
+      id: 'gift-bamboo-large',
+      name: 'Tabla de Bambú Grande',
+      subtitle: 'Tabla de corte artesanal en bambú orgánico prensado con canal colector de jugos (PREM PR0008).',
+      usageTip: 'Corta con seguridad cuidando el filo de tus cuchillos y usa su canal lateral para recoger jugos al asar carnes.',
+      tag: 'Madera Noble · $300 USD',
       visualKey: 'bamboo',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_ba6c52cc-Photoroom.png',
       accentColor: '#A66328',
       active: true,
       stockLabel: 'Disponible',
+    },
+    {
+      id: 'gift-warmer-pro',
+      name: 'Royal Prestige Warmer Pro',
+      subtitle: 'Contenedor térmico eléctrico portátil para conservar tortillas y platillos calientes (PREM PE4000).',
+      usageTip: 'Mantén tus tortillas suaves y comidas calientes en la mesa o en reuniones gracias a su batería recargable portátil.',
+      tag: 'Edición Estrella · $600 USD',
+      visualKey: 'thermo',
+      customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_621e0247-Photoroom.png',
+      accentColor: '#4B644A',
+      active: true,
+      stockLabel: 'Edición Estrella',
     },
   ],
   leads: [],
@@ -131,6 +191,7 @@ const VALID_GIFT_THEMES = new Set([
   'ruby-velvet',
   'custom',
 ]);
+const VALID_SHOWCASE_STYLES = new Set(['luminous-gold', 'crystal-aurora', 'royal-ember']);
 const VALID_VISUAL_KEYS = new Set([
   'cutlery',
   'bowls',
@@ -471,6 +532,61 @@ function isMissingQrTableError(err) {
 }
 
 let memoryQrFallback = null;
+const memoryGiftUsageTips = new Map();
+const memorySettingsFallback = {};
+
+function isMissingColumnError(err, columnNames = []) {
+  if (!err) return false;
+  const code = String(err.code || '').toUpperCase();
+  const msg = String(err.message || '').toLowerCase();
+  const looksLikeMissingCol =
+    code === 'PGRST204' ||
+    code === '42703' ||
+    msg.includes('pgrst204') ||
+    msg.includes('42703') ||
+    msg.includes('schema cache') ||
+    msg.includes('does not exist') ||
+    msg.includes('could not find the');
+  if (!looksLikeMissingCol) return false;
+  if (columnNames.length === 0) return true;
+  return columnNames.some((col) => msg.includes(String(col).toLowerCase()));
+}
+
+async function supabaseWriteWithOptionalColumns(restPath, method, headers, payload, optionalColumns) {
+  let currentPayload = payload;
+  const stripped = new Set();
+  for (let attempt = 0; attempt <= optionalColumns.length; attempt += 1) {
+    try {
+      return await supabaseRest(restPath, {
+        method,
+        headers,
+        body: JSON.stringify(currentPayload),
+      });
+    } catch (err) {
+      const remaining = optionalColumns.filter((col) => !stripped.has(col));
+      if (remaining.length === 0 || !isMissingColumnError(err, remaining)) {
+        throw err;
+      }
+      const msg = String(err.message || '').toLowerCase();
+      const matched = remaining.filter((col) => msg.includes(col.toLowerCase()));
+      const toDrop = matched.length > 0 ? matched : remaining;
+      for (const col of toDrop) {
+        stripped.add(col);
+      }
+      const stripRow = (row) => {
+        const copy = { ...row };
+        for (const col of stripped) {
+          delete copy[col];
+        }
+        return copy;
+      };
+      currentPayload = Array.isArray(currentPayload)
+        ? currentPayload.map(stripRow)
+        : stripRow(currentPayload);
+    }
+  }
+  return null;
+}
 
 function getFallbackQrHistory() {
   if (Array.isArray(memoryQrFallback)) {
@@ -567,6 +683,19 @@ function mapSettingsRow(row) {
     pinCode: '',
     giftTheme: VALID_GIFT_THEMES.has(row.gift_theme) ? row.gift_theme : 'autumn',
     customBoxColor: row.custom_box_color || '#C88A2B',
+    showcaseStyle: VALID_SHOWCASE_STYLES.has(row.showcase_style)
+      ? row.showcase_style
+      : VALID_SHOWCASE_STYLES.has(memorySettingsFallback.showcaseStyle)
+        ? memorySettingsFallback.showcaseStyle
+        : defaults.showcaseStyle || 'luminous-gold',
+    randomizeGifts:
+      typeof row.randomize_gifts === 'boolean'
+        ? row.randomize_gifts
+        : typeof memorySettingsFallback.randomizeGifts === 'boolean'
+          ? memorySettingsFallback.randomizeGifts
+          : typeof defaults.randomizeGifts === 'boolean'
+            ? defaults.randomizeGifts
+            : true,
   };
 }
 
@@ -575,6 +704,10 @@ function mapGiftRow(row) {
     id: row.id,
     name: row.name,
     subtitle: row.subtitle || '',
+    usageTip:
+      typeof row.usage_tip === 'string'
+        ? row.usage_tip
+        : memoryGiftUsageTips.get(row.id) ?? '',
     tag: row.tag || '',
     visualKey: VALID_VISUAL_KEYS.has(row.visual_key) ? row.visual_key : 'cutlery',
     customImageUrl: row.custom_image_url || undefined,
@@ -1170,7 +1303,7 @@ app.post('/api/leads', async (req, res) => {
     const activeGifts = store.gifts.filter((g) => g.active);
     const chosenGift =
       store.gifts.find((g) => g.id === giftId) ||
-      activeGifts[Math.floor(Math.random() * activeGifts.length)] ||
+      (activeGifts.length > 0 ? activeGifts[crypto.randomInt(activeGifts.length)] : null) ||
       store.gifts[0] ||
       null;
 
@@ -1420,7 +1553,7 @@ app.delete('/api/leads/:id', requireAdminRole, async (req, res) => {
 });
 
 app.post('/api/gifts', requireAdminRole, async (req, res) => {
-  const { name, subtitle, tag, visualKey, customImageUrl, accentColor, active, stockLabel } = req.body || {};
+  const { name, subtitle, usageTip, tag, visualKey, customImageUrl, accentColor, active, stockLabel } = req.body || {};
   const cleanName = typeof name === 'string' ? name.trim() : '';
   if (cleanName.length < 2) {
     return res.status(400).json({ error: 'El nombre del regalo es obligatorio.' });
@@ -1432,6 +1565,7 @@ app.post('/api/gifts', requireAdminRole, async (req, res) => {
       id: generateId('gift'),
       name: cleanName,
       subtitle: typeof subtitle === 'string' && subtitle.trim() ? subtitle.trim() : 'Obsequio exclusivo Show de Cocina.',
+      usageTip: typeof usageTip === 'string' ? usageTip.trim() : '',
       tag: typeof tag === 'string' && tag.trim() ? tag.trim() : 'Edición Especial',
       visualKey: VALID_VISUAL_KEYS.has(visualKey) ? visualKey : 'pot',
       customImageUrl: typeof customImageUrl === 'string' && customImageUrl.trim() ? customImageUrl.trim() : undefined,
@@ -1441,13 +1575,16 @@ app.post('/api/gifts', requireAdminRole, async (req, res) => {
     };
 
     if (USE_SUPABASE) {
-      await supabaseRest('gifts', {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
+      memoryGiftUsageTips.set(newGift.id, newGift.usageTip);
+      await supabaseWriteWithOptionalColumns(
+        'gifts',
+        'POST',
+        { Prefer: 'return=minimal' },
+        {
           id: newGift.id,
           name: newGift.name,
           subtitle: newGift.subtitle,
+          usage_tip: newGift.usageTip,
           tag: newGift.tag,
           visual_key: newGift.visualKey,
           custom_image_url: newGift.customImageUrl || null,
@@ -1455,8 +1592,9 @@ app.post('/api/gifts', requireAdminRole, async (req, res) => {
           active: newGift.active,
           stock_label: newGift.stockLabel,
           sort_order: Math.floor(Date.now() / 1000),
-        }),
-      });
+        },
+        ['usage_tip']
+      );
       const updatedStore = await getActiveStore();
       return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
     }
@@ -1492,6 +1630,12 @@ app.patch('/api/gifts/:id', requireAdminRole, async (req, res) => {
       ...current,
       name: typeof updates.name === 'string' && updates.name.trim() ? updates.name.trim() : current.name,
       subtitle: typeof updates.subtitle === 'string' ? updates.subtitle.trim() : current.subtitle,
+      usageTip:
+        typeof updates.usageTip === 'string'
+          ? updates.usageTip.trim()
+          : typeof current.usageTip === 'string'
+            ? current.usageTip
+            : '',
       tag: typeof updates.tag === 'string' ? updates.tag.trim() : current.tag,
       visualKey: VALID_VISUAL_KEYS.has(updates.visualKey) ? updates.visualKey : current.visualKey,
       customImageUrl:
@@ -1512,20 +1656,24 @@ app.patch('/api/gifts/:id', requireAdminRole, async (req, res) => {
     };
 
     if (USE_SUPABASE) {
-      await supabaseRest(`gifts?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
+      memoryGiftUsageTips.set(id, nextGift.usageTip);
+      await supabaseWriteWithOptionalColumns(
+        `gifts?id=eq.${encodeURIComponent(id)}`,
+        'PATCH',
+        { Prefer: 'return=minimal' },
+        {
           name: nextGift.name,
           subtitle: nextGift.subtitle,
+          usage_tip: nextGift.usageTip,
           tag: nextGift.tag,
           visual_key: nextGift.visualKey,
           custom_image_url: nextGift.customImageUrl || null,
           accent_color: nextGift.accentColor,
           active: nextGift.active,
           stock_label: nextGift.stockLabel,
-        }),
-      });
+        },
+        ['usage_tip']
+      );
       const updatedStore = await getActiveStore();
       return res.json({ gift: nextGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
     }
@@ -1570,23 +1718,30 @@ app.post('/api/gifts/reset', requireAdminRole, async (_req, res) => {
     const defaults = readDefaultStore();
 
     if (USE_SUPABASE) {
-      const rows = defaults.gifts.map((gift, idx) => ({
-        id: gift.id,
-        name: gift.name,
-        subtitle: gift.subtitle,
-        tag: gift.tag,
-        visual_key: gift.visualKey,
-        custom_image_url: null,
-        accent_color: gift.accentColor,
-        active: gift.active,
-        stock_label: gift.stockLabel,
-        sort_order: idx + 1,
-      }));
-      await supabaseRest('gifts', {
-        method: 'POST',
-        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(rows),
+      memoryGiftUsageTips.clear();
+      const rows = defaults.gifts.map((gift, idx) => {
+        memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
+        return {
+          id: gift.id,
+          name: gift.name,
+          subtitle: gift.subtitle,
+          usage_tip: gift.usageTip || '',
+          tag: gift.tag,
+          visual_key: gift.visualKey,
+          custom_image_url: gift.customImageUrl || null,
+          accent_color: gift.accentColor,
+          active: gift.active,
+          stock_label: gift.stockLabel,
+          sort_order: idx + 1,
+        };
       });
+      await supabaseWriteWithOptionalColumns(
+        'gifts',
+        'POST',
+        { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        rows,
+        ['usage_tip']
+      );
       const defaultIds = defaults.gifts.map((g) => `"${g.id}"`).join(',');
       await supabaseRest(`gifts?id=not.in.(${encodeURIComponent(defaultIds)})`, {
         method: 'DELETE',
@@ -1634,13 +1789,25 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
         typeof updates.customBoxColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(updates.customBoxColor.trim())
           ? updates.customBoxColor.trim()
           : store.settings.customBoxColor || '#B84A27',
+      showcaseStyle: VALID_SHOWCASE_STYLES.has(updates.showcaseStyle)
+        ? updates.showcaseStyle
+        : store.settings.showcaseStyle || 'luminous-gold',
+      randomizeGifts:
+        typeof updates.randomizeGifts === 'boolean'
+          ? updates.randomizeGifts
+          : typeof store.settings.randomizeGifts === 'boolean'
+            ? store.settings.randomizeGifts
+            : true,
     };
 
     if (USE_SUPABASE) {
-      await supabaseRest('app_settings?id=eq.default', {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
+      memorySettingsFallback.showcaseStyle = nextSettings.showcaseStyle;
+      memorySettingsFallback.randomizeGifts = nextSettings.randomizeGifts;
+      await supabaseWriteWithOptionalColumns(
+        'app_settings?id=eq.default',
+        'PATCH',
+        { Prefer: 'return=minimal' },
+        {
           advisor_name: nextSettings.advisorName,
           host_title: nextSettings.hostTitle,
           brand_subtitle: nextSettings.brandSubtitle,
@@ -1648,9 +1815,12 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
           require_pin: nextSettings.requirePin,
           gift_theme: nextSettings.giftTheme,
           custom_box_color: nextSettings.customBoxColor,
+          showcase_style: nextSettings.showcaseStyle,
+          randomize_gifts: nextSettings.randomizeGifts,
           updated_at: new Date().toISOString(),
-        }),
-      });
+        },
+        ['showcase_style', 'randomize_gifts', 'gift_theme', 'custom_box_color']
+      );
       const updatedStore = await getActiveStore();
       const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
       return res.json({ settings: sanitized.settings, state: sanitized });

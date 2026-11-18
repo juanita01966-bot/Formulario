@@ -8,6 +8,7 @@ import { QualificationQuiz } from '../components/referral/QualificationQuiz';
 import { CustomLoader } from '../components/referral/CustomLoader';
 import { MysteryCardsMenu } from '../components/referral/MysteryCardsMenu';
 import { GiftRevealStage } from '../components/referral/GiftRevealStage';
+import { WelcomeOrbGuide } from '../components/referral/WelcomeOrbGuide';
 
 type FlowStep = 'form' | 'quiz' | 'loading' | 'cards' | 'reveal';
 
@@ -83,7 +84,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
   };
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col items-center justify-center px-4 py-8 sm:py-12">
+    <div className="relative min-h-screen w-full flex flex-col items-center justify-center px-4 py-8 pb-24 sm:py-12 sm:pb-14">
       <AutumnAtmosphere variant="public" />
 
       <main className="relative z-10 w-full">
@@ -111,6 +112,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
               activeGifts={safeActiveGifts}
               giftTheme={appState.settings.giftTheme}
               customBoxColor={appState.settings.customBoxColor}
+              randomizeGifts={appState.settings.randomizeGifts ?? true}
               onSelectGift={handleSelectMysteryCard}
             />
           )}
@@ -119,13 +121,19 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
             <GiftRevealStage
               key="step-reveal"
               leadName={currentLead.name}
+              leadAddress={currentLead.address}
               gift={revealedGift}
               claimCode={currentLead.claimCode}
+              giftTheme={appState.settings.giftTheme}
+              customBoxColor={appState.settings.customBoxColor}
+              showcaseStyle={appState.settings.showcaseStyle}
               onStartAnother={handleResetFlow}
             />
           )}
         </AnimatePresence>
       </main>
+
+      <WelcomeOrbGuide currentStep={step} leadName={currentLead?.name} />
 
       {/* Strictly public footer with zero reference to /#/dsb */}
       <footer className="relative z-10 mt-8 text-center text-[11px] text-[#8B6F5B]">
