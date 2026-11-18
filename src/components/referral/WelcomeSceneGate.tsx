@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Play, X } from 'lucide-react';
+import { Play, Volume2, X } from 'lucide-react';
 
 export const WelcomeSceneGate: React.FC = () => {
   const prefersReduced = useReducedMotion();
@@ -8,27 +8,42 @@ export const WelcomeSceneGate: React.FC = () => {
   const [isOpen, setIsOpen] = useState(true);
   const [hasVideoEnded, setHasVideoEnded] = useState(false);
   const [needsPlayTap, setNeedsPlayTap] = useState(false);
+  const [isMutedByPolicy, setIsMutedByPolicy] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const allowPolicyMuteRef = useRef(false);
+
+  const enforceFullVolume = useCallback((video: HTMLVideoElement) => {
+    allowPolicyMuteRef.current = false;
+    video.muted = false;
+    video.defaultMuted = false;
+    if (video.volume < 1) {
+      video.volume = 1;
+    }
+    setIsMutedByPolicy(false);
+  }, []);
 
   const attemptAutoplayOnce = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
 
     try {
-      video.muted = false;
+      enforceFullVolume(video);
       await video.play();
       setNeedsPlayTap(false);
     } catch {
-      // Browser policy blocked unmuted autoplay: fall back quietly to muted autoplay
+      // Browser policy blocked unmuted autoplay: start muted while awaiting first user gesture
       try {
+        allowPolicyMuteRef.current = true;
         video.muted = true;
         await video.play();
+        setIsMutedByPolicy(true);
         setNeedsPlayTap(false);
       } catch {
+        allowPolicyMuteRef.current = false;
         setNeedsPlayTap(true);
       }
     }
-  }, []);
+  }, [enforceFullVolume]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -41,24 +56,37 @@ export const WelcomeSceneGate: React.FC = () => {
   const handleVideoSurfaceClick = () => {
     const video = videoRef.current;
     if (!video || hasVideoEnded) return;
-    if (video.muted) {
-      video.muted = false;
-    }
+    enforceFullVolume(video);
     if (video.paused) {
       void video.play().catch(() => {});
+    }
+  };
+
+  const handleVolumeChange = () => {
+    const video = videoRef.current;
+    if (!video || allowPolicyMuteRef.current) return;
+    if (video.muted || video.volume < 1) {
+      video.muted = false;
+      video.volume = 1;
     }
   };
 
   const handleManualPlay = () => {
     const video = videoRef.current;
     if (!video) return;
-    video.muted = false;
+    enforceFullVolume(video);
     void video
       .play()
-      .then(() => setNeedsPlayTap(false))
+      .then(() => {
+        setNeedsPlayTap(false);
+      })
       .catch(() => {
+        allowPolicyMuteRef.current = true;
         video.muted = true;
-        void video.play().then(() => setNeedsPlayTap(false));
+        void video.play().then(() => {
+          setIsMutedByPolicy(true);
+          setNeedsPlayTap(false);
+        });
       });
   };
 
@@ -85,6 +113,11 @@ export const WelcomeSceneGate: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.28 }}
+          onPointerDown={() => {
+            if (isMutedByPolicy && !hasVideoEnded) {
+              handleVideoSurfaceClick();
+            }
+          }}
           className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center bg-[#140A05]/45 px-3 py-4 sm:px-4 sm:py-5 backdrop-blur-[5px]"
         >
           <motion.div
@@ -109,16 +142,79 @@ export const WelcomeSceneGate: React.FC = () => {
                   src="/video%20tuto.mp4"
                   playsInline
                   preload="auto"
+                  controls={false}
+                  disablePictureInPicture
+                  controlsList="nodownload nofullscreen noremoteplayback"
+                  onContextMenu={(e) => e.preventDefault()}
                   onClick={handleVideoSurfaceClick}
+                  onVolumeChange={handleVolumeChange}
                   onEnded={handleVideoEnded}
                   className="h-full w-full cursor-pointer object-cover"
                 />
 
-                {/* Subtle top vignette for crisp button legibility */}
+                {/* Subtle top & bottom vignettes for crisp luxury badge legibility */}
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/35 to-transparent"
+                  className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/45 via-black/15 to-transparent"
                 />
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/55 via-black/20 to-transparent"
+                />
+
+                {/* Top-Left Aesthetic Audio / Volume Cue (non-mutable, harmonizes with close button) */}
+                {!hasVideoEnded && (
+                  <motion.button
+                    type="button"
+                    onClick={handleVideoSurfaceClick}
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, delay: 0.12 }}
+                    aria-label={
+                      isMutedByPolicy
+                        ? 'Toca para activar y subir el volumen'
+                        : 'Sube el volumen de tu dispositivo'
+                    }
+                    className={`absolute left-3 top-3 sm:left-3.5 sm:top-3.5 z-30 inline-flex h-11 items-center gap-2 rounded-full border px-3.5 text-left backdrop-blur-md transition-colors cursor-pointer ${
+                      isMutedByPolicy
+                        ? 'border-[#F4CA73]/75 bg-[#1B0E07]/85 text-[#FFF7E2] shadow-[0_0_20px_rgba(244,202,115,0.28)]'
+                        : 'border-white/25 bg-[#1B0E07]/65 text-[#FAF3E8]'
+                    }`}
+                  >
+                    <Volume2 className="h-4 w-4 shrink-0 text-[#F4CA73]" />
+                    <div className="flex items-end gap-[2px] h-3 shrink-0" aria-hidden="true">
+                      {[0, 1, 2].map((bar) => (
+                        <motion.span
+                          key={bar}
+                          animate={
+                            prefersReduced
+                              ? { scaleY: 0.7 }
+                              : {
+                                  scaleY: isMutedByPolicy
+                                    ? [0.35, 0.55, 0.35]
+                                    : [0.4, 1, 0.55, 0.9, 0.4],
+                                }
+                          }
+                          transition={
+                            prefersReduced
+                              ? undefined
+                              : {
+                                  duration: 0.9 + bar * 0.18,
+                                  repeat: Infinity,
+                                  ease: 'easeInOut',
+                                  delay: bar * 0.14,
+                                }
+                          }
+                          style={{ transformOrigin: 'bottom' }}
+                          className="h-3 w-[2px] rounded-full bg-[#F4CA73]"
+                        />
+                      ))}
+                    </div>
+                    <span className="text-[11px] font-semibold tracking-wide whitespace-nowrap">
+                      {isMutedByPolicy ? 'Toca para sonido' : 'Sube el volumen'}
+                    </span>
+                  </motion.button>
+                )}
 
                 {/* Top-Right Close Button (44x44px touch target; gains warm orange glow on video end) */}
                 <div className="absolute right-3 top-3 sm:right-3.5 sm:top-3.5 z-30">
@@ -196,16 +292,53 @@ export const WelcomeSceneGate: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Centered Play Fallback only if mobile blocks muted autoplay */}
+                {/* Bottom Subtle Luxury Volume Cue (fades away once video ends) */}
+                <AnimatePresence>
+                  {!hasVideoEnded && !needsPlayTap && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      transition={{ duration: 0.35, delay: 0.25 }}
+                      className={`absolute inset-x-3 bottom-3 z-20 flex justify-center ${
+                        isMutedByPolicy ? 'pointer-events-auto' : 'pointer-events-none'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={handleVideoSurfaceClick}
+                        tabIndex={isMutedByPolicy ? 0 : -1}
+                        className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium backdrop-blur-md transition-colors ${
+                          isMutedByPolicy
+                            ? 'border-[#F4CA73]/70 bg-[#1B0E07]/85 text-[#FFF7E2] shadow-[0_8px_24px_rgba(0,0,0,0.45)] cursor-pointer'
+                            : 'border-white/15 bg-[#1B0E07]/55 text-[#FAF3E8]/90'
+                        }`}
+                      >
+                        <Volume2 className="h-3.5 w-3.5 shrink-0 text-[#F4CA73]" />
+                        <span className="truncate">
+                          {isMutedByPolicy
+                            ? 'Toca el video para escuchar · Sube tu volumen'
+                            : 'Sube tu volumen para escuchar el mensaje'}
+                        </span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Centered Play Fallback only if mobile blocks autoplay */}
                 {needsPlayTap && !hasVideoEnded && (
                   <button
                     type="button"
                     onClick={handleManualPlay}
-                    aria-label="Reproducir video de bienvenida"
-                    className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 text-[#FFFDF9] backdrop-blur-[2px]"
+                    aria-label="Reproducir video de bienvenida con sonido"
+                    className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/35 px-4 text-[#FFFDF9] backdrop-blur-[2px] cursor-pointer"
                   >
-                    <span className="flex h-16 w-16 items-center justify-center rounded-full border border-white/40 bg-[#1B0E07]/80 text-[#FFFDF9] shadow-[0_12px_32px_rgba(0,0,0,0.45)] backdrop-blur-md">
-                      <Play className="ml-0.5 h-7 w-7 fill-current" />
+                    <span className="flex h-16 w-16 items-center justify-center rounded-full border border-[#F4CA73]/60 bg-[#1B0E07]/85 text-[#FFFDF9] shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur-md">
+                      <Play className="ml-0.5 h-7 w-7 fill-current text-[#F4CA73]" />
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-[#1B0E07]/80 px-3.5 py-1.5 text-xs font-semibold text-[#FFF7E2] backdrop-blur-md">
+                      <Volume2 className="h-3.5 w-3.5 text-[#F4CA73]" />
+                      Toca para ver · Sube el volumen
                     </span>
                   </button>
                 )}
