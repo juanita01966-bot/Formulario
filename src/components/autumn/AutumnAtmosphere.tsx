@@ -63,7 +63,7 @@ function LeafSvg({
         height={size}
         viewBox="0 0 48 48"
         fill="none"
-        className="drop-shadow-[0_6px_8px_rgba(34,21,14,0.28)]"
+        className="sm:drop-shadow-[0_6px_8px_rgba(34,21,14,0.28)]"
         aria-hidden="true"
       >
         <defs>
@@ -99,7 +99,7 @@ function LeafSvg({
         height={size}
         viewBox="0 0 48 48"
         fill="none"
-        className="drop-shadow-[0_6px_8px_rgba(34,21,14,0.28)]"
+        className="sm:drop-shadow-[0_6px_8px_rgba(34,21,14,0.28)]"
         aria-hidden="true"
       >
         <defs>
@@ -134,7 +134,7 @@ function LeafSvg({
       height={size}
       viewBox="0 0 48 48"
       fill="none"
-      className="drop-shadow-[0_6px_9px_rgba(34,21,14,0.3)]"
+      className="sm:drop-shadow-[0_6px_9px_rgba(34,21,14,0.3)]"
       aria-hidden="true"
     >
       <defs>
@@ -192,7 +192,7 @@ export const AutumnAtmosphere: React.FC<AutumnAtmosphereProps> = ({ variant = 'p
 
       {/* Golden autumn ambient flares */}
       <div
-        className="absolute -top-36 -left-32 h-[480px] w-[480px] rounded-full blur-3xl"
+        className="absolute -top-28 -left-24 h-[300px] w-[300px] sm:-top-36 sm:-left-32 sm:h-[480px] sm:w-[480px] rounded-full blur-2xl sm:blur-3xl"
         style={{
           background:
             variant === 'public'
@@ -201,7 +201,7 @@ export const AutumnAtmosphere: React.FC<AutumnAtmosphereProps> = ({ variant = 'p
         }}
       />
       <div
-        className="absolute -bottom-44 -right-28 h-[520px] w-[520px] rounded-full blur-3xl"
+        className="absolute -bottom-32 -right-24 h-[320px] w-[320px] sm:-bottom-44 sm:-right-28 sm:h-[520px] sm:w-[520px] rounded-full blur-2xl sm:blur-3xl"
         style={{
           background:
             variant === 'public'
@@ -210,12 +210,12 @@ export const AutumnAtmosphere: React.FC<AutumnAtmosphereProps> = ({ variant = 'p
         }}
       />
 
-      {/* Crisp, large, defined falling autumn leaves */}
+      {/* Crisp, large, defined falling autumn leaves (capped on mobile for 60 FPS touch fluidity) */}
       {!prefersReduced &&
-        visibleLeaves.map((leaf) => (
+        visibleLeaves.map((leaf, idx) => (
           <motion.div
             key={leaf.id}
-            className="absolute -top-20 will-change-transform"
+            className={`absolute -top-20 will-change-transform ${idx >= 5 ? 'hidden sm:block' : ''}`}
             style={{
               left: leaf.left,
               opacity: variant === 'dashboard' ? leaf.opacity * 0.55 : leaf.opacity,
@@ -238,13 +238,13 @@ export const AutumnAtmosphere: React.FC<AutumnAtmosphereProps> = ({ variant = 'p
           </motion.div>
         ))}
 
-      {/* Subtle warm golden motes */}
+      {/* Subtle warm golden motes (desktop/tablet) */}
       {!prefersReduced &&
         variant === 'public' &&
         MOTES.map((mote) => (
           <motion.div
             key={mote.id}
-            className="absolute rounded-full bg-amber-300/65 blur-[1px]"
+            className="hidden sm:block absolute rounded-full bg-amber-300/65 will-change-transform"
             style={{ left: mote.left, top: mote.top, width: mote.size, height: mote.size }}
             animate={{
               opacity: [0.2, 0.85, 0.2],

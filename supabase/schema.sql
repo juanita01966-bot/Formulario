@@ -43,11 +43,13 @@ create table if not exists public.gifts (
   accent_color text not null default '#C88A2B',
   active boolean not null default true,
   stock_label text not null default 'Disponible',
+  probability numeric not null default 11.1,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );
 
 alter table public.gifts add column if not exists usage_tip text not null default '';
+alter table public.gifts add column if not exists probability numeric not null default 11.1;
 
 create index if not exists gifts_sort_order_idx on public.gifts (sort_order asc, created_at asc);
 
@@ -609,6 +611,7 @@ insert into public.gifts (
   accent_color,
   active,
   stock_label,
+  probability,
   sort_order
 )
 values
@@ -623,6 +626,7 @@ values
     '#C88A2B',
     true,
     'Edición Exclusiva',
+    11.1,
     1
   ),
   (
@@ -636,6 +640,7 @@ values
     '#8C6E58',
     true,
     'Disponible',
+    11.1,
     2
   ),
   (
@@ -649,6 +654,7 @@ values
     '#B84A27',
     true,
     'Alta Demanda',
+    11.1,
     3
   ),
   (
@@ -662,6 +668,7 @@ values
     '#8C3B20',
     true,
     'Edición Limitada',
+    11.1,
     4
   ),
   (
@@ -675,6 +682,7 @@ values
     '#5B4636',
     true,
     'Disponible',
+    11.1,
     5
   ),
   (
@@ -688,6 +696,7 @@ values
     '#C88A2B',
     true,
     'Disponible',
+    11.1,
     6
   ),
   (
@@ -701,6 +710,7 @@ values
     '#7C4327',
     true,
     'Disponible',
+    11.1,
     7
   ),
   (
@@ -714,6 +724,7 @@ values
     '#A66328',
     true,
     'Disponible',
+    11.1,
     8
   ),
   (
@@ -727,6 +738,7 @@ values
     '#4B644A',
     true,
     'Edición Estrella',
+    11.1,
     9
   )
 on conflict (id) do update set
@@ -739,6 +751,7 @@ on conflict (id) do update set
   accent_color = excluded.accent_color,
   active = excluded.active,
   stock_label = excluded.stock_label,
+  probability = excluded.probability,
   sort_order = excluded.sort_order;
 
 insert into public.dsb_auth (

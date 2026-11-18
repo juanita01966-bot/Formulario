@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 
 interface CustomLoaderProps {
   leadName: string;
@@ -7,12 +7,13 @@ interface CustomLoaderProps {
 }
 
 export const CustomLoader: React.FC<CustomLoaderProps> = ({ leadName, onComplete }) => {
+  const prefersReduced = useReducedMotion();
   const [progress, setProgress] = useState(0);
   const firstName = leadName.trim().split(/\s+/)[0] || 'Invitado';
 
   useEffect(() => {
     const start = performance.now();
-    const duration = 2700;
+    const duration = prefersReduced ? 900 : 2700;
     let rafId = 0;
 
     const tick = (now: number) => {
@@ -24,28 +25,28 @@ export const CustomLoader: React.FC<CustomLoaderProps> = ({ leadName, onComplete
       if (ratio < 1) {
         rafId = requestAnimationFrame(tick);
       } else {
-        window.setTimeout(onComplete, 260);
+        window.setTimeout(onComplete, 220);
       }
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [onComplete]);
+  }, [onComplete, prefersReduced]);
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
+      initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 1.02 }}
-      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className="w-full max-w-[460px] mx-auto"
     >
-      <div className="relative overflow-hidden rounded-[32px] bg-[#FFFDF9]/78 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-7 py-9 text-center">
-        <div className="pointer-events-none absolute inset-2.5 rounded-[24px] border border-[#E6D5BF]/60" />
+      <div className="relative overflow-hidden rounded-[26px] sm:rounded-[32px] bg-[#FFFDF9]/78 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-5 py-7 sm:px-7 sm:py-9 text-center">
+        <div className="pointer-events-none absolute inset-2 sm:inset-2.5 rounded-[20px] sm:rounded-[24px] border border-[#E6D5BF]/60" />
         <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#4B644A]" />
 
         {/* Realistic Overhead Culinary Place Setting Animation: Fork & Knife moving onto Porcelain Plate */}
-        <div className="relative z-10 mx-auto mb-6 w-full max-w-[280px]">
+        <div className="relative z-10 mx-auto mb-5 sm:mb-6 w-full max-w-[232px] sm:max-w-[280px]">
           <svg
             viewBox="0 0 280 200"
             className="w-full h-auto drop-shadow-[0_14px_24px_rgba(34,21,14,0.16)]"
@@ -227,7 +228,7 @@ export const CustomLoader: React.FC<CustomLoaderProps> = ({ leadName, onComplete
           </svg>
         </div>
 
-        <h2 className="font-serif text-2xl font-semibold text-[#22150E] leading-tight">
+        <h2 className="font-serif text-xl sm:text-2xl font-semibold text-[#22150E] leading-tight">
           Preparando tu mesa y tu obsequio,{' '}
           <span className="gold-foil-text">{firstName}</span>
         </h2>

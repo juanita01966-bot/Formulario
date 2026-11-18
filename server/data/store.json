@@ -20,7 +20,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_ccc0c9bc-Photoroom.png",
       "accentColor": "#C88A2B",
       "active": true,
-      "stockLabel": "Edición Exclusiva"
+      "stockLabel": "Edición Exclusiva",
+      "probability": 11.1
     },
     {
       "id": "gift-utensil-holder",
@@ -32,7 +33,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_b86f199c-Photoroom.png",
       "accentColor": "#8C6E58",
       "active": true,
-      "stockLabel": "Disponible"
+      "stockLabel": "Disponible",
+      "probability": 11.1
     },
     {
       "id": "gift-bowls-3",
@@ -44,7 +46,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_17872483-Photoroom.png",
       "accentColor": "#B84A27",
       "active": true,
-      "stockLabel": "Alta Demanda"
+      "stockLabel": "Alta Demanda",
+      "probability": 11.1
     },
     {
       "id": "gift-santoku-5",
@@ -56,7 +59,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_a69260c7-Photoroom.png",
       "accentColor": "#8C3B20",
       "active": true,
-      "stockLabel": "Edición Limitada"
+      "stockLabel": "Edición Limitada",
+      "probability": 11.1
     },
     {
       "id": "gift-cleaver-7",
@@ -68,7 +72,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_4eb72c8b-Photoroom.png",
       "accentColor": "#5B4636",
       "active": true,
-      "stockLabel": "Disponible"
+      "stockLabel": "Disponible",
+      "probability": 11.1
     },
     {
       "id": "gift-icecream-2",
@@ -80,7 +85,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.49_0f9b4d38-Photoroom.png",
       "accentColor": "#C88A2B",
       "active": true,
-      "stockLabel": "Disponible"
+      "stockLabel": "Disponible",
+      "probability": 11.1
     },
     {
       "id": "gift-mugs-2",
@@ -92,7 +98,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_c2f45d1c-Photoroom.png",
       "accentColor": "#7C4327",
       "active": true,
-      "stockLabel": "Disponible"
+      "stockLabel": "Disponible",
+      "probability": 11.1
     },
     {
       "id": "gift-bamboo-large",
@@ -104,7 +111,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_ba6c52cc-Photoroom.png",
       "accentColor": "#A66328",
       "active": true,
-      "stockLabel": "Disponible"
+      "stockLabel": "Disponible",
+      "probability": 11.1
     },
     {
       "id": "gift-warmer-pro",
@@ -116,7 +124,8 @@
       "customImageUrl": "/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.50_621e0247-Photoroom.png",
       "accentColor": "#4B644A",
       "active": true,
-      "stockLabel": "Edición Estrella"
+      "stockLabel": "Edición Estrella",
+      "probability": 11.1
     }
   ],
   "leads": [],

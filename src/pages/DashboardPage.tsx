@@ -28,6 +28,7 @@ import {
   resetAllWorkspaceData,
   resetDefaultGifts,
   updateGift,
+  updateGiftProbabilities,
   updateLead,
   updateSettings,
   verifyDsbSession,
@@ -262,6 +263,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     onStateChange(res.state);
   };
 
+  const handleSaveGiftProbabilities = async (
+    updates: Array<{ id: string; probability: number }>
+  ) => {
+    if (updates.length === 0) return;
+    const res = await updateGiftProbabilities(updates);
+    onStateChange(res.state);
+  };
+
   const handleDeleteGift = async (id: string) => {
     const next = await deleteGift(id);
     onStateChange(next);
@@ -312,18 +321,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     const slotCount = Math.max(4, pinInput.length);
 
     return (
-      <div className="relative min-h-screen flex items-center justify-center px-4 py-8 sm:py-12">
+      <div className="relative min-h-[100dvh] flex items-center justify-center px-3.5 sm:px-4 py-6 sm:py-12 overflow-x-hidden">
         <AutumnAtmosphere variant="dashboard" />
 
         <motion.div
           initial={{ opacity: 0, y: 20, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           className="relative z-10 w-full max-w-[440px]"
         >
           {/* Ambient bronze/gold halo behind entrance gateway */}
           <div
-            className={`pointer-events-none -inset-1.5 absolute rounded-[38px] blur-2xl transition-opacity duration-500 ${
+            className={`pointer-events-none hidden sm:block -inset-1.5 absolute rounded-[38px] blur-2xl transition-opacity duration-500 ${
               isFilter2
                 ? 'bg-gradient-to-br from-[#F4CA73]/25 via-[#4B4F58]/30 to-[#0F1014]/60 opacity-85'
                 : 'bg-gradient-to-br from-[#E5AE4E]/35 via-[#9E4725]/25 to-[#4B644A]/25 opacity-80'
@@ -331,10 +340,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           />
 
           <div
-            className={`relative overflow-hidden rounded-[30px] sm:rounded-[34px] text-[#FFFDF9] backdrop-blur-2xl shadow-[0_32px_70px_-15px_rgba(10,6,4,0.9)] p-6 sm:p-8 transition-colors duration-500 ${
+            className={`relative overflow-hidden rounded-[26px] sm:rounded-[34px] text-[#FFFDF9] backdrop-blur-md sm:backdrop-blur-2xl shadow-[0_24px_56px_-15px_rgba(10,6,4,0.88)] p-5 sm:p-8 transition-colors duration-500 ${
               isFilter2
-                ? 'bg-gradient-to-b from-[#23262C]/95 via-[#181A1F]/96 to-[#0F1114]/98 border-2 border-[#525763]/80'
-                : 'bg-gradient-to-b from-[#24150D]/94 via-[#1A0E08]/96 to-[#110805]/98 border border-[#C88A2B]/55'
+                ? 'bg-gradient-to-b from-[#23262C]/96 via-[#181A1F]/97 to-[#0F1114]/98 border-2 border-[#525763]/80'
+                : 'bg-gradient-to-b from-[#24150D]/95 via-[#1A0E08]/97 to-[#110805]/98 border border-[#C88A2B]/55'
             }`}
           >
             {/* Top gold foil stripe */}
@@ -461,7 +470,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                             setAuthError(null);
                           }}
                           placeholder="Usuario autorizado"
-                          className="w-full bg-transparent px-3 py-3.5 text-sm text-white placeholder:text-white/35 focus:outline-none disabled:opacity-50"
+                          className="w-full min-h-[46px] bg-transparent px-3 py-3 text-base sm:text-sm text-white placeholder:text-white/35 focus:outline-none disabled:opacity-50"
                         />
                       </div>
                     </div>
@@ -483,12 +492,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                             setAuthError(null);
                           }}
                           placeholder="••••••••••••"
-                          className="w-full bg-transparent pl-3 pr-11 py-3.5 text-sm text-white placeholder:text-white/35 focus:outline-none disabled:opacity-50"
+                          className="w-full min-h-[46px] bg-transparent pl-3 pr-12 py-3 text-base sm:text-sm text-white placeholder:text-white/35 focus:outline-none disabled:opacity-50"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassword((prev) => !prev)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-lg text-white/50 hover:text-[#F4CA73] hover:bg-white/5 transition-colors cursor-pointer"
+                          aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-xl text-white/60 hover:text-[#F4CA73] hover:bg-white/5 transition-colors cursor-pointer"
                         >
                           {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
@@ -519,7 +529,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   <button
                     type="submit"
                     disabled={authLoading || lockoutSeconds > 0}
-                    className="relative w-full overflow-hidden rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] py-3.5 text-sm font-bold text-[#1A0E08] shadow-[0_12px_28px_-6px_rgba(229,174,78,0.45)] border border-[#FEF08A]/40 hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
+                    className="relative w-full min-h-[48px] overflow-hidden rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] py-3.5 text-sm font-bold text-[#1A0E08] shadow-[0_12px_28px_-6px_rgba(229,174,78,0.45)] border border-[#FEF08A]/40 hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
                   >
                     <span className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/35 to-transparent animate-shimmer" />
                     <span className="relative">{authLoading ? 'Verificando...' : 'Continuar'}</span>
@@ -563,16 +573,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   </div>
 
                   {/* Recessed Steel LED Combination Screen */}
-                  <div className="rounded-2xl border-2 border-[#383C44] bg-[#0B0C0E] px-4 py-3.5 shadow-[inset_0_4px_14px_rgba(0,0,0,0.9)]">
-                    <div className="flex items-center justify-center gap-3">
+                  <div className="rounded-2xl border-2 border-[#383C44] bg-[#0B0C0E] px-3 sm:px-4 py-3 shadow-[inset_0_4px_14px_rgba(0,0,0,0.9)]">
+                    <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-2.5">
                       {Array.from({ length: slotCount }).map((_, idx) => {
                         const filled = idx < pinInput.length;
                         return (
                           <motion.span
                             key={idx}
-                            animate={filled ? { scale: [1, 1.25, 1] } : { scale: 1 }}
+                            animate={filled ? { scale: [1, 1.2, 1] } : { scale: 1 }}
                             transition={{ duration: 0.18 }}
-                            className={`flex h-9 w-8 items-center justify-center rounded-lg border font-mono text-xl font-bold transition-colors ${
+                            className={`flex h-9 w-7 sm:w-8 items-center justify-center rounded-lg border font-mono text-lg sm:text-xl font-bold transition-colors ${
                               filled
                                 ? 'border-[#F4CA73]/60 bg-[#23190B] text-[#F4CA73] shadow-[0_0_12px_rgba(244,202,115,0.35)]'
                                 : 'border-[#2A2D34] bg-[#14161A] text-[#3B3F47]'
@@ -586,7 +596,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   </div>
 
                   {/* Tactile Safe Numeric Keypad */}
-                  <div className="grid grid-cols-3 gap-2.5 pt-1">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-2.5 pt-1">
                     {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
                       <motion.button
                         key={digit}
@@ -597,7 +607,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                           setAuthError(null);
                           setPinInput((prev) => (prev.length < 12 ? prev + digit : prev));
                         }}
-                        className="rounded-xl border border-[#454952] bg-gradient-to-b from-[#2E3138] to-[#202227] py-3 font-mono text-lg font-bold text-[#F3F4F6] shadow-[0_3px_0_#111215] hover:border-[#F4CA73]/50 hover:text-[#F4CA73] active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
+                        className="min-h-[48px] rounded-xl border border-[#454952] bg-gradient-to-b from-[#2E3138] to-[#202227] py-3 font-mono text-lg font-bold text-[#F3F4F6] shadow-[0_3px_0_#111215] hover:border-[#F4CA73]/50 hover:text-[#F4CA73] active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
                       >
                         {digit}
                       </motion.button>
@@ -611,7 +621,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         setAuthError(null);
                         setPinInput('');
                       }}
-                      className="rounded-xl border border-[#454952] bg-gradient-to-b from-[#272A30] to-[#1A1C20] py-3 text-xs font-bold uppercase tracking-wider text-[#B5BAC4] shadow-[0_3px_0_#111215] hover:text-white active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
+                      className="min-h-[48px] rounded-xl border border-[#454952] bg-gradient-to-b from-[#272A30] to-[#1A1C20] py-3 text-xs font-bold uppercase tracking-wider text-[#B5BAC4] shadow-[0_3px_0_#111215] hover:text-white active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
                     >
                       Limpiar
                     </motion.button>
@@ -624,7 +634,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         setAuthError(null);
                         setPinInput((prev) => (prev.length < 12 ? prev + '0' : prev));
                       }}
-                      className="rounded-xl border border-[#454952] bg-gradient-to-b from-[#2E3138] to-[#202227] py-3 font-mono text-lg font-bold text-[#F3F4F6] shadow-[0_3px_0_#111215] hover:border-[#F4CA73]/50 hover:text-[#F4CA73] active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
+                      className="min-h-[48px] rounded-xl border border-[#454952] bg-gradient-to-b from-[#2E3138] to-[#202227] py-3 font-mono text-lg font-bold text-[#F3F4F6] shadow-[0_3px_0_#111215] hover:border-[#F4CA73]/50 hover:text-[#F4CA73] active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
                     >
                       0
                     </motion.button>
@@ -638,7 +648,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         setPinInput((prev) => prev.slice(0, -1));
                       }}
                       aria-label="Borrar último dígito"
-                      className="flex items-center justify-center rounded-xl border border-[#454952] bg-gradient-to-b from-[#272A30] to-[#1A1C20] py-3 text-[#B5BAC4] shadow-[0_3px_0_#111215] hover:text-white active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
+                      className="min-h-[48px] flex items-center justify-center rounded-xl border border-[#454952] bg-gradient-to-b from-[#272A30] to-[#1A1C20] py-3 text-[#B5BAC4] shadow-[0_3px_0_#111215] hover:text-white active:translate-y-0.5 transition-all cursor-pointer disabled:opacity-45"
                     >
                       <Delete className="h-5 w-5" />
                     </motion.button>
@@ -654,7 +664,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   <button
                     type="submit"
                     disabled={authLoading || lockoutSeconds > 0 || pinInput.length < 4}
-                    className="relative w-full overflow-hidden rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] py-3.5 text-sm font-bold text-[#1A0E08] shadow-[0_12px_28px_-6px_rgba(229,174,78,0.4)] border border-[#FEF08A]/40 hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-45"
+                    className="relative w-full min-h-[48px] overflow-hidden rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] py-3.5 text-sm font-bold text-[#1A0E08] shadow-[0_12px_28px_-6px_rgba(229,174,78,0.4)] border border-[#FEF08A]/40 hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-45"
                   >
                     <span className="relative">{authLoading ? 'Abriendo caja fuerte...' : 'Abrir Caja Fuerte'}</span>
                   </button>
@@ -667,7 +677,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       setPinInput('');
                       setSecurityStage('filter1_credentials');
                     }}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#9CA3AF] hover:text-white cursor-pointer"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full px-4 text-xs font-semibold text-[#9CA3AF] hover:text-white cursor-pointer"
                   >
                     <ArrowLeft className="h-3.5 w-3.5" />
                     Volver
@@ -682,7 +692,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   }
 
   return (
-    <div className="relative min-h-screen pb-14">
+    <div className="relative min-h-[100dvh] pb-12 sm:pb-14 overflow-x-clip">
       <AutumnAtmosphere variant="dashboard" />
 
       <div className="relative z-10">
@@ -701,29 +711,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           onLogout={handleLockNow}
         />
 
-        <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 space-y-6">
+        <main className="mx-auto max-w-6xl px-3.5 sm:px-6 pt-4 sm:pt-6 space-y-5 sm:space-y-6">
           {userRole === 'caller' ? (
             <CallerProspectsView leads={appState.leads} />
           ) : (
             <>
               {activeTab === 'overview' && (
                 <>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
                     {resetSuccessMessage ? (
-                      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 shadow-xs">
-                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <div className="inline-flex items-center gap-2 rounded-2xl sm:rounded-full border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 shadow-xs">
+                        <Check className="h-4 w-4 shrink-0 text-emerald-600" />
                         <span>{resetSuccessMessage}</span>
                       </div>
                     ) : (
-                      <div />
+                      <div className="hidden sm:block" />
                     )}
 
                     <button
                       type="button"
                       onClick={() => setMasterResetOpen(true)}
-                      className="inline-flex items-center gap-2 rounded-full border border-[#B84A27]/35 bg-[#FFFDF9]/90 px-4 py-2 text-xs font-bold text-[#8C3318] shadow-sm hover:border-[#B84A27]/70 hover:bg-[#FFF5EC] transition-all cursor-pointer"
+                      className="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-full border border-[#B84A27]/35 bg-[#FFFDF9]/95 px-4 py-2 text-xs font-bold text-[#8C3318] shadow-sm hover:border-[#B84A27]/70 hover:bg-[#FFF5EC] transition-all cursor-pointer"
                     >
-                      <RotateCcw className="h-3.5 w-3.5" />
+                      <RotateCcw className="h-3.5 w-3.5 shrink-0" />
                       Reiniciar métricas y todo desde 0
                     </button>
                   </div>
@@ -759,6 +769,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   onUpdateShowcaseSettings={handleSaveSettings}
                   onCreateGift={handleCreateGift}
                   onUpdateGift={handleUpdateGift}
+                  onSaveGiftProbabilities={handleSaveGiftProbabilities}
                   onDeleteGift={handleDeleteGift}
                   onResetGifts={handleResetGifts}
                 />

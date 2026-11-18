@@ -1,5 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion';
+import {
+  AnimatePresence,
+  animate,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from 'framer-motion';
 import { MapPin, MessageCircle, RotateCcw, Sparkles, User } from 'lucide-react';
 import type { GiftItem, GiftThemeId, ShowcaseStyleId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
@@ -35,16 +42,18 @@ interface SparkParticle {
   kind: 'spark' | 'starburst' | 'leaf';
   rotation: number;
   vr: number;
+  gravity?: number;
 }
 
-const SPARK_COLORS = ['#FFFBEB', '#FEF08A', '#FDE047', '#F59E0B', '#EA580C', '#E5AE4E'];
+const SPARK_COLORS = ['#FFFFFF', '#FFFBEB', '#FEF08A', '#FDE047', '#F59E0B', '#E5AE4E'];
 
 /** Real CSS 3D Cube Gift Box with hinged top lid & golden satin ribbons */
 const Real3DGiftCube: React.FC<{
   phase: RevealPhase;
   giftTheme?: GiftThemeId;
   customBoxColor?: string;
-}> = ({ phase, giftTheme, customBoxColor }) => {
+  prefersReduced?: boolean;
+}> = ({ phase, giftTheme, customBoxColor, prefersReduced = false }) => {
   const isOpening = phase === 'opening';
   const palette = resolveBoxPalette(giftTheme, customBoxColor, 0);
 
@@ -56,61 +65,79 @@ const Real3DGiftCube: React.FC<{
   const ribbonHorizontalGradient = `linear-gradient(180deg, ${palette.ribbonStart} 0%, #FFFBEB 45%, ${palette.ribbonMid} 75%, ${palette.ribbonEnd} 100%)`;
 
   return (
-    <div className="relative h-56 w-56 flex items-center justify-center perspective-1000">
+    <div className="relative h-48 w-48 sm:h-56 sm:w-56 flex items-center justify-center perspective-1000">
       {/* Ground / Floating Pedestal Halo */}
       <motion.div
-        className="pointer-events-none absolute bottom-3 h-8 w-40 rounded-full blur-lg will-change-transform"
+        className="pointer-events-none absolute bottom-3 h-8 w-36 sm:w-40 rounded-full blur-lg will-change-transform"
         style={{
-          background: `radial-gradient(ellipse, ${palette.glow} 0%, rgba(253,224,71,0.32) 55%, transparent 78%)`,
+          background: `radial-gradient(ellipse, ${palette.glow} 0%, rgba(253,224,71,0.38) 55%, transparent 78%)`,
         }}
         animate={{
-          scale: phase === 'floating' ? [1.1, 0.78, 0.88] : phase === 'spinning' ? [0.85, 1.08, 0.85] : 1.45,
-          opacity: phase === 'opening' ? 0.95 : 0.65,
+          scale:
+            prefersReduced
+              ? 1.1
+              : phase === 'floating'
+                ? [1.1, 0.78, 0.88]
+                : phase === 'spinning'
+                  ? [0.85, 1.08, 0.85]
+                  : 1.55,
+          opacity: phase === 'opening' ? 1 : 0.65,
         }}
-        transition={{ duration: 0.9, repeat: phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
+        transition={{ duration: 0.85, repeat: !prefersReduced && phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
       />
       {/* Crisp contact shadow anchored on floor */}
       <motion.div
-        className="pointer-events-none absolute bottom-4 h-3.5 w-28 rounded-full bg-black/75 blur-[4px] will-change-transform"
+        className="pointer-events-none absolute bottom-4 h-3.5 w-24 sm:w-28 rounded-full bg-black/75 blur-[4px] will-change-transform"
         animate={{
-          scaleX: phase === 'floating' ? [1.05, 0.76, 0.84] : phase === 'spinning' ? [0.82, 0.7, 0.82] : 0.95,
-          opacity: phase === 'opening' ? 0.25 : 0.6,
+          scaleX:
+            prefersReduced
+              ? 0.9
+              : phase === 'floating'
+                ? [1.05, 0.76, 0.84]
+                : phase === 'spinning'
+                  ? [0.82, 0.7, 0.82]
+                  : 0.95,
+          opacity: phase === 'opening' ? 0.22 : 0.6,
         }}
-        transition={{ duration: 0.9, repeat: phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
+        transition={{ duration: 0.85, repeat: !prefersReduced && phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
       />
 
       {/* 3D Animated Container: Stage 1 Floating -> Stage 2 Spinning on Own Axis -> Stage 3 Opening */}
       <motion.div
-        className="relative w-32 h-32 preserve-3d"
-        initial={{ y: 36, scale: 0.84, rotateX: -14, rotateY: -25 }}
+        className="relative w-32 h-32 preserve-3d will-change-transform"
+        initial={prefersReduced ? { scale: 0.95, opacity: 0 } : { y: 36, scale: 0.84, rotateX: -14, rotateY: -25 }}
         animate={
-          phase === 'floating'
-            ? {
-                y: [-4, -22, -12, -20],
-                scale: [0.88, 1.02, 1, 1.03],
-                rotateX: [-14, -18, -15],
-                rotateY: [-25, -18, -32],
-              }
-            : phase === 'spinning'
+          prefersReduced
+            ? { y: 0, scale: isOpening ? 1.06 : 1, rotateX: -16, rotateY: -24, opacity: 1 }
+            : phase === 'floating'
               ? {
-                  y: [-20, -26, -18],
-                  scale: 1.06,
-                  rotateX: [-16, -22, -16],
-                  rotateY: [-32, 328, 688, 1048],
+                  y: [-4, -22, -12, -20],
+                  scale: [0.88, 1.02, 1, 1.03],
+                  rotateX: [-14, -18, -15],
+                  rotateY: [-25, -18, -32],
                 }
-              : {
-                  y: [-18, -12, 4],
-                  scale: [1.06, 1.18, 0.94],
-                  rotateX: -18,
-                  rotateY: 1080,
-                }
+              : phase === 'spinning'
+                ? {
+                    y: [-20, -26, -18],
+                    scale: 1.06,
+                    rotateX: [-16, -22, -16],
+                    rotateY: [-32, 328, 688, 1048],
+                  }
+                : {
+                    y: [-18, -12, 4],
+                    scale: [1.06, 1.2, 0.96],
+                    rotateX: -18,
+                    rotateY: 1080,
+                  }
         }
         transition={
-          phase === 'floating'
-            ? { duration: 1.2, ease: 'easeInOut' }
-            : phase === 'spinning'
-              ? { duration: 1.75, ease: [0.32, 0.05, 0.28, 1] }
-              : { duration: 0.9, ease: [0.22, 1, 0.36, 1] }
+          prefersReduced
+            ? { duration: 0.35 }
+            : phase === 'floating'
+              ? { duration: 1.1, ease: 'easeInOut' }
+              : phase === 'spinning'
+                ? { duration: 1.6, ease: [0.32, 0.05, 0.28, 1] }
+                : { duration: 0.85, ease: [0.22, 1, 0.36, 1] }
         }
       >
         {/* 3D Cube Side Faces (128x128px, translateZ = 64px) */}
@@ -235,32 +262,45 @@ const Real3DGiftCube: React.FC<{
 const RevealedGiftShowcase: React.FC<{
   gift: GiftItem;
   showcaseStyle?: ShowcaseStyleId;
-}> = ({ gift, showcaseStyle = 'luminous-gold' }) => {
+  prefersReduced?: boolean;
+}> = ({ gift, showcaseStyle = 'luminous-gold', prefersReduced = false }) => {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const [spotlight, setSpotlight] = useState({ x: 50, y: 38, active: false });
-
-  const lift = useMotionValue(0);
-  const giftY = useTransform(lift, [0, 1], [4, -18]);
-  const giftRotate = useTransform(lift, [0, 0.5, 1], [-1, 0, 1]);
-  const shadowScaleX = useTransform(lift, [0, 1], [1.08, 0.6]);
-  const shadowScaleY = useTransform(lift, [0, 1], [1.05, 0.65]);
-  const shadowOpacity = useTransform(lift, [0, 1], [0.8, 0.24]);
-  const auraScale = useTransform(lift, [0, 1], [0.95, 1.12]);
-  const auraOpacity = useTransform(lift, [0, 1], [0.7, 1]);
+  const [supportsFineHover, setSupportsFineHover] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      setSupportsFineHover(window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+    }
+  }, []);
+
+  const lift = useMotionValue(0);
+  const giftY = useTransform(lift, [0, 1], [4, -16]);
+  const giftRotate = useTransform(lift, [0, 0.5, 1], [-0.9, 0, 0.9]);
+  const shadowScaleX = useTransform(lift, [0, 1], [1.08, 0.62]);
+  const shadowScaleY = useTransform(lift, [0, 1], [1.05, 0.65]);
+  const shadowOpacity = useTransform(lift, [0, 1], [0.8, 0.24]);
+  const auraScale = useTransform(lift, [0, 1], [0.96, 1.15]);
+  const auraOpacity = useTransform(lift, [0, 1], [0.76, 1]);
+
+  useEffect(() => {
+    if (prefersReduced) {
+      lift.set(0.45);
+      return;
+    }
     const controls = animate(lift, [0, 1, 0], {
       duration: 2.9,
       repeat: Infinity,
       ease: 'easeInOut',
     });
     return () => controls.stop();
-  }, [lift]);
+  }, [lift, prefersReduced]);
 
   const accent = gift.accentColor || '#C88A2B';
   const tokens = resolveShowcaseTokens(showcaseStyle);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!supportsFineHover || prefersReduced) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const px = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const py = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
@@ -276,46 +316,137 @@ const RevealedGiftShowcase: React.FC<{
   };
 
   const handleMouseLeave = () => {
+    if (!supportsFineHover) return;
     setTilt({ rx: 0, ry: 0 });
     setSpotlight((prev) => ({ ...prev, active: false }));
   };
 
   return (
     <motion.div
-      initial={{ y: 12, opacity: 0, scale: 0.94 }}
+      initial={prefersReduced ? { opacity: 0 } : { y: 12, opacity: 0, scale: 0.93 }}
       animate={{ y: 0, opacity: 1, scale: 1 }}
-      transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
+      transition={{ duration: 0.45, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
+      onMouseMove={supportsFineHover ? handleMouseMove : undefined}
+      onMouseLeave={supportsFineHover ? handleMouseLeave : undefined}
       style={{ background: tokens.revealGlassBg }}
-      className={`relative mb-5 flex h-[282px] sm:h-[304px] w-full max-w-[336px] sm:max-w-[376px] flex-col items-center justify-end overflow-hidden rounded-[28px] border ${tokens.stageBorder} backdrop-blur-md px-4 pt-6 pb-5 perspective-1000 shadow-[0_24px_54px_-14px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.28)]`}
+      className={`relative mb-4 sm:mb-5 flex h-[254px] sm:h-[304px] w-full max-w-[320px] sm:max-w-[376px] flex-col items-center justify-end overflow-hidden rounded-[24px] sm:rounded-[28px] border ${tokens.stageBorder} backdrop-blur-md px-3.5 sm:px-4 pt-5 sm:pt-6 pb-4 sm:pb-5 perspective-1000 shadow-[0_24px_54px_-14px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.34)]`}
     >
       {/* Top specular highlight hairline */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/75 to-transparent"
+        className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent"
       />
 
-      {/* Interactive cursor spotlight sheen */}
-      <div
+      {/* Volumetric Rotating Sunbeams / God-Rays Behind the Product (GPU transform-only) */}
+      <motion.div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+        animate={prefersReduced ? undefined : { rotate: 360 }}
+        transition={prefersReduced ? undefined : { duration: 24, repeat: Infinity, ease: 'linear' }}
+        className="pointer-events-none absolute left-1/2 top-[44%] -translate-x-1/2 -translate-y-1/2 h-[340px] w-[340px] sm:h-[400px] sm:w-[400px] opacity-80 will-change-transform"
         style={{
-          opacity: spotlight.active ? 1 : 0,
-          background: `radial-gradient(230px circle at ${spotlight.x}% ${spotlight.y}%, ${tokens.spotlightTint}, transparent 72%)`,
+          background:
+            'conic-gradient(from 0deg, transparent 0deg 14deg, rgba(255, 251, 235, 0.32) 22deg, rgba(253, 224, 71, 0.22) 29deg, transparent 38deg 66deg, rgba(255, 251, 235, 0.28) 74deg, rgba(244, 202, 115, 0.2) 82deg, transparent 92deg 128deg, rgba(255, 251, 235, 0.34) 136deg, rgba(253, 224, 71, 0.22) 144deg, transparent 154deg 192deg, rgba(255, 251, 235, 0.28) 200deg, rgba(244, 202, 115, 0.18) 208deg, transparent 218deg 256deg, rgba(255, 251, 235, 0.32) 264deg, rgba(253, 224, 71, 0.2) 272deg, transparent 282deg 318deg, rgba(255, 251, 235, 0.26) 326deg, transparent 340deg 360deg)',
+          maskImage: 'radial-gradient(circle, rgba(0,0,0,1) 14%, rgba(0,0,0,0.45) 48%, transparent 72%)',
+          WebkitMaskImage:
+            'radial-gradient(circle, rgba(0,0,0,1) 14%, rgba(0,0,0,0.45) 48%, transparent 72%)',
         }}
       />
 
-      {/* Soft overhead gallery key-light wash behind the product */}
+      {/* Counter-Rotating Secondary Sunbeam Halo for Dimensional Depth */}
+      <motion.div
+        aria-hidden="true"
+        animate={prefersReduced ? undefined : { rotate: -360 }}
+        transition={prefersReduced ? undefined : { duration: 36, repeat: Infinity, ease: 'linear' }}
+        className="pointer-events-none absolute left-1/2 top-[44%] -translate-x-1/2 -translate-y-1/2 h-[310px] w-[310px] sm:h-[360px] sm:w-[360px] opacity-65 will-change-transform"
+        style={{
+          background:
+            'conic-gradient(from 25deg, transparent 0deg 28deg, rgba(254, 240, 138, 0.24) 40deg, transparent 54deg 110deg, rgba(255, 251, 235, 0.24) 124deg, transparent 140deg 205deg, rgba(253, 224, 71, 0.22) 220deg, transparent 236deg 295deg, rgba(255, 251, 235, 0.22) 310deg, transparent 326deg 360deg)',
+          maskImage: 'radial-gradient(circle, rgba(0,0,0,0.95) 16%, transparent 70%)',
+          WebkitMaskImage: 'radial-gradient(circle, rgba(0,0,0,0.95) 16%, transparent 70%)',
+        }}
+      />
+
+      {/* Interactive cursor spotlight sheen */}
+      {supportsFineHover && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+          style={{
+            opacity: spotlight.active ? 1 : 0,
+            background: `radial-gradient(230px circle at ${spotlight.x}% ${spotlight.y}%, ${tokens.spotlightTint}, transparent 72%)`,
+          }}
+        />
+      )}
+
+      {/* Amplified Golden Aura Behind the Product */}
       <motion.div
         aria-hidden="true"
         style={{
           scale: auraScale,
           opacity: auraOpacity,
-          background: `radial-gradient(ellipse at 50% 42%, ${tokens.auraCore} 0%, ${accent}22 48%, transparent 76%)`,
+          background: `radial-gradient(circle at 50% 46%, rgba(255, 251, 235, 0.56) 0%, rgba(253, 224, 71, 0.36) 28%, ${tokens.auraCore} 48%, ${accent}24 62%, transparent 78%)`,
         }}
-        className="pointer-events-none absolute top-4 h-52 w-64 rounded-full blur-2xl will-change-transform"
+        className="pointer-events-none absolute top-3 sm:top-4 h-52 w-60 sm:h-56 sm:w-72 rounded-full blur-xl will-change-transform"
       />
+
+      {/* Pulsing 4-Point Cross Starlight Gleam Centered Behind Product */}
+      {!prefersReduced && (
+        <motion.div
+          aria-hidden="true"
+          animate={{ scale: [0.9, 1.16, 0.9], opacity: [0.46, 0.88, 0.46] }}
+          transition={{ duration: 3.1, repeat: Infinity, ease: 'easeInOut' }}
+          className="pointer-events-none absolute left-1/2 top-[43%] -translate-x-1/2 -translate-y-1/2 z-10 h-44 w-44 sm:h-48 sm:w-48 will-change-transform"
+        >
+          <div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[2px] w-full rounded-full"
+            style={{
+              background:
+                'linear-gradient(90deg, transparent 0%, rgba(254,240,138,0.5) 35%, rgba(255,255,255,0.95) 50%, rgba(254,240,138,0.5) 65%, transparent 100%)',
+            }}
+          />
+          <div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[2px] h-full rounded-full"
+            style={{
+              background:
+                'linear-gradient(180deg, transparent 0%, rgba(254,240,138,0.45) 35%, rgba(255,255,255,0.92) 50%, rgba(254,240,138,0.45) 65%, transparent 100%)',
+            }}
+          />
+        </motion.div>
+      )}
+
+      {/* Initial Reveal Bloom Flash Inside Showcase Frame */}
+      {!prefersReduced && (
+        <motion.div
+          aria-hidden="true"
+          initial={{ scale: 0.35, opacity: 0.96 }}
+          animate={{ scale: 1.55, opacity: 0 }}
+          transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+          className="pointer-events-none absolute left-1/2 top-[42%] -translate-x-1/2 -translate-y-1/2 z-30 h-56 w-56 rounded-full will-change-transform"
+          style={{
+            background:
+              'radial-gradient(circle, rgba(255,255,255,0.96) 0%, rgba(254,240,138,0.72) 32%, rgba(229,174,78,0.22) 60%, transparent 78%)',
+          }}
+        />
+      )}
+
+      {/* Subtle Animated Diagonal Specular Light Sweep Across Pedestal Showcase */}
+      {!prefersReduced && (
+        <motion.div
+          aria-hidden="true"
+          animate={{ x: ['-170%', '380%'], opacity: [0, 0.72, 0] }}
+          transition={{
+            duration: 1.45,
+            repeat: Infinity,
+            repeatDelay: 3.2,
+            ease: [0.22, 1, 0.36, 1],
+          }}
+          className="pointer-events-none absolute -top-[28%] left-0 z-30 h-[160%] w-24 -skew-x-[22deg] will-change-transform"
+          style={{
+            background:
+              'linear-gradient(90deg, transparent 0%, rgba(255, 251, 235, 0.22) 42%, rgba(255, 255, 255, 0.36) 52%, rgba(254, 240, 138, 0.14) 64%, transparent 100%)',
+          }}
+        />
+      )}
 
       {/* Floating Transparent PNG Product Bathing in Bottom Podium Spotlight */}
       <motion.div
@@ -326,7 +457,7 @@ const RevealedGiftShowcase: React.FC<{
           style={{
             transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${spotlight.active ? 1.04 : 1})`,
             transition: 'transform 160ms ease-out',
-            filter: 'drop-shadow(0 18px 24px rgba(254, 240, 138, 0.22))',
+            filter: 'drop-shadow(0 16px 24px rgba(254, 240, 138, 0.3))',
           }}
           className="preserve-3d"
         >
@@ -334,7 +465,7 @@ const RevealedGiftShowcase: React.FC<{
             visualKey={gift.visualKey}
             customImageUrl={gift.customImageUrl}
             accentColor={accent}
-            size={180}
+            size={156}
             className="sm:!w-[198px] sm:!h-[198px]"
             variant="clean"
             alt={gift.name}
@@ -364,29 +495,40 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   showcaseStyle = 'luminous-gold',
   onStartAnother,
 }) => {
-  const [phase, setPhase] = useState<RevealPhase>('floating');
+  const prefersReduced = Boolean(useReducedMotion());
+  const [phase, setPhase] = useState<RevealPhase>(() => (prefersReduced ? 'revealed' : 'floating'));
+  const [climaxFlash, setClimaxFlash] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const phaseRef = useRef<RevealPhase>('floating');
+  const phaseRef = useRef<RevealPhase>(phase);
 
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
 
-  // Explicit 3-stage animation timeline: Floating -> Spinning on Own Axis -> Opening with Destellos -> Revealed
+  // Explicit 3-stage animation timeline: Floating -> Spinning -> Opening -> Climax Flash -> Revealed
   useEffect(() => {
-    const tSpin = window.setTimeout(() => setPhase('spinning'), 1200);
-    const tOpen = window.setTimeout(() => setPhase('opening'), 2950);
-    const tReveal = window.setTimeout(() => setPhase('revealed'), 3900);
+    if (prefersReduced) {
+      setPhase('revealed');
+      setClimaxFlash(false);
+      return;
+    }
+
+    const tSpin = window.setTimeout(() => setPhase('spinning'), 1100);
+    const tOpen = window.setTimeout(() => setPhase('opening'), 2750);
+    const tFlash = window.setTimeout(() => setClimaxFlash(true), 3380);
+    const tReveal = window.setTimeout(() => setPhase('revealed'), 3680);
 
     return () => {
       window.clearTimeout(tSpin);
       window.clearTimeout(tOpen);
+      window.clearTimeout(tFlash);
       window.clearTimeout(tReveal);
     };
-  }, []);
+  }, [prefersReduced]);
 
   // 60 FPS Canvas Sparkles & Starburst ("Destellos") Engine
   useEffect(() => {
+    if (prefersReduced) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -409,29 +551,58 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
     window.addEventListener('resize', resize);
 
     const particles: SparkParticle[] = [];
+    const isNarrow = width < 480;
     let burstFired = false;
+    let revealBurstFired = false;
     let rafId = 0;
     let frame = 0;
 
     const spawnBurstDestellos = () => {
       const cx = width / 2;
       const cy = height * 0.41;
-      for (let i = 0; i < 165; i++) {
-        const angle = (Math.PI * 2 * i) / 165 + (Math.random() - 0.5) * 0.35;
-        const speed = 2.6 + Math.random() * 9.8;
+      const count = width < 480 ? 115 : 165;
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.35;
+        const speed = 2.6 + Math.random() * 9.5;
         const roll = Math.random();
         particles.push({
           x: cx + (Math.random() - 0.5) * 18,
           y: cy + (Math.random() - 0.5) * 18,
           vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - 2.6,
-          size: roll > 0.55 ? 6 + Math.random() * 6 : 2.2 + Math.random() * 3.4,
+          vy: Math.sin(angle) * speed - 2.4,
+          size: roll > 0.52 ? 5.5 + Math.random() * 6 : 2.2 + Math.random() * 3.4,
           alpha: 1,
-          decay: 0.0075 + Math.random() * 0.009,
+          decay: 0.0085 + Math.random() * 0.009,
           color: SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)],
-          kind: roll > 0.86 ? 'leaf' : roll > 0.42 ? 'starburst' : 'spark',
+          kind: roll > 0.87 ? 'leaf' : roll > 0.36 ? 'starburst' : 'spark',
           rotation: Math.random() * Math.PI * 2,
           vr: (Math.random() - 0.5) * 0.16,
+          gravity: 0.052,
+        });
+      }
+    };
+
+    const spawnRevealDestellos = () => {
+      const cx = width / 2;
+      const cy = Math.min(205, height * 0.27);
+      const count = width < 480 ? 58 : 88;
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+        const speed = 2.0 + Math.random() * 6.8;
+        const roll = Math.random();
+        particles.push({
+          x: cx + (Math.random() - 0.5) * 24,
+          y: cy + (Math.random() - 0.5) * 24,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 0.8,
+          size: roll > 0.4 ? 5 + Math.random() * 5.8 : 2.2 + Math.random() * 2.8,
+          alpha: 1,
+          decay: 0.011 + Math.random() * 0.009,
+          color: SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)],
+          kind: roll > 0.28 ? 'starburst' : 'spark',
+          rotation: Math.random() * Math.PI * 2,
+          vr: (Math.random() - 0.5) * 0.14,
+          gravity: 0.018,
         });
       }
     };
@@ -440,35 +611,40 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       const cx = width / 2;
       const cy = height * 0.44;
       const angle = frame * (intense ? 0.22 : 0.08) + Math.random() * Math.PI * 2;
-      const radius = intense ? 58 + Math.random() * 44 : 44 + Math.random() * 36;
+      const radius = intense ? 56 + Math.random() * 44 : 42 + Math.random() * 34;
       particles.push({
         x: cx + Math.cos(angle) * radius,
-        y: cy + Math.sin(angle) * 26 + (Math.random() - 0.5) * 42,
+        y: cy + Math.sin(angle) * 24 + (Math.random() - 0.5) * 38,
         vx: (Math.random() - 0.5) * (intense ? 1.8 : 0.7),
         vy: -1.1 - Math.random() * (intense ? 2.2 : 1.1),
         size: intense ? 2.8 + Math.random() * 3.8 : 1.8 + Math.random() * 2.2,
         alpha: 0.95,
         decay: 0.022 + Math.random() * 0.015,
         color: SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)],
-        kind: Math.random() > 0.55 ? 'starburst' : 'spark',
+        kind: Math.random() > 0.52 ? 'starburst' : 'spark',
         rotation: Math.random() * Math.PI,
         vr: 0.09,
+        gravity: -0.012,
       });
     };
 
     const drawStarburst = (x: number, y: number, r: number, rot: number, color: string, alpha: number) => {
       ctx.save();
-      ctx.globalAlpha = alpha;
       ctx.translate(x, y);
-      ctx.rotate(rot);
+      // Fast 2-pass soft bloom without software ctx.shadowBlur
+      ctx.globalAlpha = alpha * 0.26;
       ctx.fillStyle = color;
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = color;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.45, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.rotate(rot);
+      ctx.globalAlpha = alpha;
       ctx.beginPath();
       for (let i = 0; i < 4; i++) {
         const theta = (i * Math.PI) / 2;
-        ctx.lineTo(Math.cos(theta) * r * 2.1, Math.sin(theta) * r * 2.1);
-        ctx.lineTo(Math.cos(theta + Math.PI / 4) * r * 0.35, Math.sin(theta + Math.PI / 4) * r * 0.35);
+        ctx.lineTo(Math.cos(theta) * r * 2.15, Math.sin(theta) * r * 2.15);
+        ctx.lineTo(Math.cos(theta + Math.PI / 4) * r * 0.32, Math.sin(theta + Math.PI / 4) * r * 0.32);
       }
       ctx.closePath();
       ctx.fill();
@@ -482,33 +658,42 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       const cur = phaseRef.current;
       if (cur === 'floating' && frame % 5 === 0) {
         spawnSpinOrbits(false);
-      } else if (cur === 'spinning' && frame % 2 === 0) {
+      } else if (cur === 'spinning' && frame % (isNarrow ? 3 : 2) === 0) {
         spawnSpinOrbits(true);
-        spawnSpinOrbits(true);
+        if (!isNarrow) spawnSpinOrbits(true);
       } else if (cur === 'opening' && !burstFired) {
         burstFired = true;
         spawnBurstDestellos();
-      } else if (cur === 'revealed' && frame % 9 === 0) {
-        particles.push({
-          x: Math.random() * width,
-          y: height * 0.88,
-          vx: (Math.random() - 0.5) * 0.9,
-          vy: -1 - Math.random() * 1.2,
-          size: 2.2 + Math.random() * 2.5,
-          alpha: 0.85,
-          decay: 0.008,
-          color: '#FEF08A',
-          kind: 'starburst',
-          rotation: 0,
-          vr: 0.05,
-        });
+      } else if (cur === 'revealed') {
+        if (!revealBurstFired) {
+          revealBurstFired = true;
+          spawnRevealDestellos();
+        }
+        if (frame % (isNarrow ? 7 : 5) === 0) {
+          const zoneTop = 52;
+          const zoneBottom = Math.min(310, height * 0.42);
+          particles.push({
+            x: width * (0.16 + Math.random() * 0.68),
+            y: zoneTop + Math.random() * Math.max(80, zoneBottom - zoneTop),
+            vx: (Math.random() - 0.5) * 0.7,
+            vy: -0.55 - Math.random() * 0.9,
+            size: 2.8 + Math.random() * 3.2,
+            alpha: 0.95,
+            decay: 0.014 + Math.random() * 0.008,
+            color: Math.random() > 0.35 ? '#FEF08A' : '#FFFFFF',
+            kind: 'starburst',
+            rotation: Math.random() * Math.PI,
+            vr: 0.06,
+            gravity: -0.004,
+          });
+        }
       }
 
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += cur === 'floating' || cur === 'spinning' ? -0.012 : 0.055;
+        p.vy += p.gravity ?? (cur === 'floating' || cur === 'spinning' ? -0.012 : 0.05);
         p.vx *= 0.988;
         p.rotation += p.vr;
         p.alpha -= p.decay;
@@ -532,10 +717,12 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
           ctx.restore();
         } else {
           ctx.save();
-          ctx.globalAlpha = p.alpha;
+          ctx.globalAlpha = p.alpha * 0.25;
           ctx.fillStyle = p.color;
-          ctx.shadowBlur = 12;
-          ctx.shadowColor = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 2.1, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = p.alpha;
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
           ctx.fill();
@@ -551,7 +738,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', resize);
     };
-  }, []);
+  }, [prefersReduced]);
 
   const firstName = leadName.trim().split(/\s+/)[0] || 'Invitado';
   const cleanAddress = leadAddress?.trim() || '';
@@ -569,12 +756,12 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
+      initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       className="relative w-full max-w-[560px] mx-auto"
     >
       <div
-        className="relative overflow-hidden rounded-[34px] border border-[#C88A2B]/50 border-t-[#FDE68A]/55 backdrop-blur-xl shadow-[0_30px_80px_-15px_rgba(34,21,14,0.68),inset_0_1px_0_rgba(254,240,138,0.24)] px-5 py-8 sm:px-9 sm:py-10 text-center text-[#FAF3E8]"
+        className="relative overflow-hidden rounded-[26px] sm:rounded-[34px] border border-[#C88A2B]/50 border-t-[#FDE68A]/55 backdrop-blur-xl shadow-[0_30px_80px_-15px_rgba(34,21,14,0.68),inset_0_1px_0_rgba(254,240,138,0.24)] px-4 py-6 sm:px-9 sm:py-10 text-center text-[#FAF3E8]"
         style={{
           background:
             'radial-gradient(ellipse at 50% 18%, rgba(59, 31, 19, 0.78) 0%, rgba(28, 13, 7, 0.84) 52%, rgba(17, 7, 3, 0.88) 100%)',
@@ -593,7 +780,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
         </svg>
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-16 left-1/4 h-72 w-28 -skew-x-12 bg-gradient-to-b from-[#FEF08A]/12 via-[#E5AE4E]/4 to-transparent blur-xl"
+          className="pointer-events-none hidden sm:block absolute -top-16 left-1/4 h-72 w-28 -skew-x-12 bg-gradient-to-b from-[#FEF08A]/12 via-[#E5AE4E]/4 to-transparent blur-xl"
         />
 
         {/* Canvas Starburst Sparks Layer */}
@@ -601,17 +788,68 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
 
         {/* Ambient Radial Golden Glow */}
         <motion.div
-          className="pointer-events-none absolute left-1/2 top-[42%] -translate-x-1/2 -translate-y-1/2 h-80 w-80 rounded-full blur-3xl"
-          animate={{
-            scale: phase === 'opening' ? [1, 1.9, 1.45] : phase === 'spinning' ? [1, 1.35, 1] : 1.1,
-            opacity: phase === 'opening' ? 0.95 : 0.55,
-          }}
-          transition={{ duration: 0.9, repeat: phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
+          className="pointer-events-none absolute left-1/2 top-[34%] sm:top-[38%] -translate-x-1/2 -translate-y-1/2 h-72 w-72 sm:h-80 sm:w-80 rounded-full blur-2xl sm:blur-3xl will-change-transform"
+          animate={
+            prefersReduced
+              ? { scale: 1.1, opacity: 0.6 }
+              : {
+                  scale:
+                    phase === 'opening'
+                      ? [1, 1.85, 1.45]
+                      : phase === 'revealed'
+                        ? [1.25, 1.12]
+                        : phase === 'spinning'
+                          ? [1, 1.32, 1]
+                          : 1.08,
+                  opacity: phase === 'opening' ? 0.95 : phase === 'revealed' ? 0.72 : 0.55,
+                }
+          }
+          transition={{ duration: 0.85, repeat: !prefersReduced && phase === 'spinning' ? Infinity : 0, ease: 'easeInOut' }}
           style={{
             background:
-              'radial-gradient(circle, rgba(253, 224, 71, 0.72) 0%, rgba(200, 90, 50, 0.25) 52%, transparent 75%)',
+              'radial-gradient(circle, rgba(253, 224, 71, 0.74) 0%, rgba(200, 90, 50, 0.25) 52%, transparent 75%)',
           }}
         />
+
+        {/* Dramatic Climax Light Flash ("Destello Final") across opening -> revealed transition */}
+        {climaxFlash && !prefersReduced && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-30 overflow-hidden"
+          >
+            {/* Primary expanding golden-white radial bloom flare */}
+            <motion.div
+              initial={{ scale: 0.16, opacity: 0 }}
+              animate={{ scale: [0.16, 1.38, 2.05], opacity: [0, 0.96, 0] }}
+              transition={{ duration: 1.05, times: [0, 0.26, 1], ease: [0.22, 1, 0.36, 1] }}
+              className="absolute left-1/2 top-[30%] -translate-x-1/2 -translate-y-1/2 h-80 w-80 sm:h-96 sm:w-96 rounded-full will-change-transform"
+              style={{
+                background:
+                  'radial-gradient(circle, rgba(255, 255, 255, 0.98) 0%, rgba(255, 251, 235, 0.9) 20%, rgba(254, 240, 138, 0.62) 44%, rgba(229, 174, 78, 0.2) 66%, transparent 78%)',
+              }}
+            />
+
+            {/* Crisp anamorphic horizontal lens flare streak */}
+            <motion.div
+              initial={{ scaleX: 0.12, scaleY: 0.5, opacity: 0 }}
+              animate={{ scaleX: [0.12, 1.3, 1.75], scaleY: [0.5, 1.25, 0.25], opacity: [0, 0.95, 0] }}
+              transition={{ duration: 0.92, times: [0, 0.24, 1], ease: 'easeOut' }}
+              className="absolute left-1/2 top-[30%] -translate-x-1/2 -translate-y-1/2 h-16 w-[115%] rounded-full will-change-transform"
+              style={{
+                background:
+                  'radial-gradient(ellipse at center, rgba(255,255,255,0.96) 0%, rgba(254,240,138,0.72) 28%, rgba(229,174,78,0.22) 56%, transparent 76%)',
+              }}
+            />
+
+            {/* Expanding golden shockwave light ring */}
+            <motion.div
+              initial={{ scale: 0.22, opacity: 0.95 }}
+              animate={{ scale: 1.7, opacity: 0 }}
+              transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute left-1/2 top-[30%] -translate-x-1/2 -translate-y-1/2 h-64 w-64 sm:h-72 sm:w-72 rounded-full border-2 border-[#FFFBEB]/85 shadow-[0_0_24px_rgba(254,240,138,0.65)] will-change-transform"
+            />
+          </div>
+        )}
 
         <AnimatePresence mode="wait">
           {phase !== 'revealed' ? (
@@ -619,51 +857,62 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
               key="gift-box-3d-stage"
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 1.14, filter: 'blur(8px)' }}
-              transition={{ duration: 0.45 }}
-              className="relative z-10 py-6 flex flex-col items-center justify-center min-h-[400px]"
+              exit={prefersReduced ? { opacity: 0 } : { opacity: 0, scale: 1.18 }}
+              transition={{ duration: 0.24, ease: 'easeOut' }}
+              className="relative z-10 py-4 sm:py-6 flex flex-col items-center justify-center min-h-[340px] sm:min-h-[400px]"
             >
-              <Real3DGiftCube phase={phase} giftTheme={giftTheme} customBoxColor={customBoxColor} />
+              <Real3DGiftCube
+                phase={phase}
+                giftTheme={giftTheme}
+                customBoxColor={customBoxColor}
+                prefersReduced={prefersReduced}
+              />
 
-              <h3 className="mt-5 font-serif text-2xl font-semibold text-[#FFF7E2]">{stageHeadline}</h3>
-              <p className="mt-2 text-sm text-amber-200/80">
+              <h3 className="mt-4 sm:mt-5 font-serif text-xl sm:text-2xl font-semibold text-[#FFF7E2]">
+                {stageHeadline}
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-amber-200/80 max-w-xs sm:max-w-sm">
                 Un instante mientras descubrimos el obsequio de cocina de tu caja.
               </p>
             </motion.div>
           ) : (
             <motion.div
               key="gift-revealed-card"
-              initial={{ opacity: 0, y: 18, scale: 0.96 }}
+              initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: 14, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
               className="relative z-10 flex flex-col items-center text-center"
             >
-              {/* Bespoke Concierge Certificate Header */}
-              <div className="flex items-center justify-center gap-3 w-full max-w-sm mb-5">
+              {/* Bespoke Concierge Certificate Header (fits cleanly on 360px+ without overflow) */}
+              <div className="flex items-center justify-center gap-2 sm:gap-3 w-full max-w-sm mb-4 sm:mb-5">
                 <div className="h-px flex-1 bg-gradient-to-r from-transparent to-[#C88A2B]/65" />
-                <span className="text-[10.5px] font-bold uppercase tracking-[0.2em] text-[#E5AE4E] whitespace-nowrap">
+                <span className="text-[9.5px] sm:text-[10.5px] font-bold uppercase tracking-[0.11em] sm:tracking-[0.2em] text-[#E5AE4E] leading-tight sm:whitespace-nowrap">
                   Certificado Oficial · The Ciprian Company
                 </span>
                 <div className="h-px flex-1 bg-gradient-to-l from-transparent to-[#C88A2B]/65" />
               </div>
 
               {/* Realistic Architectural Plinth Showcase */}
-              <RevealedGiftShowcase gift={gift} showcaseStyle={showcaseStyle} />
+              <RevealedGiftShowcase
+                gift={gift}
+                showcaseStyle={showcaseStyle}
+                prefersReduced={prefersReduced}
+              />
 
-              <h2 className="mt-1 font-serif text-2xl sm:text-[31px] font-semibold text-[#FFFDF9] leading-tight">
+              <h2 className="mt-1 font-serif text-[22px] sm:text-[31px] font-semibold text-[#FFFDF9] leading-tight px-1">
                 {gift.name}
               </h2>
-              <p className="mt-2 max-w-md text-xs sm:text-sm leading-relaxed text-[#DECAB4]">
+              <p className="mt-2 max-w-md text-xs sm:text-sm leading-relaxed text-[#DECAB4] px-1">
                 {gift.subtitle}
               </p>
 
               {/* Dedicated "Máximo Provecho" Card Strip */}
-              <div className="mt-5 w-full rounded-2xl border border-[#E5AE4E]/30 bg-gradient-to-br from-[#2B170D]/68 via-[#1E0F08]/74 to-[#150A05]/78 backdrop-blur-md px-4 py-3.5 text-left shadow-[inset_0_1px_0_rgba(254,240,138,0.16)]">
+              <div className="mt-4 sm:mt-5 w-full rounded-2xl border border-[#E5AE4E]/30 bg-gradient-to-br from-[#2B170D]/68 via-[#1E0F08]/74 to-[#150A05]/78 backdrop-blur-md px-3.5 sm:px-4 py-3.5 text-left shadow-[inset_0_1px_0_rgba(254,240,138,0.16)]">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#E5AE4E]/15 border border-[#F4CA73]/40">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#E5AE4E]/15 border border-[#F4CA73]/40 shrink-0">
                     <Sparkles className="h-3 w-3 text-[#F4CA73]" />
                   </span>
-                  <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-[#F4CA73]">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[#F4CA73]">
                     Cómo sacarle el máximo provecho
                   </span>
                 </div>
@@ -673,17 +922,17 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
               </div>
 
               {/* Refined Folio & Delivery Information Card */}
-              <div className="mt-4 w-full rounded-2xl bg-[#160B06]/68 backdrop-blur-md border border-[#C88A2B]/35 px-4 sm:px-5 py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <div className="mt-3.5 sm:mt-4 w-full rounded-2xl bg-[#160B06]/68 backdrop-blur-md border border-[#C88A2B]/35 px-3.5 sm:px-5 py-3.5 sm:py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                 <div className="text-center sm:text-left">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#B89B7A]">
                     Folio de reclamación
                   </p>
-                  <p className="mt-0.5 font-mono text-xl sm:text-2xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
+                  <p className="mt-0.5 font-mono text-lg sm:text-2xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
                     {claimCode}
                   </p>
                 </div>
 
-                <div className="mt-3.5 pt-3 border-t border-[#C88A2B]/20 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                <div className="mt-3 pt-3 border-t border-[#C88A2B]/20 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div className="flex items-center gap-2 text-[#E8D5BE] min-w-0">
                     <User className="h-3.5 w-3.5 text-[#C88A2B] shrink-0" />
                     <span className="text-[#A88D71] shrink-0">Titular:</span>
@@ -699,7 +948,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </div>
               </div>
 
-              <div className="mt-4 flex items-center justify-center gap-2.5 text-xs text-[#C4AC92] max-w-sm">
+              <div className="mt-4 flex items-center justify-center gap-2.5 text-xs text-[#C4AC92] max-w-sm px-1">
                 <img
                   src="/images/logo%20ciprian.png"
                   alt="The Ciprian Company"
@@ -711,12 +960,12 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </p>
               </div>
 
-              <div className="mt-6 flex flex-col sm:flex-row items-center gap-3 w-full">
+              <div className="mt-5 sm:mt-6 flex flex-col sm:flex-row items-center gap-2.5 sm:gap-3 w-full">
                 <a
                   href={`https://wa.me/?text=${whatsappText}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-[#E5AE4E] px-5 py-3 text-sm font-bold text-[#1E110A] shadow-md hover:bg-[#F4CA73] transition-colors"
+                  className="w-full sm:flex-1 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full bg-[#E5AE4E] px-5 py-3 text-sm font-bold text-[#1E110A] shadow-md hover:bg-[#F4CA73] transition-colors"
                 >
                   <MessageCircle className="h-4 w-4" />
                   Guardar comprobante
@@ -724,7 +973,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 <button
                   type="button"
                   onClick={onStartAnother}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full border border-[#C88A2B]/35 bg-transparent px-5 py-3 text-sm font-medium text-[#E8D5BE] hover:bg-white/5 transition-colors cursor-pointer"
+                  className="w-full sm:w-auto min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-[#C88A2B]/35 bg-transparent px-5 py-3 text-sm font-medium text-[#E8D5BE] hover:bg-white/5 transition-colors cursor-pointer"
                 >
                   <RotateCcw className="h-4 w-4" />
                   Nuevo registro

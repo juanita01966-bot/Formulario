@@ -67,7 +67,10 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
         if (stateRes.ok) {
           const currentState = await stateRes.json();
           const leftoverLeads = (currentState.leads || []).filter(
-            (l) => l.name === 'Cliente Prueba RBAC' || l.name === 'Lead para Borrar'
+            (l) =>
+              l.name === 'Cliente Prueba RBAC' ||
+              l.name === 'Lead para Borrar' ||
+              l.name === 'Lead Peso Ponderado'
           );
           for (const lead of leftoverLeads) {
             await fetch(`${baseUrl}/api/leads/${lead.id}`, {
@@ -1134,6 +1137,204 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
       assert.strictEqual(restored.settings.showcaseStyle, 'luminous-gold');
       assert.strictEqual(restored.settings.randomizeGifts, true);
       initialShowcaseSettings = null;
+    });
+  });
+
+  describe('7b. Gift Probability Persistence, Sanitization & RBAC', () => {
+    test('Unauthenticated and Caller PATCH /api/gifts/probabilities are REJECTED (401 / 403)', async () => {
+      const unauthRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ probabilities: { 'gift-utensils-6': 50 } }),
+      });
+      assert.strictEqual(unauthRes.status, 401);
+
+      const callerRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${callerSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ probabilities: { 'gift-utensils-6': 50 } }),
+      });
+      assert.strictEqual(callerRes.status, 403);
+    });
+
+    test('GET /api/state returns seeded probability 11.1 on all 9 gifts and omits gifts for Caller', async () => {
+      const publicRes = await fetch(`${baseUrl}/api/state`);
+      assert.strictEqual(publicRes.status, 200);
+      const publicState = await publicRes.json();
+      assert.strictEqual(publicState.gifts.length, 9);
+      for (const gift of publicState.gifts) {
+        assert.strictEqual(gift.probability, 11.1);
+      }
+
+      const callerRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${callerSessionToken}` },
+      });
+      assert.strictEqual(callerRes.status, 200);
+      const callerState = await callerRes.json();
+      assert.deepStrictEqual(callerState.gifts, []);
+    });
+
+    test('Admin POST /api/gifts & PATCH /api/gifts/:id sanitize probability (defaults, >=0 clamping, 2 decimals) and support concurrent updates', async () => {
+      // 1. Missing probability defaults to 10; negative clamps to 0; decimal rounds cleanly
+      const defaultRes = await fetch(`${baseUrl}/api/gifts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'Regalo Default Prob' }),
+      });
+      assert.strictEqual(defaultRes.status, 201);
+      const defaultData = await defaultRes.json();
+      assert.strictEqual(defaultData.gift.probability, 10);
+      createdGiftIds.add(defaultData.gift.id);
+
+      const negRes = await fetch(`${baseUrl}/api/gifts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'Regalo Negativo Prob', probability: -15.4 }),
+      });
+      assert.strictEqual(negRes.status, 201);
+      const negData = await negRes.json();
+      assert.strictEqual(negData.gift.probability, 0);
+      createdGiftIds.add(negData.gift.id);
+
+      // 2. PATCH clamps negative, rounds 2 decimals, and keeps current on invalid non-numeric input
+      const patchRoundRes = await fetch(`${baseUrl}/api/gifts/${defaultData.gift.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ probability: 33.337 }),
+      });
+      assert.strictEqual(patchRoundRes.status, 200);
+      const patchRoundData = await patchRoundRes.json();
+      assert.strictEqual(patchRoundData.gift.probability, 33.34);
+
+      const patchInvalidRes = await fetch(`${baseUrl}/api/gifts/${defaultData.gift.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ probability: 'not-a-number' }),
+      });
+      assert.strictEqual(patchInvalidRes.status, 200);
+      const patchInvalidData = await patchInvalidRes.json();
+      assert.strictEqual(patchInvalidData.gift.probability, 33.34);
+
+      // 3. Concurrent PATCH /api/gifts/:id calls must not overwrite each other
+      const [c1, c2] = await Promise.all([
+        fetch(`${baseUrl}/api/gifts/${defaultData.gift.id}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ probability: 42.5 }),
+        }),
+        fetch(`${baseUrl}/api/gifts/${negData.gift.id}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ probability: 18.25 }),
+        }),
+      ]);
+      assert.strictEqual(c1.status, 200);
+      assert.strictEqual(c2.status, 200);
+
+      const verifyRes = await fetch(`${baseUrl}/api/state`);
+      const verifyState = await verifyRes.json();
+      assert.strictEqual(
+        verifyState.gifts.find((g) => g.id === defaultData.gift.id)?.probability,
+        42.5
+      );
+      assert.strictEqual(
+        verifyState.gifts.find((g) => g.id === negData.gift.id)?.probability,
+        18.25
+      );
+
+      // Clean up temporary gifts
+      for (const gid of [defaultData.gift.id, negData.gift.id]) {
+        await fetch(`${baseUrl}/api/gifts/${gid}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${adminSessionToken}` },
+        });
+        createdGiftIds.delete(gid);
+      }
+    });
+
+    test('Admin PATCH /api/gifts/probabilities updates weights in bulk, respects 0-weight in POST /api/leads fallback, and POST /api/gifts/reset restores 11.1', async () => {
+      const bulkRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          probabilities: {
+            'gift-utensils-6': 100,
+            'gift-utensil-holder': 0,
+            'gift-bowls-3': -10,
+            'gift-santoku-5': 0,
+            'gift-cleaver-7': 0,
+            'gift-icecream-2': 0,
+            'gift-mugs-2': 0,
+            'gift-bamboo-large': 0,
+            'gift-warmer-pro': 0,
+          },
+        }),
+      });
+      assert.strictEqual(bulkRes.status, 200);
+      const bulkData = await bulkRes.json();
+      assert.strictEqual(
+        bulkData.gifts.find((g) => g.id === 'gift-utensils-6')?.probability,
+        100
+      );
+      assert.strictEqual(
+        bulkData.gifts.find((g) => g.id === 'gift-bowls-3')?.probability,
+        0
+      );
+
+      // Lead created without giftId must draw only positive-weight gift ('gift-utensils-6')
+      const leadRes = await fetch(`${baseUrl}/api/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Lead Peso Ponderado',
+          phone: '555-777-8888',
+          address: 'Test Ave',
+        }),
+      });
+      assert.strictEqual(leadRes.status, 201);
+      const leadData = await leadRes.json();
+      assert.strictEqual(leadData.lead.giftId, 'gift-utensils-6');
+
+      await fetch(`${baseUrl}/api/leads/${leadData.lead.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+
+      // Reset catalog back to default 11.1 weights
+      const resetRes = await fetch(`${baseUrl}/api/gifts/reset`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(resetRes.status, 200);
+      const resetData = await resetRes.json();
+      assert.strictEqual(resetData.state.gifts.length, 9);
+      for (const gift of resetData.state.gifts) {
+        assert.strictEqual(gift.probability, 11.1);
+      }
     });
   });
 

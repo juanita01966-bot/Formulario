@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
-import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
+import { animate, motion, useMotionValue, useReducedMotion, useTransform } from 'framer-motion';
 import type { GiftItem, GiftThemeId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
 
@@ -29,6 +29,27 @@ function cryptoRandomInt(max: number): number {
   return Math.floor(Math.random() * max);
 }
 
+function cryptoRandomUnit(): number {
+  const cryptoObj = typeof window !== 'undefined' ? window.crypto : globalThis.crypto;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    const buf = new Uint32Array(2);
+    cryptoObj.getRandomValues(buf);
+    const high = buf[0] >>> 5;
+    const low = buf[1] >>> 6;
+    return (high * 67108864 + low) / 9007199254740992;
+  }
+  return Math.random();
+}
+
+function getGiftWeight(gift: GiftItem): number {
+  const raw: unknown = gift.probability;
+  if (raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '')) {
+    return 10;
+  }
+  const num = Number(raw);
+  return Number.isFinite(num) ? Math.max(0, num) : 10;
+}
+
 function cryptoShuffle<T>(items: readonly T[]): T[] {
   const arr = [...items];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -38,8 +59,32 @@ function cryptoShuffle<T>(items: readonly T[]): T[] {
   return arr;
 }
 
-function cryptoRandomPick<T>(items: readonly T[]): T {
-  return items[cryptoRandomInt(items.length)];
+function cryptoWeightedRandomPick<T extends GiftItem>(items: readonly T[]): T {
+  const positiveEntries: Array<{ item: T; weight: number }> = [];
+  let totalWeight = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const w = getGiftWeight(items[i]);
+    if (w > 0) {
+      positiveEntries.push({ item: items[i], weight: w });
+      totalWeight += w;
+    }
+  }
+
+  // Fallback to uniform cryptographic draw when all active gifts have weight 0
+  if (positiveEntries.length === 0 || totalWeight <= 0) {
+    return items[cryptoRandomInt(items.length)];
+  }
+
+  const threshold = cryptoRandomUnit() * totalWeight;
+  let cumulative = 0;
+  for (let i = 0; i < positiveEntries.length; i++) {
+    cumulative += positiveEntries[i].weight;
+    if (threshold < cumulative) {
+      return positiveEntries[i].item;
+    }
+  }
+  return positiveEntries[positiveEntries.length - 1].item;
 }
 
 interface GiftBox3DTileProps {
@@ -59,16 +104,24 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
 }) => {
   const rawId = useId();
   const uid = rawId.replace(/:/g, '');
+  const prefersReduced = useReducedMotion();
 
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const [spotlight, setSpotlight] = useState({ x: 50, y: 35, active: false });
+  const [supportsFineHover, setSupportsFineHover] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      setSupportsFineHover(window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+    }
+  }, []);
 
   const isSelected = selectedIndex === index;
   const anotherSelected = selectedIndex !== null && !isSelected;
   const palette = resolveBoxPalette(giftTheme, customBoxColor, index);
   const roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'][index] || String(index + 1);
 
-  // Unique per-card SVG gradient & filter IDs so multi-card renders never collide
+  // Unique per-card SVG gradient IDs so multi-card renders never collide
   const goldRibId = `goldRib-${uid}`;
   const goldShadeId = `goldShade-${uid}`;
   const bowFillId = `bowFill-${uid}`;
@@ -76,19 +129,23 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
   const boxSideId = `boxSide-${uid}`;
   const boxLidId = `boxLid-${uid}`;
   const boxRimId = `boxRim-${uid}`;
-  const boxDropId = `boxDrop-${uid}`;
 
   // Single 60 FPS motion driver linking levitation height to inverse contact shadow
   const lift = useMotionValue(0);
-  const boxY = useTransform(lift, [0, 1, 1.8], [0, -9, -18]);
-  const boxScale = useTransform(lift, [0, 1, 1.8], [1, 1.02, 1.12]);
+  const boxY = useTransform(lift, [0, 1, 1.8], [0, -8, -16]);
+  const boxScale = useTransform(lift, [0, 1, 1.8], [1, 1.02, 1.1]);
   const shadowScaleX = useTransform(lift, [0, 1, 1.8], [1, 0.72, 0.54]);
   const shadowScaleY = useTransform(lift, [0, 1, 1.8], [1, 0.76, 0.62]);
   const shadowOpacity = useTransform(lift, [0, 1, 1.8], [0.72, 0.34, 0.2]);
-  const auraScale = useTransform(lift, [0, 1, 1.8], [0.94, 1.14, 1.3]);
-  const auraOpacity = useTransform(lift, [0, 1, 1.8], [0.35, 0.65, 0.85]);
+  const auraScale = useTransform(lift, [0, 1, 1.8], [0.94, 1.12, 1.26]);
+  const auraOpacity = useTransform(lift, [0, 1, 1.8], [0.34, 0.62, 0.85]);
 
   useEffect(() => {
+    if (prefersReduced) {
+      lift.set(isSelected ? 1.2 : 0);
+      return;
+    }
+
     if (selectedIndex === null) {
       const controls = animate(lift, [0, 1, 0], {
         duration: 2.8 + (index % 3) * 0.35,
@@ -110,16 +167,16 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
 
     const controls = animate(lift, 0, { duration: 0.25 });
     return () => controls.stop();
-  }, [index, isSelected, lift, selectedIndex]);
+  }, [index, isSelected, lift, prefersReduced, selectedIndex]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (selectedIndex !== null) return;
+    if (selectedIndex !== null || !supportsFineHover || prefersReduced) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const px = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const py = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
     setTilt({
-      rx: (0.5 - py) * 18,
-      ry: (px - 0.5) * 20,
+      rx: (0.5 - py) * 16,
+      ry: (px - 0.5) * 18,
     });
     setSpotlight({
       x: Math.round(px * 100),
@@ -129,6 +186,7 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
   };
 
   const handleMouseLeave = () => {
+    if (!supportsFineHover) return;
     setTilt({ rx: 0, ry: 0 });
     setSpotlight((prev) => ({ ...prev, active: false }));
   };
@@ -137,24 +195,25 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
     <motion.button
       type="button"
       onClick={onPick}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
+      onMouseMove={supportsFineHover ? handleMouseMove : undefined}
+      onMouseLeave={supportsFineHover ? handleMouseLeave : undefined}
       disabled={selectedIndex !== null}
-      initial={{ opacity: 0, y: 24, scale: 0.92 }}
+      aria-label={`Elegir Cajita ${roman}`}
+      initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.94 }}
       animate={{
         opacity: anotherSelected ? 0.2 : 1,
-        scale: isSelected ? 1.07 : anotherSelected ? 0.88 : 1,
-        y: isSelected ? -10 : 0,
+        scale: isSelected ? 1.06 : anotherSelected ? 0.9 : 1,
+        y: isSelected ? -8 : 0,
       }}
-      whileHover={selectedIndex === null ? { y: -6, scale: 1.035 } : undefined}
+      whileHover={supportsFineHover && selectedIndex === null ? { y: -6, scale: 1.035 } : undefined}
       whileTap={selectedIndex === null ? { scale: 0.96 } : undefined}
       transition={{
         type: 'spring',
         stiffness: 300,
         damping: 22,
-        delay: selectedIndex === null ? index * 0.055 : 0,
+        delay: !prefersReduced && selectedIndex === null ? index * 0.045 : 0,
       }}
-      className="group relative flex flex-col items-center justify-between overflow-hidden rounded-[22px] border border-[#C88A2B]/40 border-t-[#FDE68A]/55 p-3.5 sm:p-4 backdrop-blur-md perspective-1000 cursor-pointer shadow-[0_16px_34px_-12px_rgba(0,0,0,0.78),inset_0_1px_0_rgba(254,240,138,0.24)] hover:border-[#F4CA73]/80 hover:border-t-[#FEF08A]/85 hover:shadow-[0_22px_44px_-10px_rgba(229,174,78,0.36),inset_0_1px_0_rgba(254,240,138,0.45)] transition-[border-color,box-shadow] duration-300 focus:outline-none"
+      className="group relative flex min-h-[112px] sm:min-h-[164px] flex-col items-center justify-between overflow-hidden rounded-[16px] sm:rounded-[22px] border border-[#C88A2B]/40 border-t-[#FDE68A]/55 p-2 pt-2.5 pb-2.5 sm:p-4 perspective-1000 cursor-pointer shadow-[0_12px_26px_-10px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(254,240,138,0.24)] hover:border-[#F4CA73]/80 hover:border-t-[#FEF08A]/85 hover:shadow-[0_20px_40px_-10px_rgba(229,174,78,0.34),inset_0_1px_0_rgba(254,240,138,0.45)] transition-[border-color,box-shadow] duration-250 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FEF08A]/80"
       style={{
         background:
           'radial-gradient(120% 90% at 50% 18%, rgba(229, 174, 78, 0.16) 0%, rgba(48, 25, 15, 0.94) 52%, rgba(15, 7, 4, 0.99) 100%)',
@@ -164,7 +223,7 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
       <svg
         aria-hidden="true"
         viewBox="0 0 200 220"
-        className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.22]"
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.2]"
         preserveAspectRatio="none"
       >
         <defs>
@@ -177,30 +236,32 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
         <circle cx="100" cy="86" r="76" stroke="#C88A2B" strokeOpacity="0.14" strokeDasharray="3 4" strokeWidth="0.7" fill="none" />
       </svg>
 
-      {/* Diagonal satin gallery sheen across card background */}
+      {/* Diagonal satin gallery sheen across card background (desktop+) */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -top-10 -left-10 h-44 w-28 rotate-[28deg] bg-gradient-to-r from-transparent via-[#FEF08A]/[0.08] to-transparent blur-sm"
+        className="pointer-events-none hidden sm:block absolute -top-10 -left-10 h-44 w-28 rotate-[28deg] bg-gradient-to-r from-transparent via-[#FEF08A]/[0.08] to-transparent blur-sm"
       />
 
       {/* Dynamic cursor-tracked radial spotlight sheen */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 transition-opacity duration-200"
-        style={{
-          opacity: spotlight.active ? 1 : 0,
-          background: `radial-gradient(210px circle at ${spotlight.x}% ${spotlight.y}%, rgba(254, 240, 138, 0.24), rgba(200, 138, 43, 0.09) 46%, transparent 74%)`,
-        }}
-      />
+      {supportsFineHover && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+          style={{
+            opacity: spotlight.active ? 1 : 0,
+            background: `radial-gradient(210px circle at ${spotlight.x}% ${spotlight.y}%, rgba(254, 240, 138, 0.24), rgba(200, 138, 43, 0.09) 46%, transparent 74%)`,
+          }}
+        />
+      )}
 
       {/* Subtle glassmorphic top highlight strip */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-[#FEF08A]/55 to-transparent"
+        className="pointer-events-none absolute inset-x-3 sm:inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-[#FEF08A]/55 to-transparent"
       />
 
       {/* 3D Floating Box Stage */}
-      <div className="relative z-10 my-1 flex w-full flex-col items-center justify-center pt-1 pb-2 perspective-1000">
+      <div className="relative z-10 my-0.5 sm:my-1 flex w-full flex-col items-center justify-center pt-0.5 pb-1 sm:pt-1 sm:pb-2 perspective-1000">
         {/* Ambient back studio glow synchronized with levitation */}
         <motion.div
           aria-hidden="true"
@@ -209,7 +270,7 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
             opacity: auraOpacity,
             background: `radial-gradient(circle, ${palette.glow} 0%, rgba(253, 224, 71, 0.14) 55%, transparent 76%)`,
           }}
-          className="pointer-events-none absolute top-3 h-24 w-24 sm:h-28 sm:w-28 rounded-full blur-xl will-change-transform"
+          className="pointer-events-none absolute top-1.5 sm:top-3 h-14 w-14 min-[390px]:h-16 min-[390px]:w-16 sm:h-28 sm:w-28 rounded-full blur-lg sm:blur-xl will-change-transform"
         />
 
         {/* Levitating 3D Isometric Gift Box */}
@@ -218,7 +279,7 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
             y: boxY,
             scale: boxScale,
           }}
-          className="relative z-10 w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center will-change-transform"
+          className="relative z-10 w-[56px] h-[56px] min-[390px]:w-[66px] min-[390px]:h-[66px] sm:w-28 sm:h-28 flex items-center justify-center will-change-transform"
         >
           <div
             style={{
@@ -280,13 +341,9 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
                   <stop offset="0%" stopColor={palette.lid} />
                   <stop offset="100%" stopColor={palette.front} />
                 </linearGradient>
-
-                <filter id={boxDropId} x="-22%" y="-22%" width="144%" height="144%">
-                  <feDropShadow dx="0" dy="8" stdDeviation="5" floodColor="#050201" floodOpacity="0.62" />
-                </filter>
               </defs>
 
-              <g filter={`url(#${boxDropId})`}>
+              <g>
                 {/* Left Front 3D Lit Face */}
                 <polygon
                   points="23,56 65,76 65,112 23,92"
@@ -397,7 +454,7 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
             scaleY: shadowScaleY,
             opacity: shadowOpacity,
           }}
-          className="relative z-0 -mt-1.5 h-3.5 w-20 sm:w-24 rounded-full bg-gradient-to-r from-transparent via-black/90 to-transparent blur-[3.5px] will-change-transform"
+          className="relative z-0 -mt-1 sm:-mt-1.5 h-2.5 sm:h-3.5 w-12 min-[390px]:w-14 sm:w-24 rounded-full bg-gradient-to-r from-transparent via-black/90 to-transparent blur-[3px] sm:blur-[3.5px] will-change-transform"
         />
         {/* Subtle champagne floor reflection disc */}
         <motion.div
@@ -406,16 +463,16 @@ const GiftBox3DTile: React.FC<GiftBox3DTileProps> = ({
             scaleX: shadowScaleX,
             opacity: auraOpacity,
           }}
-          className="pointer-events-none -mt-2.5 h-2 w-16 rounded-full bg-gradient-to-r from-transparent via-[#FDE68A]/25 to-transparent blur-[4px] will-change-transform"
+          className="pointer-events-none -mt-2 sm:-mt-2.5 h-1.5 sm:h-2 w-10 min-[390px]:w-12 sm:w-16 rounded-full bg-gradient-to-r from-transparent via-[#FDE68A]/25 to-transparent blur-[3px] sm:blur-[4px] will-change-transform"
         />
       </div>
 
       {/* Bottom label */}
-      <div className="relative z-10 w-full text-center pt-1">
-        <p className="font-serif text-xs sm:text-sm font-semibold tracking-wide text-[#FFF7E2]">
+      <div className="relative z-10 w-full text-center pt-0.5 sm:pt-1">
+        <p className="font-serif text-[11px] min-[390px]:text-xs sm:text-sm font-semibold tracking-wide text-[#FFF7E2] leading-tight whitespace-nowrap">
           Cajita {roman}
         </p>
-        <p className="text-[10px] uppercase tracking-[0.14em] text-[#E5AE4E]/85 group-hover:text-[#FEF08A] transition-colors">
+        <p className="mt-0.5 text-[8.5px] min-[390px]:text-[9.5px] sm:text-[10px] uppercase tracking-[0.04em] sm:tracking-[0.14em] text-[#E5AE4E]/85 group-hover:text-[#FEF08A] transition-colors leading-tight whitespace-nowrap">
           Elegir regalo
         </p>
       </div>
@@ -434,13 +491,17 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const firstName = leadName.trim().split(/\s+/)[0] || 'Invitado';
 
-  // Present 4 to 6 3D mystery boxes drawn from active gifts (stable across background sync polls)
+  // Always present all 9 mystery gift box spaces (3x3 grid), stable across background sync polls
   const giftIdsKey = activeGifts.map((g) => g.id).join('|');
   const boxGifts = useMemo(() => {
     const pool = activeGifts.length > 0 ? activeGifts : [];
     if (pool.length === 0) return [];
-    const targetCount = Math.min(9, Math.max(4, pool.length));
-    const orderedPool = randomizeGifts ? cryptoShuffle(pool) : pool;
+
+    const targetCount = 9;
+    const positivePool = pool.filter((g) => getGiftWeight(g) > 0);
+    const eligiblePool = positivePool.length > 0 ? positivePool : pool;
+    const orderedPool = randomizeGifts ? cryptoShuffle(eligiblePool) : eligiblePool;
+
     const result: GiftItem[] = [];
     for (let i = 0; i < targetCount; i++) {
       result.push(orderedPool[i % orderedPool.length]);
@@ -453,7 +514,9 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
     if (selectedIndex !== null) return;
     setSelectedIndex(idx);
     const awardedGift =
-      randomizeGifts && activeGifts.length > 0 ? cryptoRandomPick(activeGifts) : tileGift;
+      randomizeGifts && activeGifts.length > 0
+        ? cryptoWeightedRandomPick(activeGifts)
+        : tileGift;
     window.setTimeout(() => {
       onSelectGift(awardedGift, idx);
     }, 340);
@@ -464,17 +527,17 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
       className="w-full max-w-[700px] mx-auto"
     >
-      <div className="relative overflow-hidden rounded-[34px] bg-[#FFFDF9]/82 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-5 py-7 sm:px-8 sm:py-9">
+      <div className="relative overflow-hidden rounded-[26px] sm:rounded-[34px] bg-[#FFFDF9]/82 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-3 py-5 sm:px-8 sm:py-9">
         <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#4B644A]" />
 
-        <div className="text-center max-w-md mx-auto mb-6">
-          <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#22150E] leading-tight">
+        <div className="text-center max-w-md mx-auto mb-4 sm:mb-6 px-1">
+          <h2 className="font-serif text-[21px] sm:text-3xl font-semibold text-[#22150E] leading-tight">
             {firstName}, elige una <span className="gold-foil-text">cajita de regalo</span>
           </h2>
-          <p className="mt-2 text-sm text-[#5C4332]">
+          <p className="mt-1.5 sm:mt-2 text-xs sm:text-sm text-[#5C4332] leading-relaxed">
             {randomizeGifts
               ? 'Cada cajita mezcla premios Royal Prestige al azar. Toca cualquiera para elevarla, girarla y descubrir tu obsequio exclusivo.'
               : 'Toca cualquiera de las cajas dentro del recuadro para elevarla, girarla y descubrir tu obsequio exclusivo.'}
@@ -483,7 +546,7 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
 
         {/* Dedicated 3D HD Floating Showcase Gallery */}
         <div
-          className="relative overflow-hidden rounded-[26px] border border-[#C88A2B]/55 border-t-[#FDE68A]/60 p-4 sm:p-5 shadow-[0_24px_52px_-16px_rgba(24,11,5,0.72),inset_0_2px_28px_rgba(0,0,0,0.7)]"
+          className="relative overflow-hidden rounded-[20px] sm:rounded-[26px] border border-[#C88A2B]/55 border-t-[#FDE68A]/60 p-2.5 sm:p-5 shadow-[0_24px_52px_-16px_rgba(24,11,5,0.72),inset_0_2px_28px_rgba(0,0,0,0.7)]"
           style={{
             background:
               'radial-gradient(ellipse at 50% 0%, #3E2114 0%, #1F1009 46%, #110703 100%)',
@@ -508,11 +571,11 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
           {/* Diagonal volumetric light shafts */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -top-12 left-1/4 h-64 w-32 -skew-x-12 bg-gradient-to-b from-[#FEF08A]/12 via-[#E5AE4E]/5 to-transparent blur-xl"
+            className="pointer-events-none hidden sm:block absolute -top-12 left-1/4 h-64 w-32 -skew-x-12 bg-gradient-to-b from-[#FEF08A]/12 via-[#E5AE4E]/5 to-transparent blur-xl"
           />
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -top-12 right-1/4 h-64 w-28 skew-x-12 bg-gradient-to-b from-[#FDE68A]/10 via-[#C88A2B]/4 to-transparent blur-xl"
+            className="pointer-events-none hidden sm:block absolute -top-12 right-1/4 h-64 w-28 skew-x-12 bg-gradient-to-b from-[#FDE68A]/10 via-[#C88A2B]/4 to-transparent blur-xl"
           />
 
           {/* Top specular rim hairline */}
@@ -524,7 +587,7 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
           {/* Top studio champagne spotlight cone */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 -top-4 -translate-x-1/2 h-40 w-4/5 blur-2xl opacity-55"
+            className="pointer-events-none absolute left-1/2 -top-4 -translate-x-1/2 h-32 sm:h-40 w-4/5 blur-xl sm:blur-2xl opacity-55"
             style={{
               background: 'radial-gradient(ellipse at top, rgba(253, 230, 138, 0.55), rgba(200, 138, 43, 0.16) 55%, transparent 78%)',
             }}
@@ -533,17 +596,14 @@ export const MysteryCardsMenu: React.FC<MysteryCardsMenuProps> = ({
           {/* Subtle bottom warm floor bounce glow */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 h-24 w-3/4 blur-2xl opacity-35"
+            className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 h-20 sm:h-24 w-3/4 blur-xl sm:blur-2xl opacity-35"
             style={{
               background: 'radial-gradient(ellipse at bottom, rgba(229, 174, 78, 0.45), transparent 75%)',
             }}
           />
 
-          <div
-            className={`relative z-10 grid gap-3 sm:gap-4 ${
-              boxGifts.length <= 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'
-            }`}
-          >
+          {/* Symmetric 3x3 Mystery Box Grid on both mobile and desktop */}
+          <div className="relative z-10 grid grid-cols-3 gap-2 sm:gap-4">
             {boxGifts.map((gift, index) => (
               <GiftBox3DTile
                 key={`mystery-box-${index}`}

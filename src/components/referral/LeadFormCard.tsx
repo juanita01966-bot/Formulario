@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { AlertCircle, Building2, Check, ChevronRight, Globe, MapPin, Phone, Share2, User } from 'lucide-react';
 import type { AppSettings, GiftThemeId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
@@ -26,42 +26,54 @@ function StylizedHeroGift3D({
   customBoxColor?: string;
   compact?: boolean;
 }) {
+  const prefersReduced = useReducedMotion();
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const [supportsFineHover, setSupportsFineHover] = useState(false);
   const palette = resolveBoxPalette(giftTheme, customBoxColor, 0);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      setSupportsFineHover(window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+    }
+  }, []);
 
   return (
     <motion.div
       className={`relative flex items-center justify-center perspective-1000 select-none shrink-0 ${
         compact ? 'h-16 w-16' : 'mx-auto mb-5 h-32 w-32'
       }`}
-      onMouseMove={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const px = (e.clientX - rect.left) / rect.width;
-        const py = (e.clientY - rect.top) / rect.height;
-        setTilt({ rx: (0.5 - py) * 20, ry: (px - 0.5) * 24 });
-      }}
-      onMouseLeave={() => setTilt({ rx: 0, ry: 0 })}
-      initial={{ scale: 0.85, opacity: 0 }}
+      onMouseMove={
+        supportsFineHover && !prefersReduced
+          ? (e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const px = (e.clientX - rect.left) / rect.width;
+              const py = (e.clientY - rect.top) / rect.height;
+              setTilt({ rx: (0.5 - py) * 20, ry: (px - 0.5) * 24 });
+            }
+          : undefined
+      }
+      onMouseLeave={supportsFineHover ? () => setTilt({ rx: 0, ry: 0 }) : undefined}
+      initial={{ scale: 0.88, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: 'spring', stiffness: 260, damping: 20 }}
     >
       {/* Glowing radial aura matching the active theme */}
       <motion.div
-        className="absolute inset-0.5 rounded-full blur-xl"
+        className="absolute inset-0.5 rounded-full blur-xl will-change-transform"
         style={{ background: palette.glow }}
-        animate={{ scale: [0.95, 1.15, 0.95], opacity: [0.55, 0.9, 0.55] }}
-        transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+        animate={prefersReduced ? { opacity: 0.7 } : { scale: [0.95, 1.15, 0.95], opacity: [0.55, 0.9, 0.55] }}
+        transition={prefersReduced ? undefined : { duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       {/* Floating 3D gift box */}
       <motion.div
-        animate={{ y: [0, compact ? -4 : -7, 0], rotateZ: [-1.2, 1.2, -1.2] }}
-        transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+        animate={prefersReduced ? undefined : { y: [0, compact ? -4 : -7, 0], rotateZ: [-1.2, 1.2, -1.2] }}
+        transition={prefersReduced ? undefined : { duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
         style={{
           transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`,
           transition: 'transform 140ms ease-out',
         }}
-        className={`relative flex items-center justify-center ${compact ? 'h-14 w-14' : 'h-28 w-28'}`}
+        className={`relative flex items-center justify-center will-change-transform ${compact ? 'h-14 w-14' : 'h-28 w-28'}`}
       >
         <svg viewBox="0 0 130 130" className="w-full h-full drop-shadow-[0_14px_18px_rgba(34,21,14,0.38)]" fill="none" aria-hidden="true">
           <defs>
@@ -283,10 +295,10 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
         {/* Outer subtle champagne glow */}
         <div className="pointer-events-none -inset-1 absolute rounded-[36px] bg-gradient-to-br from-[#E5AE4E]/35 via-[#B84A27]/15 to-[#4B644A]/25 blur-xl opacity-75" />
 
-        <div className="relative rounded-[28px] sm:rounded-[32px] bg-[#FFFDF9]/72 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-5 py-6 sm:px-9 sm:py-9">
+        <div className="relative rounded-[26px] sm:rounded-[32px] bg-[#FFFDF9]/74 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-4 py-5 sm:px-9 sm:py-9">
           {/* Clipped decorative border & top foil stripe so dropdowns inside can overflow freely */}
-          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px] sm:rounded-[32px]">
-            <div className="absolute inset-2 sm:inset-2.5 rounded-[22px] sm:rounded-[24px] border border-[#E6D5BF]/60" />
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[26px] sm:rounded-[32px]">
+            <div className="absolute inset-2 sm:inset-2.5 rounded-[20px] sm:rounded-[24px] border border-[#E6D5BF]/60" />
             <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#4B644A]" />
           </div>
 
@@ -295,7 +307,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-            className="relative z-10 mx-auto mb-4 flex h-24 w-24 sm:h-32 sm:w-32 items-center justify-center rounded-full overflow-hidden bg-[#1A120D] border-2 border-[#C88A2B]/75 shadow-[0_14px_32px_-8px_rgba(34,21,14,0.45)]"
+            className="relative z-10 mx-auto mb-3.5 sm:mb-4 flex h-20 w-20 sm:h-32 sm:w-32 items-center justify-center rounded-full overflow-hidden bg-[#1A120D] border-2 border-[#C88A2B]/75 shadow-[0_14px_32px_-8px_rgba(34,21,14,0.45)]"
           >
             <img
               src="/images/logo%20ciprian.png"
@@ -305,8 +317,8 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
           </motion.div>
 
           {/* Hero Copy */}
-          <div className="relative z-10 text-center space-y-2.5 mb-5">
-            <h1 className="font-serif text-[21px] sm:text-[26px] leading-[1.22] font-semibold tracking-tight text-[#22150E]">
+          <div className="relative z-10 text-center space-y-2 sm:space-y-2.5 mb-4 sm:mb-5">
+            <h1 className="font-serif text-[20px] sm:text-[26px] leading-[1.24] font-semibold tracking-tight text-[#22150E]">
               Reclama tu obsequio exclusivo y participa por hasta{' '}
               <span className="gold-foil-text font-bold">$2,000 USD</span> en productos Royal Prestige.
             </h1>
@@ -322,7 +334,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
               <button
                 type="button"
                 onClick={() => setTermsOpen(true)}
-                className="font-semibold text-[#9E4725] underline decoration-[#C88A2B]/60 underline-offset-2 hover:text-[#7B2D13] cursor-pointer"
+                className="inline-block py-1.5 -my-1 px-0.5 font-semibold text-[#9E4725] underline decoration-[#C88A2B]/60 underline-offset-2 hover:text-[#7B2D13] cursor-pointer"
               >
                 Términos y Condiciones
               </button>{' '}
@@ -331,12 +343,12 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
           </div>
 
           {/* Clean Hairline Divider */}
-          <div className="relative z-10 h-px w-full bg-gradient-to-r from-transparent via-[#DFCBB3] to-transparent mb-5" />
+          <div className="relative z-10 h-px w-full bg-gradient-to-r from-transparent via-[#DFCBB3] to-transparent mb-4 sm:mb-5" />
 
           {/* Form Header with adapted 3D Gift Box beside "Reclama tu premio" */}
-          <div className="relative z-10 mb-5 flex items-center justify-between gap-3.5 rounded-2xl bg-[#FAF3E8]/70 border border-[#E6D5BF]/80 px-4 py-3">
+          <div className="relative z-10 mb-4 sm:mb-5 flex items-center justify-between gap-3 rounded-2xl bg-[#FAF3E8]/70 border border-[#E6D5BF]/80 px-3.5 py-2.5 sm:px-4 sm:py-3">
             <div className="min-w-0">
-              <h2 className="font-serif text-xl font-semibold text-[#22150E] leading-tight">
+              <h2 className="font-serif text-lg sm:text-xl font-semibold text-[#22150E] leading-tight">
                 Reclama tu premio
               </h2>
               <p className="text-xs sm:text-[13px] text-[#5C4332] mt-1 leading-snug">
@@ -350,14 +362,14 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
             />
           </div>
 
-          <form onSubmit={handleFormSubmit} noValidate className="space-y-4">
+          <form onSubmit={handleFormSubmit} noValidate className="space-y-3.5 sm:space-y-4">
             {/* Name input */}
             <div>
               <label htmlFor="lead-name" className="sr-only">
                 Nombre completo
               </label>
               <div
-                className={`group relative flex items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
+                className={`group relative flex min-h-[48px] items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
                   showNameError
                     ? 'border-red-500 ring-2 ring-red-500/15 bg-red-50/30'
                     : 'border-[#DFCBB3] focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10'
@@ -374,7 +386,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   onBlur={() => setTouched((prev) => ({ ...prev, name: true }))}
-                  className="w-full bg-transparent py-3.5 pr-4 text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
+                  className="w-full bg-transparent py-3 sm:py-3.5 pr-4 text-base sm:text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
                 />
                 {showNameError && (
                   <span className="pr-3.5 text-red-500" aria-hidden="true">
@@ -402,7 +414,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                 Teléfono
               </label>
               <div
-                className={`group relative flex items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
+                className={`group relative flex min-h-[48px] items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
                   showPhoneError
                     ? 'border-red-500 ring-2 ring-red-500/15 bg-red-50/30'
                     : 'border-[#DFCBB3] focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10'
@@ -419,7 +431,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   onBlur={() => setTouched((prev) => ({ ...prev, phone: true }))}
-                  className="w-full bg-transparent py-3.5 pr-4 text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none tabular-nums"
+                  className="w-full bg-transparent py-3 sm:py-3.5 pr-4 text-base sm:text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none tabular-nums"
                 />
                 {showPhoneError && (
                   <span className="pr-3.5 text-red-500" aria-hidden="true">
@@ -512,7 +524,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                   exit={{ opacity: 0, height: 0 }}
                 >
                   <div
-                    className={`group relative flex items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
+                    className={`group relative flex min-h-[48px] items-center rounded-2xl border bg-[#FCF8F2] transition-all duration-200 ${
                       showCityError
                         ? 'border-red-500 ring-2 ring-red-500/15 bg-red-50/30'
                         : 'border-[#DFCBB3] focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10'
@@ -527,7 +539,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                       value={customCity}
                       onChange={(e) => setCustomCity(e.target.value)}
                       onBlur={() => setTouched((prev) => ({ ...prev, customCity: true }))}
-                      className="w-full bg-transparent py-3.5 pr-4 text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
+                      className="w-full bg-transparent py-3 sm:py-3.5 pr-4 text-base sm:text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
                     />
                     {showCityError && (
                       <span className="pr-3.5 text-red-500" aria-hidden="true">
@@ -549,7 +561,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
               <label htmlFor="lead-address" className="sr-only">
                 Dirección de vivienda (opcional)
               </label>
-              <div className="group relative flex items-center rounded-2xl border border-[#DFCBB3] bg-[#FCF8F2] transition-all duration-200 focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10">
+              <div className="group relative flex min-h-[48px] items-center rounded-2xl border border-[#DFCBB3] bg-[#FCF8F2] transition-all duration-200 focus-within:border-[#B84A27] focus-within:bg-white focus-within:ring-4 focus-within:ring-amber-500/10">
                 <span className="pl-4 pr-2.5 text-[#8C6E58] group-focus-within:text-[#B84A27] transition-colors">
                   <MapPin className="h-[18px] w-[18px]" />
                 </span>
@@ -560,18 +572,18 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                   placeholder="Dirección de vivienda (opcional)"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  className="w-full bg-transparent py-3.5 pr-4 text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
+                  className="w-full bg-transparent py-3 sm:py-3.5 pr-4 text-base sm:text-[15px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
                 />
               </div>
             </div>
 
             {/* Consent Checkbox */}
-            <label className="flex items-start gap-3 rounded-2xl border border-[#EFE2D0] bg-[#FAF3E8]/60 p-3.5 cursor-pointer hover:bg-[#FAF3E8] transition-colors">
+            <label className="flex min-h-[48px] items-start gap-3 rounded-2xl border border-[#EFE2D0] bg-[#FAF3E8]/60 p-3.5 cursor-pointer hover:bg-[#FAF3E8] transition-colors">
               <input
                 type="checkbox"
                 checked={accepted}
                 onChange={(e) => setAccepted(e.target.checked)}
-                className="mt-0.5 h-4.5 w-4.5 shrink-0 rounded border-[#C6A787] accent-[#8C3318] cursor-pointer"
+                className="mt-0.5 h-5 w-5 shrink-0 rounded border-[#C6A787] accent-[#8C3318] cursor-pointer"
               />
               <span className="text-[12.5px] leading-snug text-[#4E382B]">
                 Confirmo que soy mayor de 18 años y autorizo que me contacten por llamada, mensaje de texto o WhatsApp
@@ -597,7 +609,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="relative w-full overflow-hidden rounded-full bg-gradient-to-r from-[#22150E] via-[#5C2918] to-[#8C3318] py-4 px-6 text-base font-semibold text-[#FFFDF9] shadow-lg shadow-[#5C2918]/25 hover:shadow-xl hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-70"
+                    className="relative min-h-[50px] w-full overflow-hidden rounded-full bg-gradient-to-r from-[#22150E] via-[#5C2918] to-[#8C3318] py-3.5 sm:py-4 px-6 text-base font-semibold text-[#FFFDF9] shadow-lg shadow-[#5C2918]/25 hover:shadow-xl hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-70"
                   >
                     <span className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-amber-200/25 to-transparent animate-shimmer" />
                     <span className="relative flex items-center justify-center gap-2">
@@ -611,14 +623,14 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
           </form>
 
           {/* Subtle QR / Referral Share Strip */}
-          <div className="relative z-10 mt-5 pt-4 border-t border-[#E6D5BF]/70 flex items-center justify-between gap-3">
+          <div className="relative z-10 mt-5 pt-4 border-t border-[#E6D5BF]/70 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 sm:gap-3">
             <p className="text-[11.5px] text-[#5C4332] leading-snug">
               Comparte este acceso QR para participar por hasta <strong className="text-[#8C3318]">$2,000 USD</strong>.
             </p>
             <button
               type="button"
               onClick={handleShareInvite}
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-3 py-1.5 text-[11px] font-semibold text-[#4E382B] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
+              className="shrink-0 min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-4 py-2 text-xs font-semibold text-[#4E382B] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
             >
               {shareCopied ? (
                 <>

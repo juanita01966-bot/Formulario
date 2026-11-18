@@ -957,21 +957,21 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
   };
 
   return (
-    <div ref={studioTopRef} className="space-y-6">
+    <div ref={studioTopRef} className="space-y-5 sm:space-y-6">
       {/* Studio Editorial Header */}
-      <section className="relative overflow-hidden rounded-[26px] bg-gradient-to-br from-[#FFFDF9] via-[#FFF8EE] to-[#F7EADA] border border-[#E6D5BF] p-5 sm:p-7 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
-        <div className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-[#E5AE4E]/15 blur-2xl" />
-        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#22150E] to-[#3B2418] text-[#F4CA73] shadow-md border border-[#C88A2B]/40">
-              <QrCode className="h-6 w-6" />
+      <section className="relative overflow-hidden rounded-[24px] sm:rounded-[26px] bg-gradient-to-br from-[#FFFDF9] via-[#FFF8EE] to-[#F7EADA] border border-[#E6D5BF] p-4 sm:p-7 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
+        <div className="pointer-events-none hidden sm:block absolute -right-12 -top-12 h-44 w-44 rounded-full bg-[#E5AE4E]/15 blur-2xl" />
+        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-3.5 sm:gap-4">
+          <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+            <div className="flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#22150E] to-[#3B2418] text-[#F4CA73] shadow-md border border-[#C88A2B]/40">
+              <QrCode className="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
-            <div>
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-[#9A6315]">
-                <Sparkles className="h-3.5 w-3.5 text-[#C88A2B]" />
+            <div className="min-w-0">
+              <span className="inline-flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[#9A6315]">
+                <Sparkles className="h-3.5 w-3.5 text-[#C88A2B] shrink-0" />
                 Estudio QR · Alta Definición
               </span>
-              <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#22150E] mt-0.5">
+              <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E] mt-0.5 leading-snug">
                 Generador de Códigos QR The Ciprian Company
               </h2>
               <p className="text-xs sm:text-sm text-[#6E5341] mt-1 max-w-2xl">
@@ -994,15 +994,15 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
       </section>
 
       {/* Main Split Workspace: Controls + Floating Live Preview */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 sm:gap-6 items-start">
         {/* Left: Generator Controls */}
         <form
           onSubmit={handleSaveToHistory}
-          className="xl:col-span-7 rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-5 sm:p-7 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)] space-y-6"
+          className="xl:col-span-7 rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-4 sm:p-7 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)] space-y-5 sm:space-y-6"
         >
           {/* Identity & Destination */}
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
               <div>
                 <label className="block text-xs font-semibold text-[#594133] mb-1.5">
                   Nombre del QR *
@@ -1016,7 +1016,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   }}
                   maxLength={70}
                   placeholder="Ej. Show Otoño · Mesa VIP"
-                  className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-sm text-[#22150E] placeholder:text-[#A8917D] focus:bg-white focus:border-[#C88A2B] focus:outline-none transition-colors"
+                  className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm text-[#22150E] placeholder:text-[#A8917D] focus:bg-white focus:border-[#C88A2B] focus:outline-none transition-colors"
                 />
               </div>
 
@@ -1030,7 +1030,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   onChange={(e) => setFrameText(e.target.value)}
                   maxLength={54}
                   placeholder="Ej. Escanea y reclama tu obsequio"
-                  className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-sm text-[#22150E] placeholder:text-[#A8917D] focus:bg-white focus:border-[#C88A2B] focus:outline-none transition-colors"
+                  className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm text-[#22150E] placeholder:text-[#A8917D] focus:bg-white focus:border-[#C88A2B] focus:outline-none transition-colors"
                 />
               </div>
             </div>
@@ -1043,7 +1043,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   key={label}
                   type="button"
                   onClick={() => setFrameText(label)}
-                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                  className={`min-h-[38px] sm:min-h-[30px] rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
                     frameText === label
                       ? 'border-[#C88A2B] bg-[#FFF4DC] text-[#7A4B0F]'
                       : 'border-[#E6D5BF] bg-[#FAF3E8]/70 text-[#6E5341] hover:bg-[#F3E4CE]'
@@ -1056,7 +1056,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => setFrameText('')}
-                  className="rounded-full border border-transparent px-2 py-1 text-[11px] font-semibold text-[#8C3318] hover:bg-rose-50 cursor-pointer"
+                  className="min-h-[38px] sm:min-h-[30px] rounded-full border border-transparent px-3 py-1 text-[11px] font-semibold text-[#8C3318] hover:bg-rose-50 cursor-pointer"
                 >
                   Sin texto
                 </button>
@@ -1076,7 +1076,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                     setTargetUrl(defaultUrl);
                     setStatusBanner(null);
                   }}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[#C88A2B]/45 bg-[#FFF6E3] px-3 py-1 text-[11px] font-bold text-[#8A5610] hover:bg-[#FDEBC3] transition-colors cursor-pointer shadow-xs"
+                  className="inline-flex min-h-[38px] sm:min-h-[30px] items-center gap-1.5 rounded-full border border-[#C88A2B]/45 bg-[#FFF6E3] px-3 py-1 text-[11px] font-bold text-[#8A5610] hover:bg-[#FDEBC3] transition-colors cursor-pointer shadow-xs"
                 >
                   <RotateCcw className="h-3 w-3" />
                   Usar enlace del formulario
@@ -1090,7 +1090,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   setStatusBanner(null);
                 }}
                 placeholder={defaultUrl}
-                className={`w-full rounded-xl border bg-[#FCF8F2] px-3.5 py-2.5 text-sm font-mono text-[#22150E] placeholder:text-[#A8917D] focus:bg-white focus:outline-none transition-colors ${
+                className={`w-full min-h-[44px] rounded-xl border bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm font-mono text-[#22150E] placeholder:text-[#A8917D] focus:bg-white focus:outline-none transition-colors ${
                   urlValid ? 'border-[#DFCBB3] focus:border-[#C88A2B]' : 'border-rose-400 focus:border-rose-500'
                 }`}
               />
@@ -1189,7 +1189,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                       key={shape.id}
                       type="button"
                       onClick={() => setDotShape(shape.id)}
-                      className={`rounded-xl border px-2.5 py-2 text-center transition-all cursor-pointer ${
+                      className={`min-h-[56px] rounded-xl border px-1.5 sm:px-2.5 py-2 text-center transition-all cursor-pointer ${
                         active
                           ? 'border-[#22150E] bg-[#22150E] text-[#FFFDF9] shadow-sm'
                           : 'border-[#DFCBB3] bg-[#FCF8F2] text-[#594133] hover:bg-[#F5E9D6]'
@@ -1215,9 +1215,9 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                           } ${active ? 'bg-[#F4CA73]' : 'bg-[#8C3318]'}`}
                         />
                       </div>
-                      <span className="block text-xs font-bold leading-none">{shape.label}</span>
+                      <span className="block text-[11px] sm:text-xs font-bold leading-none">{shape.label}</span>
                       <span
-                        className={`block text-[10px] mt-0.5 ${
+                        className={`block text-[9.5px] sm:text-[10px] mt-0.5 leading-tight ${
                           active ? 'text-[#E8D5BE]' : 'text-[#8A6D5B]'
                         }`}
                       >
@@ -1247,33 +1247,33 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
-                <label className="flex items-center gap-2.5 rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-2.5 py-2 cursor-pointer hover:border-[#C88A2B]">
+                <label className="flex min-h-[48px] items-center gap-2 rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-2.5 py-2 cursor-pointer hover:border-[#C88A2B]">
                   <input
                     type="color"
                     value={normalizeHex(foregroundColor, '#22150E')}
                     onChange={(e) => setForegroundColor(e.target.value.toUpperCase())}
-                    className="h-7 w-7 shrink-0 cursor-pointer rounded-lg border border-[#D8C0A2] bg-transparent p-0"
+                    className="h-8 w-8 sm:h-7 sm:w-7 shrink-0 cursor-pointer rounded-lg border border-[#D8C0A2] bg-transparent p-0"
                     aria-label="Color de módulos QR"
                   />
                   <div className="min-w-0">
                     <span className="block text-[10px] font-semibold text-[#7B5D4A]">Módulos</span>
-                    <span className="block font-mono text-xs font-bold text-[#22150E]">
+                    <span className="block font-mono text-xs font-bold text-[#22150E] truncate">
                       {foregroundColor.toUpperCase()}
                     </span>
                   </div>
                 </label>
 
-                <label className="flex items-center gap-2.5 rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-2.5 py-2 cursor-pointer hover:border-[#C88A2B]">
+                <label className="flex min-h-[48px] items-center gap-2 rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-2.5 py-2 cursor-pointer hover:border-[#C88A2B]">
                   <input
                     type="color"
                     value={normalizeHex(backgroundColor, '#FFF9ED')}
                     onChange={(e) => setBackgroundColor(e.target.value.toUpperCase())}
-                    className="h-7 w-7 shrink-0 cursor-pointer rounded-lg border border-[#D8C0A2] bg-transparent p-0"
+                    className="h-8 w-8 sm:h-7 sm:w-7 shrink-0 cursor-pointer rounded-lg border border-[#D8C0A2] bg-transparent p-0"
                     aria-label="Color de fondo QR"
                   />
                   <div className="min-w-0">
                     <span className="block text-[10px] font-semibold text-[#7B5D4A]">Fondo</span>
-                    <span className="block font-mono text-xs font-bold text-[#22150E]">
+                    <span className="block font-mono text-xs font-bold text-[#22150E] truncate">
                       {backgroundColor.toUpperCase()}
                     </span>
                   </div>
@@ -1283,9 +1283,9 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
           </div>
 
           {/* Center Logo Toggle */}
-          <div className="flex items-center justify-between gap-4 rounded-2xl border border-[#E6D5BF] bg-gradient-to-r from-[#FAF3E8]/85 to-[#FFFDF9] p-3.5">
+          <div className="flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-[#E6D5BF] bg-gradient-to-r from-[#FAF3E8]/85 to-[#FFFDF9] p-3.5">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full p-[2px] bg-gradient-to-br from-[#F4CA73] via-[#C88A2B] to-[#6E450E] shadow-sm">
+              <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-full p-[2px] bg-gradient-to-br from-[#F4CA73] via-[#C88A2B] to-[#6E450E] shadow-sm">
                 <img
                   src={LOGO_PUBLIC_PATH}
                   alt="Logo The Ciprian Company"
@@ -1307,15 +1307,15 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
               role="switch"
               aria-checked={includeLogo}
               onClick={() => setIncludeLogo((prev) => !prev)}
-              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors cursor-pointer ${
+              className={`relative inline-flex h-8 w-14 sm:h-7 sm:w-12 shrink-0 items-center rounded-full border transition-colors cursor-pointer ${
                 includeLogo
                   ? 'bg-[#22150E] border-[#C88A2B]'
                   : 'bg-[#E5D7C4] border-[#CDBAA1]'
               }`}
             >
               <span
-                className={`inline-block h-5 w-5 transform rounded-full transition-transform shadow-sm ${
-                  includeLogo ? 'translate-x-6 bg-[#F4CA73]' : 'translate-x-1 bg-white'
+                className={`inline-block h-6 w-6 sm:h-5 sm:w-5 transform rounded-full transition-transform shadow-sm ${
+                  includeLogo ? 'translate-x-7 sm:translate-x-6 bg-[#F4CA73]' : 'translate-x-1 bg-white'
                 }`}
               />
             </button>
@@ -1345,7 +1345,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
           </AnimatePresence>
 
           {/* Primary Save Action inside Form */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
             <p className="text-[11px] text-[#7B5D4A]">
               {matrixInfo
                 ? `Matriz HD ${matrixInfo.size}×${matrixInfo.size} (Versión ${matrixInfo.version})`
@@ -1354,7 +1354,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
             <button
               type="submit"
               disabled={saving || !nameValid || !urlValid}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#22150E] via-[#3B2316] to-[#22150E] px-6 py-3 text-xs sm:text-sm font-bold text-[#F4CA73] border border-[#C88A2B]/50 shadow-[0_12px_26px_-10px_rgba(34,21,14,0.5)] hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
+              className="inline-flex min-h-[46px] w-full sm:w-auto items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#22150E] via-[#3B2316] to-[#22150E] px-6 py-3 text-xs sm:text-sm font-bold text-[#F4CA73] border border-[#C88A2B]/50 shadow-[0_12px_26px_-10px_rgba(34,21,14,0.5)] hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
             >
               <BookmarkCheck className="h-4 w-4" />
               {saving ? 'Guardando en historial...' : 'Guardar QR en historial'}
@@ -1364,21 +1364,21 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
 
         {/* Right: Interactive Live HD QR Preview Card & Download Actions */}
         <aside className="xl:col-span-5 xl:sticky xl:top-24 space-y-4">
-          <div className="relative overflow-hidden rounded-[28px] border border-[#E6D5BF] bg-gradient-to-b from-[#24150D] via-[#1B100A] to-[#120A06] p-5 sm:p-7 text-[#FFFDF9] shadow-[0_24px_54px_-18px_rgba(34,21,14,0.45)]">
+          <div className="relative overflow-hidden rounded-[24px] sm:rounded-[28px] border border-[#E6D5BF] bg-gradient-to-b from-[#24150D] via-[#1B100A] to-[#120A06] p-4 sm:p-7 text-[#FFFDF9] shadow-[0_24px_54px_-18px_rgba(34,21,14,0.45)]">
             {/* Ambient studio glow */}
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(244,202,115,0.18),_transparent_62%)]" />
 
-            <div className="relative flex items-center justify-between gap-2 mb-4">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#E5AE4E]">
+            <div className="relative flex items-center justify-between gap-2 mb-4 min-w-0">
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] font-bold uppercase tracking-[0.18em] sm:tracking-[0.2em] text-[#E5AE4E] block">
                   Vista Previa HD en Vivo
                 </span>
-                <h3 className="font-serif text-lg font-bold text-white truncate max-w-[260px]">
+                <h3 className="font-serif text-base sm:text-lg font-bold text-white truncate">
                   {name.trim() || 'Código QR Ciprian'}
                 </h3>
               </div>
               <span
-                className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${activePreset.badgeBg} ${activePreset.badgeText}`}
+                className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${activePreset.badgeBg} ${activePreset.badgeText}`}
               >
                 {activePreset.name}
               </span>
@@ -1388,10 +1388,10 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
             <motion.div
               whileHover={{ y: -4 }}
               transition={{ type: 'spring', stiffness: 280, damping: 22 }}
-              className="relative mx-auto max-w-[320px]"
+              className="relative mx-auto max-w-[270px] sm:max-w-[320px]"
             >
               <div
-                className="relative overflow-hidden rounded-[24px] p-4 sm:p-5 shadow-[0_22px_45px_-12px_rgba(0,0,0,0.75)] transition-colors duration-300"
+                className="relative overflow-hidden rounded-[22px] sm:rounded-[24px] p-3.5 sm:p-5 shadow-[0_22px_45px_-12px_rgba(0,0,0,0.75)] transition-colors duration-300"
                 style={{
                   backgroundColor,
                   border: `1.5px solid ${
@@ -1427,14 +1427,14 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
             </motion.div>
 
             {/* Target URL Pill */}
-            <div className="relative mt-4 rounded-xl border border-white/10 bg-black/30 px-3 py-2 flex items-center justify-between gap-2">
-              <span className="truncate font-mono text-[11px] text-[#E8D5BE]">
+            <div className="relative mt-4 rounded-xl border border-white/10 bg-black/30 px-3 py-2 flex items-center justify-between gap-2 min-w-0">
+              <span className="truncate font-mono text-[11px] text-[#E8D5BE] min-w-0 flex-1">
                 {targetUrl.trim() || defaultUrl}
               </span>
               <button
                 type="button"
                 onClick={() => handleCopyUrl(targetUrl)}
-                className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1 text-[11px] font-semibold text-[#F4CA73] transition-colors cursor-pointer"
+                className="shrink-0 inline-flex min-h-[38px] sm:min-h-[30px] items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1 text-[11px] font-semibold text-[#F4CA73] transition-colors cursor-pointer"
               >
                 {copiedPreviewLink ? (
                   <>
@@ -1456,7 +1456,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                 type="button"
                 onClick={() => handleSaveToHistory()}
                 disabled={saving || !nameValid || !urlValid}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] py-3 text-xs sm:text-sm font-bold text-[#1A0E08] shadow-[0_12px_26px_-8px_rgba(229,174,78,0.45)] hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
+                className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] py-3 text-xs sm:text-sm font-bold text-[#1A0E08] shadow-[0_12px_26px_-8px_rgba(229,174,78,0.45)] hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
               >
                 <BookmarkCheck className="h-4 w-4" />
                 {saving ? 'Guardando...' : 'Guardar QR en historial'}
@@ -1467,7 +1467,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   type="button"
                   onClick={() => handleDownloadPng()}
                   disabled={exportingPng || !urlValid}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#F4CA73]/30 bg-white/10 hover:bg-white/15 px-3 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-45"
+                  className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#F4CA73]/30 bg-white/10 hover:bg-white/15 px-3 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-45"
                 >
                   <Download className="h-3.5 w-3.5 text-[#F4CA73]" />
                   {exportingPng ? 'Generando...' : 'PNG HD'}
@@ -1477,7 +1477,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   type="button"
                   onClick={handleDownloadSvg}
                   disabled={!urlValid}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/10 hover:bg-white/15 px-3 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-45"
+                  className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/10 hover:bg-white/15 px-3 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-45"
                 >
                   <FileCode2 className="h-3.5 w-3.5 text-[#F4CA73]" />
                   SVG Vector
@@ -1487,7 +1487,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   type="button"
                   onClick={() => handleCopyUrl(targetUrl)}
                   disabled={!targetUrl.trim()}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/10 hover:bg-white/15 px-3 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-45"
+                  className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/10 hover:bg-white/15 px-3 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-45"
                 >
                   {copiedPreviewLink ? (
                     <Check className="h-3.5 w-3.5 text-emerald-300" />
@@ -1503,10 +1503,10 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
       </div>
 
       {/* Saved QR Codes History Gallery */}
-      <section className="rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-5 sm:p-7 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)] space-y-5">
+      <section className="rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-4 sm:p-7 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)] space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="font-serif text-xl font-bold text-[#22150E]">
+            <h3 className="font-serif text-lg sm:text-xl font-bold text-[#22150E]">
               Historial de QRs guardados
             </h3>
             <p className="text-xs sm:text-sm text-[#7B5D4A]">
@@ -1519,7 +1519,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
         </div>
 
         {qrHistory.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[#DEC9AE] bg-[#FAF3E8]/55 px-6 py-10 text-center space-y-2">
+          <div className="rounded-2xl border border-dashed border-[#DEC9AE] bg-[#FAF3E8]/55 px-5 py-10 text-center space-y-2">
             <QrCode className="mx-auto h-9 w-9 text-[#C88A2B]/80" />
             <p className="font-serif text-base font-bold text-[#22150E]">
               Aún no has guardado códigos QR
@@ -1543,12 +1543,12 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.96 }}
-                    className="group flex flex-col justify-between rounded-2xl border border-[#E6D5BF] bg-gradient-to-b from-[#FFFDF9] to-[#FAF3E8]/60 p-4 shadow-sm hover:shadow-md hover:border-[#C88A2B]/60 transition-all"
+                    className="group flex flex-col justify-between rounded-2xl border border-[#E6D5BF] bg-gradient-to-b from-[#FFFDF9] to-[#FAF3E8]/60 p-3.5 sm:p-4 shadow-sm hover:shadow-md hover:border-[#C88A2B]/60 transition-all"
                   >
-                    <div className="flex items-start gap-3.5">
+                    <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
                       {/* Mini Live SVG Thumbnail */}
                       <div
-                        className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-[#DFCBB3] p-1 shadow-xs"
+                        className="h-16 w-16 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-xl border border-[#DFCBB3] p-1 shadow-xs"
                         style={{ backgroundColor: item.backgroundColor }}
                       >
                         <QrSvgArtwork
@@ -1598,7 +1598,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => handleLoadIntoEditor(item)}
-                        className="flex-1 min-w-[115px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#22150E] hover:bg-[#3A2418] px-2.5 py-2 text-[11px] font-semibold text-[#FAF3E8] transition-colors cursor-pointer"
+                        className="flex-1 min-w-[125px] min-h-[44px] sm:min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#22150E] hover:bg-[#3A2418] px-3 py-2 text-xs sm:text-[11px] font-semibold text-[#FAF3E8] transition-colors cursor-pointer"
                       >
                         <Upload className="h-3.5 w-3.5 text-[#F4CA73]" />
                         Cargar en editor
@@ -1618,7 +1618,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                           })
                         }
                         title="Descargar PNG HD 1024×1024"
-                        className="inline-flex items-center justify-center gap-1 rounded-xl border border-[#DFCBB3] bg-white hover:bg-[#FAF3E8] px-2.5 py-2 text-[11px] font-semibold text-[#22150E] transition-colors cursor-pointer"
+                        className="min-h-[44px] sm:min-h-[34px] inline-flex items-center justify-center gap-1 rounded-xl border border-[#DFCBB3] bg-white hover:bg-[#FAF3E8] px-3 py-2 text-xs sm:text-[11px] font-semibold text-[#22150E] transition-colors cursor-pointer"
                       >
                         <Download className="h-3.5 w-3.5 text-[#B84A27]" />
                         PNG HD
@@ -1628,7 +1628,8 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                         type="button"
                         onClick={() => handleCopyUrl(item.targetUrl, item.id)}
                         title="Copiar enlace"
-                        className="inline-flex items-center justify-center gap-1 rounded-xl border border-[#DFCBB3] bg-white hover:bg-[#FAF3E8] px-2.5 py-2 text-[11px] font-semibold text-[#594133] transition-colors cursor-pointer"
+                        aria-label={`Copiar enlace de ${item.name}`}
+                        className="min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-[34px] inline-flex items-center justify-center gap-1 rounded-xl border border-[#DFCBB3] bg-white hover:bg-[#FAF3E8] px-2.5 py-2 text-xs sm:text-[11px] font-semibold text-[#594133] transition-colors cursor-pointer"
                       >
                         {copiedRecordId === item.id ? (
                           <Check className="h-3.5 w-3.5 text-emerald-600" />
@@ -1641,12 +1642,12 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                       </button>
 
                       {isConfirming ? (
-                        <div className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-1.5 py-1">
+                        <div className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-2 py-1">
                           <button
                             type="button"
                             disabled={isDeleting}
                             onClick={() => handleDeleteRecord(item.id)}
-                            className="rounded-lg bg-rose-600 hover:bg-rose-700 px-2 py-1 text-[10px] font-bold text-white cursor-pointer disabled:opacity-50"
+                            className="min-h-[34px] sm:min-h-0 rounded-lg bg-rose-600 hover:bg-rose-700 px-2.5 py-1 text-[11px] sm:text-[10px] font-bold text-white cursor-pointer disabled:opacity-50"
                           >
                             {isDeleting ? '...' : 'Borrar'}
                           </button>
@@ -1654,7 +1655,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                             type="button"
                             disabled={isDeleting}
                             onClick={() => setConfirmDeleteId(null)}
-                            className="rounded-lg px-1.5 py-1 text-[10px] font-semibold text-rose-800 hover:bg-rose-100 cursor-pointer"
+                            className="min-h-[34px] sm:min-h-0 rounded-lg px-2 py-1 text-[11px] sm:text-[10px] font-semibold text-rose-800 hover:bg-rose-100 cursor-pointer"
                           >
                             No
                           </button>
@@ -1665,9 +1666,9 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                           onClick={() => setConfirmDeleteId(item.id)}
                           title="Eliminar QR"
                           aria-label={`Eliminar ${item.name}`}
-                          className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 p-2 text-rose-700 transition-colors cursor-pointer"
+                          className="min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-[34px] inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 p-2 text-rose-700 transition-colors cursor-pointer"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                         </button>
                       )}
                     </div>

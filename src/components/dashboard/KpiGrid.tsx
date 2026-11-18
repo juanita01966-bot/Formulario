@@ -139,8 +139,8 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
   ];
 
   return (
-    <section aria-label="Indicadores de desempeño Métricas Ciprian" className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+    <section aria-label="Indicadores de desempeño Métricas Ciprian" className="space-y-3.5 sm:space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         {cards.map((card, idx) => {
           const Icon = card.icon;
           const isSelected = activeFilter === card.key;
@@ -149,45 +149,45 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
               key={card.key}
               type="button"
               onClick={() => onSelectFilter(isSelected && card.key !== 'all' ? 'all' : card.key)}
-              initial={{ opacity: 0, y: 14 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.06, duration: 0.35 }}
-              whileHover={{ y: -4, scale: 1.01 }}
+              transition={{ delay: idx * 0.05, duration: 0.3 }}
+              whileHover={{ y: -3, scale: 1.01 }}
               whileTap={{ scale: 0.985 }}
-              className={`group relative overflow-hidden rounded-[22px] bg-[#FFFDF9] p-4 sm:p-5 text-left border transition-all cursor-pointer shadow-[0_10px_28px_-14px_rgba(34,21,14,0.16)] hover:shadow-[0_18px_36px_-14px_rgba(184,74,39,0.22)] ${
+              className={`group relative overflow-hidden rounded-[20px] sm:rounded-[22px] bg-[#FFFDF9] p-3.5 sm:p-5 text-left border transition-all cursor-pointer shadow-[0_10px_28px_-14px_rgba(34,21,14,0.16)] hover:shadow-[0_18px_36px_-14px_rgba(184,74,39,0.22)] ${
                 isSelected ? `ring-2 ${card.ringColor}` : 'border-[#E6D5BF]/90 hover:border-[#CFAF8A]'
               }`}
             >
               {/* Colored top strip */}
               <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${card.topBar}`} />
-              {/* Soft radial corner glow */}
+              {/* Soft radial corner glow (desktop blur, zero heavy filter on mobile) */}
               <div
-                className={`pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-gradient-to-br ${card.glowBg} blur-xl opacity-70 group-hover:opacity-100 transition-opacity`}
+                className={`pointer-events-none hidden sm:block absolute -right-8 -top-8 h-24 w-24 rounded-full bg-gradient-to-br ${card.glowBg} blur-xl opacity-70 group-hover:opacity-100 transition-opacity`}
               />
 
-              <div className="relative flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5">
+              <div className="relative flex items-center justify-between gap-1.5 sm:gap-2">
+                <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                   <span
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl shadow-xs group-hover:scale-110 transition-transform ${card.iconBg}`}
+                    className={`flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl shadow-xs group-hover:scale-110 transition-transform ${card.iconBg}`}
                   >
-                    <Icon className="h-4.5 w-4.5" />
+                    <Icon className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
                   </span>
-                  <span className="text-sm font-semibold text-[#594133]">{card.title}</span>
+                  <span className="text-xs sm:text-sm font-semibold text-[#594133] truncate">{card.title}</span>
                 </div>
-                <ChevronRight className="h-4 w-4 text-[#B89D86] group-hover:translate-x-1 transition-transform" />
+                <ChevronRight className="h-4 w-4 shrink-0 text-[#B89D86] group-hover:translate-x-1 transition-transform" />
               </div>
 
-              <div className="relative mt-4 flex items-baseline justify-between">
-                <div className="text-3xl sm:text-[36px] font-bold tracking-tight text-[#22150E]">
+              <div className="relative mt-3 sm:mt-4 flex items-baseline justify-between gap-1.5">
+                <div className="text-2xl sm:text-[36px] font-bold tracking-tight text-[#22150E]">
                   <AnimatedNumber value={card.count} />
                 </div>
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-[#FAF3E8] px-2 py-0.5 text-[11px] font-bold text-[#8C4A19] tabular-nums">
+                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[#FAF3E8] px-2 py-0.5 text-[10.5px] sm:text-[11px] font-bold text-[#8C4A19] tabular-nums">
                   <TrendingUp className="h-3 w-3 text-[#C88A2B]" />
                   {card.percent}%
                 </span>
               </div>
 
-              <div className="relative mt-3">
+              <div className="relative mt-2.5 sm:mt-3">
                 <div className="h-2 w-full overflow-hidden rounded-full bg-[#EFE5D8]">
                   <motion.div
                     className={`relative h-full rounded-full bg-gradient-to-r ${card.barColor}`}
@@ -198,9 +198,12 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
                     <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/35 to-transparent animate-shimmer" />
                   </motion.div>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-xs text-[#7B5D4A]">
-                  <span className="font-medium">{card.sublabel}</span>
-                  <span className="text-[11px] text-[#9B816E]">Clic para filtrar</span>
+                <div className="mt-2 flex items-center justify-between gap-1.5 text-[11px] sm:text-xs text-[#7B5D4A]">
+                  <span className="font-medium truncate">{card.sublabel}</span>
+                  <span className="text-[10px] sm:text-[11px] text-[#9B816E] shrink-0">
+                    <span className="sm:hidden">Filtrar</span>
+                    <span className="hidden sm:inline">Clic para filtrar</span>
+                  </span>
                 </div>
               </div>
             </motion.button>
@@ -209,28 +212,28 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
       </div>
 
       {/* Executive Ticket Promedio + Live Funnel Strip */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.4 }}
-          className="lg:col-span-7 relative overflow-hidden flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-[22px] bg-gradient-to-r from-[#22150E] via-[#3B2014] to-[#6B2B17] border border-[#C88A2B]/40 px-5 py-4.5 text-[#FAF3E8] shadow-[0_16px_32px_-14px_rgba(34,21,14,0.45)]"
+          transition={{ delay: 0.16, duration: 0.35 }}
+          className="lg:col-span-7 relative overflow-hidden flex items-center justify-between gap-3 rounded-[20px] sm:rounded-[22px] bg-gradient-to-r from-[#22150E] via-[#3B2014] to-[#6B2B17] border border-[#C88A2B]/40 px-4 sm:px-5 py-3.5 sm:py-4.5 text-[#FAF3E8] shadow-[0_16px_32px_-14px_rgba(34,21,14,0.45)]"
         >
-          <div className="pointer-events-none absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-amber-400/15 blur-2xl" />
-          <div className="relative flex items-center gap-3.5">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-400/15 border border-amber-300/35 text-[#FDE68A]">
+          <div className="pointer-events-none hidden sm:block absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-amber-400/15 blur-2xl" />
+          <div className="relative flex items-center gap-3 sm:gap-3.5 min-w-0">
+            <span className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl bg-amber-400/15 border border-amber-300/35 text-[#FDE68A]">
               <ReceiptText className="h-5 w-5" />
             </span>
-            <div>
-              <p className="text-sm font-semibold text-[#FFFDF9]">Ticket promedio</p>
-              <p className="text-xs text-amber-200/80">
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-semibold text-[#FFFDF9] truncate">Ticket promedio</p>
+              <p className="text-[11px] sm:text-xs text-amber-200/80 line-clamp-1">
                 {ordenesCount > 0
                   ? `${ordenesCount} ${ordenesCount === 1 ? 'orden cerrada' : 'órdenes cerradas'} · Total $${totalVolume.toLocaleString('en-US')}`
                   : 'Valor base configurado en Métricas Ciprian'}
               </p>
             </div>
           </div>
-          <div className="relative text-2xl sm:text-[30px] font-bold tracking-tight text-[#FDE68A]">
+          <div className="relative shrink-0 text-xl sm:text-[30px] font-bold tracking-tight text-[#FDE68A]">
             <AnimatedNumber value={avgTicket} prefix="$" />
           </div>
         </motion.div>
@@ -241,27 +244,27 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
           onClick={() => onSelectFilter(activeFilter === 'vip' ? 'all' : 'vip')}
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25, duration: 0.4 }}
+          transition={{ delay: 0.2, duration: 0.35 }}
           whileHover={{ y: -2 }}
-          className={`lg:col-span-5 flex items-center justify-between gap-3 rounded-[22px] border px-5 py-4 text-left transition-all cursor-pointer shadow-[0_10px_24px_-14px_rgba(34,21,14,0.14)] ${
+          className={`lg:col-span-5 flex min-h-[68px] items-center justify-between gap-3 rounded-[20px] sm:rounded-[22px] border px-4 sm:px-5 py-3.5 sm:py-4 text-left transition-all cursor-pointer shadow-[0_10px_24px_-14px_rgba(34,21,14,0.14)] ${
             activeFilter === 'vip'
               ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-400/40'
               : 'bg-[#FFFDF9] border-[#E6D5BF] hover:border-emerald-300'
           }`}
         >
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-100 to-amber-100 text-emerald-700 border border-emerald-200">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-br from-emerald-100 to-amber-100 text-emerald-700 border border-emerald-200">
               <Flame className="h-5 w-5" />
             </span>
-            <div>
-              <p className="text-sm font-bold text-[#22150E]">Buen Crédito (VIP)</p>
-              <p className="text-xs text-[#6E5341]">
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-bold text-[#22150E] truncate">Buen Crédito (VIP)</p>
+              <p className="text-[11px] sm:text-xs text-[#6E5341] truncate">
                 {pct(vipLeads, totalLeads)}% con alto potencial crediticio
               </p>
             </div>
           </div>
-          <div className="text-right">
-            <span className="text-2xl font-bold text-emerald-700 tabular-nums">
+          <div className="text-right shrink-0">
+            <span className="text-xl sm:text-2xl font-bold text-emerald-700 tabular-nums">
               <AnimatedNumber value={vipLeads} />
             </span>
             <span className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-600">

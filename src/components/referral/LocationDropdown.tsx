@@ -60,11 +60,18 @@ export const LocationDropdown: React.FC<LocationDropdownProps> = ({
       setQuery('');
       return;
     }
+    const isFinePointer =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: fine)').matches;
+
     const timer = window.setTimeout(() => {
-      searchInputRef.current?.focus();
+      if (isFinePointer) {
+        searchInputRef.current?.focus();
+      }
     }, 40);
 
-    const handlePointerDown = (e: MouseEvent) => {
+    const handlePointerDown = (e: PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
         onBlurValidate?.();
@@ -77,11 +84,11 @@ export const LocationDropdown: React.FC<LocationDropdownProps> = ({
       }
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('pointerdown', handlePointerDown);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.clearTimeout(timer);
-      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('pointerdown', handlePointerDown);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [open, onBlurValidate]);
@@ -107,7 +114,7 @@ export const LocationDropdown: React.FC<LocationDropdownProps> = ({
         onClick={() => {
           if (!disabled) setOpen((prev) => !prev);
         }}
-        className={`group relative flex w-full items-center justify-between rounded-2xl border text-left transition-all duration-200 py-3.5 pl-4 pr-3.5 ${
+        className={`group relative flex min-h-[48px] w-full items-center justify-between rounded-2xl border text-left transition-all duration-200 py-3 sm:py-3.5 pl-4 pr-3.5 ${
           disabled
             ? 'border-[#E6D5BF]/70 bg-[#FAF3E8]/55 text-[#9D8370] cursor-not-allowed opacity-70'
             : hasError
@@ -126,7 +133,7 @@ export const LocationDropdown: React.FC<LocationDropdownProps> = ({
             {icon}
           </span>
           <span
-            className={`truncate text-[14.5px] sm:text-[15px] ${
+            className={`truncate text-base sm:text-[15px] ${
               selectedItem ? 'font-medium text-[#22150E]' : 'text-[#9D8370]'
             }`}
           >
@@ -162,15 +169,15 @@ export const LocationDropdown: React.FC<LocationDropdownProps> = ({
 
             {/* Search input inside menu */}
             <div className="border-b border-[#EFE3D2] bg-[#FAF3E8]/55 px-3 py-2">
-              <div className="flex items-center gap-2 rounded-xl border border-[#DFCBB3] bg-white px-2.5 py-1.5 focus-within:border-[#C88A2B]">
-                <Search className="h-3.5 w-3.5 shrink-0 text-[#9D8370]" />
+              <div className="flex min-h-[42px] items-center gap-2 rounded-xl border border-[#DFCBB3] bg-white px-2.5 py-1.5 focus-within:border-[#C88A2B]">
+                <Search className="h-4 w-4 shrink-0 text-[#9D8370]" />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={searchPlaceholder}
-                  className="w-full bg-transparent text-xs sm:text-[13px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
+                  className="w-full bg-transparent text-base sm:text-[13px] text-[#22150E] placeholder:text-[#9D8370] focus:outline-none"
                 />
               </div>
             </div>
@@ -179,7 +186,7 @@ export const LocationDropdown: React.FC<LocationDropdownProps> = ({
             <ul
               role="listbox"
               aria-label={label}
-              className="max-h-56 overflow-y-auto py-1.5 px-1.5 space-y-0.5"
+              className="max-h-[min(46dvh,230px)] overflow-y-auto overscroll-contain py-1.5 px-1.5 space-y-0.5"
             >
               {filteredItems.length === 0 ? (
                 <li className="px-3 py-4 text-center text-xs text-[#8C6E58]">
@@ -193,7 +200,7 @@ export const LocationDropdown: React.FC<LocationDropdownProps> = ({
                       <button
                         type="button"
                         onClick={() => handleSelect(item.value)}
-                        className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-xs sm:text-[13.5px] transition-colors cursor-pointer ${
+                        className={`flex min-h-[44px] w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm sm:text-[13.5px] transition-colors cursor-pointer ${
                           isSelected
                             ? 'bg-gradient-to-r from-[#FAF0E0] to-[#FFF8EC] font-semibold text-[#8C3318]'
                             : 'text-[#3D2A1E] hover:bg-[#FAF3E8]'

@@ -41,11 +41,72 @@ function isDsbAdminSession(): boolean {
   }
 }
 
+export const DEFAULT_GIFT_PROBABILITY = 10;
+
+export function sanitizeGiftProbability(
+  value: unknown,
+  fallback = DEFAULT_GIFT_PROBABILITY
+): number {
+  if (
+    value === undefined ||
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'object'
+  ) {
+    return fallback;
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return fallback;
+  }
+  const num = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(num)) {
+    return fallback;
+  }
+  const clamped = Math.max(0, num);
+  const scaled = clamped * 100;
+  const rounded = Number.isFinite(scaled) ? Math.round(scaled) / 100 : clamped;
+  return rounded === 0 ? 0 : rounded;
+}
+
+function normalizeGift(gift: GiftItem): GiftItem {
+  return {
+    ...gift,
+    probability: sanitizeGiftProbability(gift.probability, DEFAULT_GIFT_PROBABILITY),
+  };
+}
+
+function normalizeAppState(state: AppState): AppState {
+  const role = (state as AppState & { role?: string }).role;
+  if (role === 'caller') {
+    return state;
+  }
+  return {
+    ...state,
+    settings: {
+      ...state.settings,
+      pinCode: '',
+      randomizeGifts:
+        typeof state.settings?.randomizeGifts === 'boolean'
+          ? state.settings.randomizeGifts
+          : true,
+    },
+    gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
+  };
+}
+
 function cloneDefaults(): AppState {
   const defaults = JSON.parse(JSON.stringify(defaultStoreJson)) as AppState;
   return {
     ...defaults,
-    settings: { ...defaults.settings, pinCode: '' },
+    settings: {
+      ...defaults.settings,
+      pinCode: '',
+      randomizeGifts:
+        typeof defaults.settings?.randomizeGifts === 'boolean'
+          ? defaults.settings.randomizeGifts
+          : true,
+    },
+    gifts: Array.isArray(defaults.gifts) ? defaults.gifts.map(normalizeGift) : [],
     leads: [],
     qrHistory: [],
   };
@@ -64,9 +125,22 @@ function readLocalState(): AppState {
     }
     const parsed = JSON.parse(raw) as Partial<AppState>;
     const defaults = cloneDefaults();
+    const rawGifts =
+      Array.isArray(parsed.gifts) && parsed.gifts.length > 0 ? parsed.gifts : defaults.gifts;
+    const mergedSettings: AppSettings = {
+      ...defaults.settings,
+      ...(parsed.settings || {}),
+      pinCode: '',
+    };
+    if (typeof mergedSettings.randomizeGifts !== 'boolean') {
+      mergedSettings.randomizeGifts =
+        typeof defaults.settings.randomizeGifts === 'boolean'
+          ? defaults.settings.randomizeGifts
+          : true;
+    }
     return {
-      settings: { ...defaults.settings, ...(parsed.settings || {}), pinCode: '' },
-      gifts: Array.isArray(parsed.gifts) && parsed.gifts.length > 0 ? parsed.gifts : defaults.gifts,
+      settings: mergedSettings,
+      gifts: rawGifts.map(normalizeGift),
       leads: hasDsbSession && Array.isArray(parsed.leads) ? parsed.leads : [],
       qrHistory: isAdmin && Array.isArray(parsed.qrHistory) ? parsed.qrHistory : [],
     };
@@ -82,8 +156,19 @@ function writeLocalState(state: AppState, broadcast = true): void {
   const isAdmin =
     hasDsbSession && (stateRole ? stateRole === 'admin' : isDsbAdminSession());
   const sanitizedState: AppState = {
-    settings: { ...state.settings, pinCode: '' },
-    gifts: state.gifts,
+    settings: {
+      ...state.settings,
+      pinCode: '',
+      ...(stateRole === 'caller'
+        ? {}
+        : {
+            randomizeGifts:
+              typeof state.settings?.randomizeGifts === 'boolean'
+                ? state.settings.randomizeGifts
+                : true,
+          }),
+    },
+    gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
     // Never persist other people's leads or admin QR history into browser LocalStorage on public/caller routes
     leads: hasDsbSession ? state.leads : [],
     qrHistory: isAdmin && Array.isArray(state.qrHistory) ? state.qrHistory : [],
@@ -108,14 +193,40 @@ function generateClaimCode(): string {
   return `OTN-${num}`;
 }
 
-function cryptoRandomIndex(length: number): number {
-  if (length <= 1) return 0;
-  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
-    const arr = new Uint32Array(1);
-    window.crypto.getRandomValues(arr);
-    return arr[0] % length;
+function cryptoRandomUnit(): number {
+  const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  if (cryptoObj?.getRandomValues) {
+    const buf = new Uint32Array(2);
+    cryptoObj.getRandomValues(buf);
+    const hi = buf[0] >>> 11;
+    const lo = buf[1];
+    return (hi * 0x100000000 + lo) / 0x20000000000000;
   }
-  return Math.floor(Math.random() * length);
+  return Math.random();
+}
+
+export function pickWeightedGift(gifts: GiftItem[]): GiftItem | null {
+  if (!Array.isArray(gifts) || gifts.length === 0) return null;
+  const weights = gifts.map((g) => sanitizeGiftProbability(g.probability, DEFAULT_GIFT_PROBABILITY));
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  if (!Number.isFinite(totalWeight) || totalWeight <= 0) {
+    const idx = Math.min(gifts.length - 1, Math.floor(cryptoRandomUnit() * gifts.length));
+    return gifts[idx] ?? null;
+  }
+  const target = cryptoRandomUnit() * totalWeight;
+  let cumulative = 0;
+  for (let i = 0; i < gifts.length; i += 1) {
+    const w = weights[i];
+    if (w <= 0) continue;
+    cumulative += w;
+    if (target < cumulative) {
+      return gifts[i];
+    }
+  }
+  for (let i = gifts.length - 1; i >= 0; i -= 1) {
+    if (weights[i] > 0) return gifts[i];
+  }
+  return gifts[0] ?? null;
 }
 
 class ApiValidationError extends Error {
@@ -153,7 +264,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function fetchAppState(): Promise<{ state: AppState; mode: 'api' | 'local' }> {
   try {
-    const state = await requestJson<AppState>('/api/state');
+    const state = normalizeAppState(await requestJson<AppState>('/api/state'));
     writeLocalState(state, false);
     return { state, mode: 'api' };
   } catch (err) {
@@ -183,8 +294,9 @@ export async function createLead(
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    writeLocalState(res.state, Boolean(getDsbSessionToken()));
-    return { ...res, mode: 'api' };
+    const normalizedState = normalizeAppState(res.state);
+    writeLocalState(normalizedState, Boolean(getDsbSessionToken()));
+    return { lead: res.lead, state: normalizedState, mode: 'api' };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
 
@@ -192,7 +304,7 @@ export async function createLead(
     const activeGifts = state.gifts.filter((g) => g.active);
     const chosenGift =
       state.gifts.find((g) => g.id === payload.giftId) ||
-      (activeGifts.length > 0 ? activeGifts[cryptoRandomIndex(activeGifts.length)] : null) ||
+      (activeGifts.length > 0 ? pickWeightedGift(activeGifts) : null) ||
       state.gifts[0] ||
       null;
 
@@ -332,25 +444,32 @@ export interface UpsertGiftPayload {
   accentColor: string;
   active: boolean;
   stockLabel: string;
+  probability?: number;
 }
 
 export async function createGift(payload: UpsertGiftPayload): Promise<{ gift: GiftItem; state: AppState }> {
+  const sanitizedPayload: UpsertGiftPayload = {
+    ...payload,
+    probability: sanitizeGiftProbability(payload.probability, DEFAULT_GIFT_PROBABILITY),
+  };
   try {
     const res = await requestJson<{ gift: GiftItem; state: AppState }>('/api/gifts', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(sanitizedPayload),
     });
-    writeLocalState(res.state, true);
-    return res;
+    const normalizedState = normalizeAppState(res.state);
+    writeLocalState(normalizedState, true);
+    return { gift: normalizeGift(res.gift), state: normalizedState };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
-    const gift: GiftItem = {
+    const gift: GiftItem = normalizeGift({
       id: generateLocalId('gift'),
       ...payload,
       usageTip: payload.usageTip?.trim() || '',
       customImageUrl: payload.customImageUrl?.trim() || undefined,
-    };
+      probability: sanitizeGiftProbability(payload.probability, DEFAULT_GIFT_PROBABILITY),
+    });
     const nextState = { ...state, gifts: [...state.gifts, gift] };
     writeLocalState(nextState, true);
     return { gift, state: nextState };
@@ -361,13 +480,27 @@ export async function updateGift(
   id: string,
   updates: Partial<UpsertGiftPayload>
 ): Promise<{ gift: GiftItem; state: AppState }> {
+  const hasFiniteProbUpdate =
+    updates.probability !== undefined &&
+    typeof updates.probability === 'number' &&
+    Number.isFinite(updates.probability);
+  const apiUpdates: Partial<UpsertGiftPayload> =
+    updates.probability !== undefined
+      ? {
+          ...updates,
+          probability: hasFiniteProbUpdate
+            ? sanitizeGiftProbability(updates.probability, DEFAULT_GIFT_PROBABILITY)
+            : undefined,
+        }
+      : updates;
   try {
     const res = await requestJson<{ gift: GiftItem; state: AppState }>(`/api/gifts/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(updates),
+      body: JSON.stringify(apiUpdates),
     });
-    writeLocalState(res.state, true);
-    return res;
+    const normalizedState = normalizeAppState(res.state);
+    writeLocalState(normalizedState, true);
+    return { gift: normalizeGift(res.gift), state: normalizedState };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
@@ -376,18 +509,27 @@ export async function updateGift(
     if (updates.active === false && state.gifts.filter((g) => g.id !== id && g.active).length < 1) {
       throw new ApiValidationError('Debe quedar al menos un regalo activo para las tarjetas ocultas.');
     }
-    const nextGift: GiftItem = {
-      ...state.gifts[index],
+    const currentGift = state.gifts[index];
+    const currentProbability = sanitizeGiftProbability(
+      currentGift.probability,
+      DEFAULT_GIFT_PROBABILITY
+    );
+    const nextGift: GiftItem = normalizeGift({
+      ...currentGift,
       ...updates,
       usageTip:
         updates.usageTip !== undefined
           ? updates.usageTip.trim()
-          : state.gifts[index].usageTip || '',
+          : currentGift.usageTip || '',
       customImageUrl:
         updates.customImageUrl === ''
           ? undefined
-          : updates.customImageUrl ?? state.gifts[index].customImageUrl,
-    };
+          : updates.customImageUrl ?? currentGift.customImageUrl,
+      probability:
+        updates.probability !== undefined
+          ? sanitizeGiftProbability(updates.probability, currentProbability)
+          : currentProbability,
+    });
     const nextGifts = [...state.gifts];
     nextGifts[index] = nextGift;
     const nextState = { ...state, gifts: nextGifts };
@@ -396,13 +538,56 @@ export async function updateGift(
   }
 }
 
+export async function updateGiftProbabilities(
+  probabilities: Record<string, number> | Array<{ id: string; probability: number }>
+): Promise<{ gifts: GiftItem[]; state: AppState }> {
+  const entries = Array.isArray(probabilities)
+    ? probabilities
+        .filter((item) => item && typeof item.id === 'string' && item.id.trim().length > 0)
+        .map((item) => ({
+          id: item.id.trim(),
+          probability: sanitizeGiftProbability(item.probability, DEFAULT_GIFT_PROBABILITY),
+        }))
+    : Object.entries(probabilities).map(([id, probability]) => ({
+        id: id.trim(),
+        probability: sanitizeGiftProbability(probability, DEFAULT_GIFT_PROBABILITY),
+      }));
+
+  const updatesMap = new Map(entries.map((entry) => [entry.id, entry.probability]));
+
+  try {
+    const res = await requestJson<{ gifts: GiftItem[]; state: AppState }>(
+      '/api/gifts/probabilities',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ gifts: entries }),
+      }
+    );
+    const normalizedState = normalizeAppState(res.state);
+    writeLocalState(normalizedState, true);
+    return { gifts: normalizedState.gifts, state: normalizedState };
+  } catch (err) {
+    if (err instanceof ApiValidationError) throw err;
+    const state = readLocalState();
+    const nextGifts = state.gifts.map((gift) => {
+      const normalized = normalizeGift(gift);
+      const nextProb = updatesMap.get(normalized.id);
+      return nextProb !== undefined ? { ...normalized, probability: nextProb } : normalized;
+    });
+    const nextState = { ...state, gifts: nextGifts };
+    writeLocalState(nextState, true);
+    return { gifts: nextGifts, state: nextState };
+  }
+}
+
 export async function deleteGift(id: string): Promise<AppState> {
   try {
     const res = await requestJson<{ state: AppState }>(`/api/gifts/${id}`, {
       method: 'DELETE',
     });
-    writeLocalState(res.state, true);
-    return res.state;
+    const normalizedState = normalizeAppState(res.state);
+    writeLocalState(normalizedState, true);
+    return normalizedState;
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
@@ -421,8 +606,9 @@ export async function resetDefaultGifts(): Promise<AppState> {
     const res = await requestJson<{ state: AppState }>('/api/gifts/reset', {
       method: 'POST',
     });
-    writeLocalState(res.state, true);
-    return res.state;
+    const normalizedState = normalizeAppState(res.state);
+    writeLocalState(normalizedState, true);
+    return normalizedState;
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
@@ -439,8 +625,9 @@ export async function updateSettings(updates: Partial<AppSettings>): Promise<App
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
-    writeLocalState(res.state, true);
-    return res.state;
+    const normalizedState = normalizeAppState(res.state);
+    writeLocalState(normalizedState, true);
+    return normalizedState;
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
@@ -593,14 +780,14 @@ export async function deleteQrCode(id: string): Promise<AppState> {
 export function subscribeStoreSync(onSync: (state: AppState) => void): () => void {
   const handleChannel = (event: MessageEvent) => {
     if (event.data?.type === 'STATE_UPDATED' && event.data.state) {
-      onSync(event.data.state as AppState);
+      onSync(normalizeAppState(event.data.state as AppState));
     }
   };
 
   const handleStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY && event.newValue) {
       try {
-        onSync(JSON.parse(event.newValue) as AppState);
+        onSync(normalizeAppState(JSON.parse(event.newValue) as AppState));
       } catch {
         // Ignore parse failure
       }
@@ -1052,10 +1239,11 @@ export async function resetAllWorkspaceData(
     throw new DsbAuthError(data);
   }
 
-  writeLocalState(data.state, true);
+  const normalizedState = normalizeAppState(data.state);
+  writeLocalState(normalizedState, true);
   return {
     ok: true,
-    state: data.state,
+    state: normalizedState,
     message: data.message || 'Todas las métricas y datos fueron reiniciados a 0.',
   };
 }

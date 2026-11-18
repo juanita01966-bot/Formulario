@@ -47,6 +47,7 @@ export interface GiftItem {
   accentColor: string;
   active: boolean;
   stockLabel: string;
+  probability?: number;
 }
 
 export interface Lead {

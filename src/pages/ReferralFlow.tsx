@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import type { AppState, GiftItem, Lead, LeadQualification } from '../types/app';
 import { createLead, updateLead } from '../services/storeClient';
@@ -12,6 +12,24 @@ import { WelcomeSceneGate } from '../components/referral/WelcomeSceneGate';
 
 type FlowStep = 'form' | 'quiz' | 'loading' | 'cards' | 'reveal';
 
+function cryptoRandomIntRange(min: number, maxExclusive: number): number {
+  const span = maxExclusive - min;
+  if (span <= 1) return min;
+  const cryptoObj = typeof window !== 'undefined' ? window.crypto : globalThis.crypto;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    const range = 0x100000000;
+    const limit = range - (range % span);
+    const buf = new Uint32Array(1);
+    let value = 0;
+    do {
+      cryptoObj.getRandomValues(buf);
+      value = buf[0];
+    } while (value >= limit);
+    return min + (value % span);
+  }
+  return min + Math.floor(Math.random() * span);
+}
+
 interface ReferralFlowProps {
   appState: AppState;
   onStateChange: (next: AppState) => void;
@@ -19,11 +37,23 @@ interface ReferralFlowProps {
 
 export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateChange }) => {
   const [step, setStep] = useState<FlowStep>('form');
+  const [playRound, setPlayRound] = useState(0);
   const [currentLead, setCurrentLead] = useState<Lead | null>(null);
   const [revealedGift, setRevealedGift] = useState<GiftItem | null>(null);
+  const lastClaimCodeRef = useRef<string | null>(null);
 
   const activeGifts = appState.gifts.filter((g) => g.active);
   const safeActiveGifts = activeGifts.length > 0 ? activeGifts : appState.gifts;
+
+  const generateFreshClaimCode = useCallback((): string => {
+    let candidate = '';
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      candidate = `OTN-${cryptoRandomIntRange(1000, 10000)}`;
+      if (candidate !== lastClaimCodeRef.current) break;
+    }
+    lastClaimCodeRef.current = candidate;
+    return candidate;
+  }, []);
 
   const handleFormSubmit = async (formData: {
     name: string;
@@ -36,7 +66,9 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
       phone: formData.phone,
       address: formData.address,
       acceptedTerms: formData.acceptedTerms,
+      claimCode: generateFreshClaimCode(),
     });
+    lastClaimCodeRef.current = res.lead.claimCode;
     setCurrentLead(res.lead);
     onStateChange(res.state);
     setStep('quiz');
@@ -80,34 +112,43 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
   const handleResetFlow = () => {
     setCurrentLead(null);
     setRevealedGift(null);
+    setPlayRound((prev) => prev + 1);
     setStep('form');
   };
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col items-center justify-center px-4 py-8 pb-24 sm:py-12 sm:pb-14">
+    <div className="relative min-h-[100dvh] w-full overflow-x-clip flex flex-col items-center justify-center px-3 py-5 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10 sm:pb-12">
       <AutumnAtmosphere variant="public" />
 
       <main className="relative z-10 w-full">
         <AnimatePresence mode="wait">
           {step === 'form' && (
-            <LeadFormCard key="step-form" settings={appState.settings} onSubmit={handleFormSubmit} />
+            <LeadFormCard
+              key={`step-form-${playRound}`}
+              settings={appState.settings}
+              onSubmit={handleFormSubmit}
+            />
           )}
 
           {step === 'quiz' && currentLead && (
             <QualificationQuiz
-              key="step-quiz"
+              key={`step-quiz-${playRound}`}
               leadName={currentLead.name}
               onComplete={handleQuizComplete}
             />
           )}
 
           {step === 'loading' && currentLead && (
-            <CustomLoader key="step-loading" leadName={currentLead.name} onComplete={handleLoaderComplete} />
+            <CustomLoader
+              key={`step-loading-${playRound}`}
+              leadName={currentLead.name}
+              onComplete={handleLoaderComplete}
+            />
           )}
 
           {step === 'cards' && currentLead && (
             <MysteryCardsMenu
-              key="step-cards"
+              key={`step-cards-${playRound}`}
               leadName={currentLead.name}
               activeGifts={safeActiveGifts}
               giftTheme={appState.settings.giftTheme}
@@ -119,7 +160,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
 
           {step === 'reveal' && currentLead && revealedGift && (
             <GiftRevealStage
-              key="step-reveal"
+              key={`step-reveal-${playRound}`}
               leadName={currentLead.name}
               leadAddress={currentLead.address}
               gift={revealedGift}
@@ -136,7 +177,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
       <WelcomeSceneGate />
 
       {/* Strictly public footer with zero reference to /#/dsb */}
-      <footer className="relative z-10 mt-8 text-center text-[11px] text-[#8B6F5B]">
+      <footer className="relative z-10 mt-6 sm:mt-8 px-3 text-center text-[11px] text-[#8B6F5B]">
         The Ciprian Company · Todos los derechos reservados
       </footer>
     </div>

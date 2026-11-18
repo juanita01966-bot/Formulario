@@ -28,6 +28,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#C88A2B',
       active: true,
       stockLabel: 'Edición Exclusiva',
+      probability: 11.1,
     },
     {
       id: 'gift-utensil-holder',
@@ -40,6 +41,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#8C6E58',
       active: true,
       stockLabel: 'Disponible',
+      probability: 11.1,
     },
     {
       id: 'gift-bowls-3',
@@ -52,6 +54,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#B84A27',
       active: true,
       stockLabel: 'Alta Demanda',
+      probability: 11.1,
     },
     {
       id: 'gift-santoku-5',
@@ -64,6 +67,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#8C3B20',
       active: true,
       stockLabel: 'Edición Limitada',
+      probability: 11.1,
     },
     {
       id: 'gift-cleaver-7',
@@ -76,6 +80,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#5B4636',
       active: true,
       stockLabel: 'Disponible',
+      probability: 11.1,
     },
     {
       id: 'gift-icecream-2',
@@ -88,6 +93,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#C88A2B',
       active: true,
       stockLabel: 'Disponible',
+      probability: 11.1,
     },
     {
       id: 'gift-mugs-2',
@@ -100,6 +106,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#7C4327',
       active: true,
       stockLabel: 'Disponible',
+      probability: 11.1,
     },
     {
       id: 'gift-bamboo-large',
@@ -112,6 +119,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#A66328',
       active: true,
       stockLabel: 'Disponible',
+      probability: 11.1,
     },
     {
       id: 'gift-warmer-pro',
@@ -124,6 +132,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#4B644A',
       active: true,
       stockLabel: 'Edición Estrella',
+      probability: 11.1,
     },
   ],
   leads: [],
@@ -453,11 +462,88 @@ function clearAttempts(key) {
   attemptBuckets.delete(key);
 }
 
+const DEFAULT_GIFT_PROBABILITY = 10;
+
+function sanitizeGiftProbability(value, fallback = DEFAULT_GIFT_PROBABILITY) {
+  if (
+    value === undefined ||
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'object'
+  ) {
+    return fallback;
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return fallback;
+  }
+  const num = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(num)) {
+    return fallback;
+  }
+  const clamped = Math.max(0, num);
+  const scaled = clamped * 100;
+  const rounded = Number.isFinite(scaled) ? Math.round(scaled) / 100 : clamped;
+  return rounded === 0 ? 0 : rounded;
+}
+
+function normalizeGiftRecord(gift, fallbackProbability = DEFAULT_GIFT_PROBABILITY) {
+  if (!gift || typeof gift !== 'object') return gift;
+  return {
+    ...gift,
+    probability: sanitizeGiftProbability(gift.probability, fallbackProbability),
+  };
+}
+
+function pickWeightedGift(gifts) {
+  if (!Array.isArray(gifts) || gifts.length === 0) return null;
+  const weights = gifts.map((g) => sanitizeGiftProbability(g?.probability, DEFAULT_GIFT_PROBABILITY));
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  if (!Number.isFinite(totalWeight) || totalWeight <= 0) {
+    return gifts[crypto.randomInt(gifts.length)];
+  }
+  const hi = crypto.randomBytes(4).readUInt32BE(0) >>> 11;
+  const lo = crypto.randomBytes(4).readUInt32BE(0);
+  const unit = (hi * 0x100000000 + lo) / 0x20000000000000;
+  const target = unit * totalWeight;
+  let cumulative = 0;
+  for (let i = 0; i < gifts.length; i += 1) {
+    const w = weights[i];
+    if (w <= 0) continue;
+    cumulative += w;
+    if (target < cumulative) {
+      return gifts[i];
+    }
+  }
+  for (let i = gifts.length - 1; i >= 0; i -= 1) {
+    if (weights[i] > 0) return gifts[i];
+  }
+  return gifts[0];
+}
+
+let storeMutationQueue = Promise.resolve();
+function withStoreMutationLock(fn) {
+  const run = storeMutationQueue.then(fn, fn);
+  storeMutationQueue = run.catch(() => {});
+  return run;
+}
+
 function readDefaultStore() {
   if (fs.existsSync(DEFAULT_STORE_PATH)) {
     try {
       const raw = fs.readFileSync(DEFAULT_STORE_PATH, 'utf8');
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      return {
+        ...parsed,
+        settings: {
+          ...BUNDLED_DEFAULT_STORE.settings,
+          ...(parsed.settings || {}),
+          randomizeGifts:
+            typeof parsed.settings?.randomizeGifts === 'boolean' ? parsed.settings.randomizeGifts : true,
+        },
+        gifts: Array.isArray(parsed.gifts)
+          ? parsed.gifts.map((g) => normalizeGiftRecord(g, 11.1))
+          : BUNDLED_DEFAULT_STORE.gifts,
+      };
     } catch {
       // Fallback to bundled copy
     }
@@ -481,9 +567,15 @@ function ensureStore() {
     const raw = fs.readFileSync(STORE_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     const defaults = readDefaultStore();
+    const mergedSettings = { ...defaults.settings, ...(parsed.settings || {}) };
+    if (typeof mergedSettings.randomizeGifts !== 'boolean') {
+      mergedSettings.randomizeGifts =
+        typeof defaults.settings.randomizeGifts === 'boolean' ? defaults.settings.randomizeGifts : true;
+    }
+    const rawGifts = Array.isArray(parsed.gifts) && parsed.gifts.length > 0 ? parsed.gifts : defaults.gifts;
     return {
-      settings: { ...defaults.settings, ...(parsed.settings || {}) },
-      gifts: Array.isArray(parsed.gifts) && parsed.gifts.length > 0 ? parsed.gifts : defaults.gifts,
+      settings: mergedSettings,
+      gifts: rawGifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY)),
       leads: Array.isArray(parsed.leads) ? parsed.leads : defaults.leads,
       qrHistory: Array.isArray(parsed.qrHistory) ? parsed.qrHistory : defaults.qrHistory || [],
     };
@@ -538,12 +630,13 @@ function isMissingQrTableError(err) {
 
 let memoryQrFallback = null;
 const memoryGiftUsageTips = new Map();
+const memoryGiftProbabilities = new Map();
 const memorySettingsFallback = {};
 
 function isMissingColumnError(err, columnNames = []) {
   if (!err) return false;
   const code = String(err.code || '').toUpperCase();
-  const msg = String(err.message || '').toLowerCase();
+  const msg = `${err.message || ''} ${err.details || ''} ${err.hint || ''}`.toLowerCase();
   const looksLikeMissingCol =
     code === 'PGRST204' ||
     code === '42703' ||
@@ -557,12 +650,19 @@ function isMissingColumnError(err, columnNames = []) {
   return columnNames.some((col) => msg.includes(String(col).toLowerCase()));
 }
 
-async function supabaseWriteWithOptionalColumns(restPath, method, headers, payload, optionalColumns) {
+async function supabaseWriteWithOptionalColumns(
+  restPath,
+  method,
+  headers,
+  payload,
+  optionalColumns,
+  restExecutor = supabaseRest
+) {
   let currentPayload = payload;
   const stripped = new Set();
   for (let attempt = 0; attempt <= optionalColumns.length; attempt += 1) {
     try {
-      return await supabaseRest(restPath, {
+      return await restExecutor(restPath, {
         method,
         headers,
         body: JSON.stringify(currentPayload),
@@ -572,7 +672,7 @@ async function supabaseWriteWithOptionalColumns(restPath, method, headers, paylo
       if (remaining.length === 0 || !isMissingColumnError(err, remaining)) {
         throw err;
       }
-      const msg = String(err.message || '').toLowerCase();
+      const msg = `${err.message || ''} ${err.details || ''} ${err.hint || ''}`.toLowerCase();
       const matched = remaining.filter((col) => msg.includes(col.toLowerCase()));
       const toDrop = matched.length > 0 ? matched : remaining;
       for (const col of toDrop) {
@@ -663,6 +763,8 @@ async function supabaseRest(restPath, init = {}) {
     const err = new Error(msg);
     err.status = res.status;
     err.code = data && typeof data === 'object' ? data.code : undefined;
+    err.details = data && typeof data === 'object' ? data.details : undefined;
+    err.hint = data && typeof data === 'object' ? data.hint : undefined;
     throw err;
   }
 
@@ -705,6 +807,14 @@ function mapSettingsRow(row) {
 }
 
 function mapGiftRow(row) {
+  const hasColumnProbability =
+    row.probability !== undefined &&
+    row.probability !== null &&
+    !(typeof row.probability === 'string' && row.probability.trim() === '');
+  const fallbackProbability = memoryGiftProbabilities.has(row.id)
+    ? memoryGiftProbabilities.get(row.id)
+    : DEFAULT_GIFT_PROBABILITY;
+
   return {
     id: row.id,
     name: row.name,
@@ -719,6 +829,9 @@ function mapGiftRow(row) {
     accentColor: row.accent_color || '#C88A2B',
     active: Boolean(row.active),
     stockLabel: row.stock_label || 'Disponible',
+    probability: hasColumnProbability
+      ? sanitizeGiftProbability(row.probability, fallbackProbability)
+      : fallbackProbability,
   };
 }
 
@@ -782,7 +895,10 @@ async function fetchSupabaseStore() {
 
   return {
     settings: mapSettingsRow(Array.isArray(settingsRows) ? settingsRows[0] : null),
-    gifts: Array.isArray(giftRows) && giftRows.length > 0 ? giftRows.map(mapGiftRow) : defaults.gifts,
+    gifts:
+      Array.isArray(giftRows) && giftRows.length > 0
+        ? giftRows.map(mapGiftRow)
+        : defaults.gifts.map((g) => normalizeGiftRecord(g, 11.1)),
     leads: Array.isArray(leadRows) ? leadRows.map(mapLeadRow) : [],
     qrHistory: qrTableMissing
       ? getFallbackQrHistory()
@@ -833,13 +949,20 @@ function requireAdminRole(req, res, next) {
 }
 
 function sanitizeStateForClient(store, isAuthed, role) {
+  const normalizedGifts = Array.isArray(store.gifts)
+    ? store.gifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY))
+    : [];
+  const defaultRandomize =
+    typeof store.settings?.randomizeGifts === 'boolean' ? store.settings.randomizeGifts : true;
+
   if (!isAuthed) {
     return {
       settings: {
         ...store.settings,
+        randomizeGifts: defaultRandomize,
         pinCode: '',
       },
-      gifts: store.gifts,
+      gifts: normalizedGifts,
       leads: [],
       qrHistory: [],
     };
@@ -870,9 +993,10 @@ function sanitizeStateForClient(store, isAuthed, role) {
   return {
     settings: {
       ...store.settings,
+      randomizeGifts: defaultRandomize,
       pinCode: '',
     },
-    gifts: store.gifts,
+    gifts: normalizedGifts,
     leads: store.leads || [],
     qrHistory: isAuthed && role === 'admin' && Array.isArray(store.qrHistory) ? store.qrHistory : [],
     role: 'admin',
@@ -1314,8 +1438,11 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
 
       if (shouldResetCatalog) {
         memoryGiftUsageTips.clear();
+        memoryGiftProbabilities.clear();
         const giftRows = defaults.gifts.map((gift, idx) => {
+          const probability = sanitizeGiftProbability(gift.probability, 11.1);
           memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
+          memoryGiftProbabilities.set(gift.id, probability);
           return {
             id: gift.id,
             name: gift.name,
@@ -1327,6 +1454,7 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
             accent_color: gift.accentColor,
             active: gift.active,
             stock_label: gift.stockLabel,
+            probability,
             sort_order: idx + 1,
           };
         });
@@ -1335,7 +1463,7 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
           'POST',
           { Prefer: 'resolution=merge-duplicates,return=minimal' },
           giftRows,
-          ['usage_tip']
+          ['usage_tip', 'probability']
         );
         const defaultIds = defaults.gifts.map((g) => `"${g.id}"`).join(',');
         await supabaseRest(`gifts?id=not.in.(${encodeURIComponent(defaultIds)})`, {
@@ -1454,7 +1582,7 @@ app.post('/api/leads', async (req, res) => {
     const activeGifts = store.gifts.filter((g) => g.active);
     const chosenGift =
       store.gifts.find((g) => g.id === giftId) ||
-      (activeGifts.length > 0 ? activeGifts[crypto.randomInt(activeGifts.length)] : null) ||
+      (activeGifts.length > 0 ? pickWeightedGift(activeGifts) : null) ||
       store.gifts[0] ||
       null;
 
@@ -1704,210 +1832,310 @@ app.delete('/api/leads/:id', requireAdminRole, async (req, res) => {
 });
 
 app.post('/api/gifts', requireAdminRole, async (req, res) => {
-  const { name, subtitle, usageTip, tag, visualKey, customImageUrl, accentColor, active, stockLabel } = req.body || {};
+  const { name, subtitle, usageTip, tag, visualKey, customImageUrl, accentColor, active, stockLabel, probability } =
+    req.body || {};
   const cleanName = typeof name === 'string' ? name.trim() : '';
   if (cleanName.length < 2) {
     return res.status(400).json({ error: 'El nombre del regalo es obligatorio.' });
   }
 
-  try {
-    const store = await getActiveStore();
-    const newGift = {
-      id: generateId('gift'),
-      name: cleanName,
-      subtitle: typeof subtitle === 'string' && subtitle.trim() ? subtitle.trim() : 'Obsequio exclusivo Show de Cocina.',
-      usageTip: typeof usageTip === 'string' ? usageTip.trim() : '',
-      tag: typeof tag === 'string' && tag.trim() ? tag.trim() : 'Edición Especial',
-      visualKey: VALID_VISUAL_KEYS.has(visualKey) ? visualKey : 'pot',
-      customImageUrl: typeof customImageUrl === 'string' && customImageUrl.trim() ? customImageUrl.trim() : undefined,
-      accentColor: typeof accentColor === 'string' && accentColor.trim() ? accentColor.trim() : '#C88A2B',
-      active: active !== false,
-      stockLabel: typeof stockLabel === 'string' && stockLabel.trim() ? stockLabel.trim() : 'Disponible',
-    };
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const newGift = {
+        id: generateId('gift'),
+        name: cleanName,
+        subtitle: typeof subtitle === 'string' && subtitle.trim() ? subtitle.trim() : 'Obsequio exclusivo Show de Cocina.',
+        usageTip: typeof usageTip === 'string' ? usageTip.trim() : '',
+        tag: typeof tag === 'string' && tag.trim() ? tag.trim() : 'Edición Especial',
+        visualKey: VALID_VISUAL_KEYS.has(visualKey) ? visualKey : 'pot',
+        customImageUrl: typeof customImageUrl === 'string' && customImageUrl.trim() ? customImageUrl.trim() : undefined,
+        accentColor: typeof accentColor === 'string' && accentColor.trim() ? accentColor.trim() : '#C88A2B',
+        active: active !== false,
+        stockLabel: typeof stockLabel === 'string' && stockLabel.trim() ? stockLabel.trim() : 'Disponible',
+        probability: sanitizeGiftProbability(probability, DEFAULT_GIFT_PROBABILITY),
+      };
 
-    if (USE_SUPABASE) {
-      memoryGiftUsageTips.set(newGift.id, newGift.usageTip);
-      await supabaseWriteWithOptionalColumns(
-        'gifts',
-        'POST',
-        { Prefer: 'return=minimal' },
-        {
-          id: newGift.id,
-          name: newGift.name,
-          subtitle: newGift.subtitle,
-          usage_tip: newGift.usageTip,
-          tag: newGift.tag,
-          visual_key: newGift.visualKey,
-          custom_image_url: newGift.customImageUrl || null,
-          accent_color: newGift.accentColor,
-          active: newGift.active,
-          stock_label: newGift.stockLabel,
-          sort_order: Math.floor(Date.now() / 1000),
-        },
-        ['usage_tip']
-      );
-      const updatedStore = await getActiveStore();
-      return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
+      if (USE_SUPABASE) {
+        memoryGiftUsageTips.set(newGift.id, newGift.usageTip);
+        memoryGiftProbabilities.set(newGift.id, newGift.probability);
+        await supabaseWriteWithOptionalColumns(
+          'gifts',
+          'POST',
+          { Prefer: 'return=minimal' },
+          {
+            id: newGift.id,
+            name: newGift.name,
+            subtitle: newGift.subtitle,
+            usage_tip: newGift.usageTip,
+            tag: newGift.tag,
+            visual_key: newGift.visualKey,
+            custom_image_url: newGift.customImageUrl || null,
+            accent_color: newGift.accentColor,
+            active: newGift.active,
+            stock_label: newGift.stockLabel,
+            probability: newGift.probability,
+            sort_order: Math.floor(Date.now() / 1000),
+          },
+          ['usage_tip', 'probability']
+        );
+        const updatedStore = await getActiveStore();
+        return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
+      }
+
+      store.gifts.push(newGift);
+      writeStore(store);
+      return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(store, true, 'admin') });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo crear el regalo.' });
     }
+  });
+});
 
-    store.gifts.push(newGift);
-    writeStore(store);
-    return res.status(201).json({ gift: newGift, state: sanitizeStateForClient(store, true, 'admin') });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo crear el regalo.' });
+app.patch('/api/gifts/probabilities', requireAdminRole, async (req, res) => {
+  const { gifts: giftsInput, probabilities: probsInput } = req.body || {};
+  const updatesById = new Map();
+
+  if (Array.isArray(giftsInput)) {
+    for (const entry of giftsInput) {
+      if (entry && typeof entry.id === 'string' && entry.id.trim()) {
+        updatesById.set(entry.id.trim(), entry.probability);
+      }
+    }
+  } else if (probsInput && typeof probsInput === 'object' && !Array.isArray(probsInput)) {
+    for (const [id, prob] of Object.entries(probsInput)) {
+      if (typeof id === 'string' && id.trim()) {
+        updatesById.set(id.trim(), prob);
+      }
+    }
   }
+
+  if (updatesById.size === 0) {
+    return res.status(400).json({ error: 'Debes indicar las probabilidades de los regalos.' });
+  }
+
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const updatedItems = [];
+      const nextGifts = store.gifts.map((gift) => {
+        const normalized = normalizeGiftRecord(gift, DEFAULT_GIFT_PROBABILITY);
+        if (!updatesById.has(normalized.id)) {
+          return normalized;
+        }
+        const nextProbability = sanitizeGiftProbability(
+          updatesById.get(normalized.id),
+          normalized.probability
+        );
+        const updatedGift = { ...normalized, probability: nextProbability };
+        updatedItems.push(updatedGift);
+        return updatedGift;
+      });
+
+      if (USE_SUPABASE) {
+        for (const item of updatedItems) {
+          memoryGiftProbabilities.set(item.id, item.probability);
+        }
+        for (const item of updatedItems) {
+          try {
+            await supabaseRest(`gifts?id=eq.${encodeURIComponent(item.id)}`, {
+              method: 'PATCH',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({ probability: item.probability }),
+            });
+          } catch (err) {
+            if (isMissingColumnError(err, ['probability'])) {
+              break;
+            }
+            throw err;
+          }
+        }
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
+        return res.json({ gifts: sanitized.gifts, state: sanitized });
+      }
+
+      store.gifts = nextGifts;
+      writeStore(store);
+      const sanitized = sanitizeStateForClient(store, true, 'admin');
+      return res.json({ gifts: sanitized.gifts, state: sanitized });
+    } catch {
+      return res.status(503).json({ error: 'No se pudieron actualizar las probabilidades.' });
+    }
+  });
 });
 
 app.patch('/api/gifts/:id', requireAdminRole, async (req, res) => {
   const { id } = req.params;
-  try {
-    const store = await getActiveStore();
-    const index = store.gifts.findIndex((g) => g.id === id);
-    if (index === -1) {
-      return res.status(404).json({ error: 'Regalo no encontrado.' });
-    }
-
-    const current = store.gifts[index];
-    const updates = req.body || {};
-
-    if (updates.active === false) {
-      const otherActiveCount = store.gifts.filter((g) => g.id !== id && g.active).length;
-      if (otherActiveCount < 1) {
-        return res.status(400).json({ error: 'Debe quedar al menos un regalo activo para las tarjetas ocultas.' });
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const index = store.gifts.findIndex((g) => g.id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Regalo no encontrado.' });
       }
+
+      const current = store.gifts[index];
+      const updates = req.body || {};
+
+      if (updates.active === false) {
+        const otherActiveCount = store.gifts.filter((g) => g.id !== id && g.active).length;
+        if (otherActiveCount < 1) {
+          return res.status(400).json({ error: 'Debe quedar al menos un regalo activo para las tarjetas ocultas.' });
+        }
+      }
+
+      const currentProbability = sanitizeGiftProbability(current.probability, DEFAULT_GIFT_PROBABILITY);
+      const nextProbability =
+        updates.probability !== undefined
+          ? sanitizeGiftProbability(updates.probability, currentProbability)
+          : currentProbability;
+
+      const nextGift = {
+        ...current,
+        name: typeof updates.name === 'string' && updates.name.trim() ? updates.name.trim() : current.name,
+        subtitle: typeof updates.subtitle === 'string' ? updates.subtitle.trim() : current.subtitle,
+        usageTip:
+          typeof updates.usageTip === 'string'
+            ? updates.usageTip.trim()
+            : typeof current.usageTip === 'string'
+              ? current.usageTip
+              : '',
+        tag: typeof updates.tag === 'string' ? updates.tag.trim() : current.tag,
+        visualKey: VALID_VISUAL_KEYS.has(updates.visualKey) ? updates.visualKey : current.visualKey,
+        customImageUrl:
+          updates.customImageUrl === ''
+            ? undefined
+            : typeof updates.customImageUrl === 'string'
+              ? updates.customImageUrl.trim()
+              : current.customImageUrl,
+        accentColor:
+          typeof updates.accentColor === 'string' && updates.accentColor.trim()
+            ? updates.accentColor.trim()
+            : current.accentColor,
+        active: typeof updates.active === 'boolean' ? updates.active : current.active,
+        stockLabel:
+          typeof updates.stockLabel === 'string' && updates.stockLabel.trim()
+            ? updates.stockLabel.trim()
+            : current.stockLabel,
+        probability: nextProbability,
+      };
+
+      if (USE_SUPABASE) {
+        memoryGiftUsageTips.set(id, nextGift.usageTip);
+        memoryGiftProbabilities.set(id, nextGift.probability);
+        await supabaseWriteWithOptionalColumns(
+          `gifts?id=eq.${encodeURIComponent(id)}`,
+          'PATCH',
+          { Prefer: 'return=minimal' },
+          {
+            name: nextGift.name,
+            subtitle: nextGift.subtitle,
+            usage_tip: nextGift.usageTip,
+            tag: nextGift.tag,
+            visual_key: nextGift.visualKey,
+            custom_image_url: nextGift.customImageUrl || null,
+            accent_color: nextGift.accentColor,
+            active: nextGift.active,
+            stock_label: nextGift.stockLabel,
+            probability: nextGift.probability,
+          },
+          ['usage_tip', 'probability']
+        );
+        const updatedStore = await getActiveStore();
+        return res.json({ gift: nextGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
+      }
+
+      store.gifts[index] = nextGift;
+      writeStore(store);
+      return res.json({ gift: nextGift, state: sanitizeStateForClient(store, true, 'admin') });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo actualizar el regalo.' });
     }
-
-    const nextGift = {
-      ...current,
-      name: typeof updates.name === 'string' && updates.name.trim() ? updates.name.trim() : current.name,
-      subtitle: typeof updates.subtitle === 'string' ? updates.subtitle.trim() : current.subtitle,
-      usageTip:
-        typeof updates.usageTip === 'string'
-          ? updates.usageTip.trim()
-          : typeof current.usageTip === 'string'
-            ? current.usageTip
-            : '',
-      tag: typeof updates.tag === 'string' ? updates.tag.trim() : current.tag,
-      visualKey: VALID_VISUAL_KEYS.has(updates.visualKey) ? updates.visualKey : current.visualKey,
-      customImageUrl:
-        updates.customImageUrl === ''
-          ? undefined
-          : typeof updates.customImageUrl === 'string'
-            ? updates.customImageUrl.trim()
-            : current.customImageUrl,
-      accentColor:
-        typeof updates.accentColor === 'string' && updates.accentColor.trim()
-          ? updates.accentColor.trim()
-          : current.accentColor,
-      active: typeof updates.active === 'boolean' ? updates.active : current.active,
-      stockLabel:
-        typeof updates.stockLabel === 'string' && updates.stockLabel.trim()
-          ? updates.stockLabel.trim()
-          : current.stockLabel,
-    };
-
-    if (USE_SUPABASE) {
-      memoryGiftUsageTips.set(id, nextGift.usageTip);
-      await supabaseWriteWithOptionalColumns(
-        `gifts?id=eq.${encodeURIComponent(id)}`,
-        'PATCH',
-        { Prefer: 'return=minimal' },
-        {
-          name: nextGift.name,
-          subtitle: nextGift.subtitle,
-          usage_tip: nextGift.usageTip,
-          tag: nextGift.tag,
-          visual_key: nextGift.visualKey,
-          custom_image_url: nextGift.customImageUrl || null,
-          accent_color: nextGift.accentColor,
-          active: nextGift.active,
-          stock_label: nextGift.stockLabel,
-        },
-        ['usage_tip']
-      );
-      const updatedStore = await getActiveStore();
-      return res.json({ gift: nextGift, state: sanitizeStateForClient(updatedStore, true, 'admin') });
-    }
-
-    store.gifts[index] = nextGift;
-    writeStore(store);
-    return res.json({ gift: nextGift, state: sanitizeStateForClient(store, true, 'admin') });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo actualizar el regalo.' });
-  }
+  });
 });
 
 app.delete('/api/gifts/:id', requireAdminRole, async (req, res) => {
   const { id } = req.params;
-  try {
-    const store = await getActiveStore();
-    const target = store.gifts.find((g) => g.id === id);
-    if (!target) {
-      return res.status(404).json({ error: 'Regalo no encontrado.' });
-    }
-    const remaining = store.gifts.filter((g) => g.id !== id);
-    if (remaining.filter((g) => g.active).length < 1) {
-      return res.status(400).json({ error: 'Debe quedar al menos un regalo activo en el catálogo.' });
-    }
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const target = store.gifts.find((g) => g.id === id);
+      if (!target) {
+        return res.status(404).json({ error: 'Regalo no encontrado.' });
+      }
+      const remaining = store.gifts.filter((g) => g.id !== id);
+      if (remaining.filter((g) => g.active).length < 1) {
+        return res.status(400).json({ error: 'Debe quedar al menos un regalo activo en el catálogo.' });
+      }
 
-    if (USE_SUPABASE) {
-      await supabaseRest(`gifts?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
-      const updatedStore = await getActiveStore();
-      return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
-    }
+      if (USE_SUPABASE) {
+        await supabaseRest(`gifts?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+        memoryGiftUsageTips.delete(id);
+        memoryGiftProbabilities.delete(id);
+        const updatedStore = await getActiveStore();
+        return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
+      }
 
-    store.gifts = remaining;
-    writeStore(store);
-    return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo eliminar el regalo.' });
-  }
+      store.gifts = remaining;
+      writeStore(store);
+      return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo eliminar el regalo.' });
+    }
+  });
 });
 
 app.post('/api/gifts/reset', requireAdminRole, async (_req, res) => {
-  try {
-    const defaults = readDefaultStore();
+  return withStoreMutationLock(async () => {
+    try {
+      const defaults = readDefaultStore();
 
-    if (USE_SUPABASE) {
-      memoryGiftUsageTips.clear();
-      const rows = defaults.gifts.map((gift, idx) => {
-        memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
-        return {
-          id: gift.id,
-          name: gift.name,
-          subtitle: gift.subtitle,
-          usage_tip: gift.usageTip || '',
-          tag: gift.tag,
-          visual_key: gift.visualKey,
-          custom_image_url: gift.customImageUrl || null,
-          accent_color: gift.accentColor,
-          active: gift.active,
-          stock_label: gift.stockLabel,
-          sort_order: idx + 1,
-        };
-      });
-      await supabaseWriteWithOptionalColumns(
-        'gifts',
-        'POST',
-        { Prefer: 'resolution=merge-duplicates,return=minimal' },
-        rows,
-        ['usage_tip']
-      );
-      const defaultIds = defaults.gifts.map((g) => `"${g.id}"`).join(',');
-      await supabaseRest(`gifts?id=not.in.(${encodeURIComponent(defaultIds)})`, {
-        method: 'DELETE',
-      });
-      const updatedStore = await getActiveStore();
-      return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
+      if (USE_SUPABASE) {
+        memoryGiftUsageTips.clear();
+        memoryGiftProbabilities.clear();
+        const rows = defaults.gifts.map((gift, idx) => {
+          const probability = sanitizeGiftProbability(gift.probability, 11.1);
+          memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
+          memoryGiftProbabilities.set(gift.id, probability);
+          return {
+            id: gift.id,
+            name: gift.name,
+            subtitle: gift.subtitle,
+            usage_tip: gift.usageTip || '',
+            tag: gift.tag,
+            visual_key: gift.visualKey,
+            custom_image_url: gift.customImageUrl || null,
+            accent_color: gift.accentColor,
+            active: gift.active,
+            stock_label: gift.stockLabel,
+            probability,
+            sort_order: idx + 1,
+          };
+        });
+        await supabaseWriteWithOptionalColumns(
+          'gifts',
+          'POST',
+          { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          rows,
+          ['usage_tip', 'probability']
+        );
+        const defaultIds = defaults.gifts.map((g) => `"${g.id}"`).join(',');
+        await supabaseRest(`gifts?id=not.in.(${encodeURIComponent(defaultIds)})`, {
+          method: 'DELETE',
+        });
+        const updatedStore = await getActiveStore();
+        return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
+      }
+
+      const store = ensureStore();
+      store.gifts = defaults.gifts;
+      writeStore(store);
+      return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo restaurar el catálogo predeterminado.' });
     }
-
-    const store = ensureStore();
-    store.gifts = defaults.gifts;
-    writeStore(store);
-    return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo restaurar el catálogo predeterminado.' });
-  }
+  });
 });
 
 app.patch('/api/settings', requireAdminRole, async (req, res) => {
@@ -2129,5 +2357,16 @@ if (!IS_VERCEL && !IS_TESTING) {
     console.log(`Metricas Ciprian API listening on http://localhost:${PORT} (storage: ${USE_SUPABASE ? 'supabase' : 'local'})`);
   });
 }
+
+export {
+  DEFAULT_GIFT_PROBABILITY,
+  sanitizeGiftProbability,
+  normalizeGiftRecord,
+  pickWeightedGift,
+  isMissingColumnError,
+  supabaseWriteWithOptionalColumns,
+  mapGiftRow,
+  memoryGiftProbabilities,
+};
 
 export default app;

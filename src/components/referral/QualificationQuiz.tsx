@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, Check } from 'lucide-react';
 import type { CreditTier, LeadQualification } from '../../types/app';
 
@@ -132,6 +132,7 @@ const FUTURE_PRODUCTS_NO: OptionItem[] = [
 ];
 
 export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, onComplete }) => {
+  const prefersReduced = useReducedMotion();
   const [stage, setStage] = useState<QuizStage>('knows_brand');
   const [pickedId, setPickedId] = useState<string | null>(null);
 
@@ -256,18 +257,18 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 24 }}
+      initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20, scale: 0.97 }}
-      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      exit={prefersReduced ? { opacity: 0 } : { opacity: 0, y: -20, scale: 0.97 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className="relative w-full max-w-[560px] mx-auto"
     >
-      <div className="relative overflow-hidden rounded-[32px] bg-[#FFFDF9]/78 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-6 py-7 sm:px-9 sm:py-9">
-        <div className="pointer-events-none absolute inset-2.5 rounded-[24px] border border-[#E6D5BF]/60" />
+      <div className="relative overflow-hidden rounded-[26px] sm:rounded-[32px] bg-[#FFFDF9]/78 backdrop-blur-xl border border-[#DFC9AB]/80 autumn-card-shadow px-4 py-5 sm:px-9 sm:py-9">
+        <div className="pointer-events-none absolute inset-2 sm:inset-2.5 rounded-[20px] sm:rounded-[24px] border border-[#E6D5BF]/60" />
         <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#4B644A]" />
 
         {/* Clean minimal progress line */}
-        <div className="relative z-10 h-1.5 w-full overflow-hidden rounded-full bg-[#E8DAC5] mb-6">
+        <div className="relative z-10 h-1.5 w-full overflow-hidden rounded-full bg-[#E8DAC5] mb-5 sm:mb-6">
           <motion.div
             className="h-full rounded-full bg-gradient-to-r from-[#8C3318] via-[#C88A2B] to-[#E5AE4E]"
             animate={{ width: `${Math.round(progressRatio * 100)}%` }}
@@ -286,14 +287,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
               className="relative z-10"
             >
               <p className="text-xs font-medium text-[#8C4A19] mb-1">Hola, {firstName}</p>
-              <h2 className="font-serif text-2xl sm:text-[26px] font-semibold text-[#22150E] leading-snug">
+              <h2 className="font-serif text-[21px] sm:text-[26px] font-semibold text-[#22150E] leading-snug">
                 ¿Conoce la marca Royal Prestige?
               </h2>
-              <p className="mt-1.5 text-sm text-[#5C4332]">
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
                 Selecciona una respuesta para continuar hacia tu obsequio.
               </p>
 
-              <div className="mt-5 space-y-3">
+              <div className="mt-4 sm:mt-5 space-y-2.5 sm:space-y-3">
                 {KNOWS_OPTIONS.map((opt) => {
                   const selected = pickedId === opt.id;
                   return (
@@ -303,7 +304,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                       whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.985 }}
                       onClick={() => handleSelectKnowsBrand(opt)}
-                      className={`w-full rounded-2xl border p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      className={`min-h-[52px] w-full rounded-2xl border p-3.5 sm:p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
                           ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
                           : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
@@ -336,14 +337,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
               transition={{ duration: 0.28 }}
               className="relative z-10"
             >
-              <h2 className="font-serif text-2xl sm:text-[26px] font-semibold text-[#22150E] leading-snug">
+              <h2 className="font-serif text-[21px] sm:text-[26px] font-semibold text-[#22150E] leading-snug">
                 ¿Usted es cliente de la marca Royal Prestige?
               </h2>
-              <p className="mt-1.5 text-sm text-[#5C4332]">
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
                 Indícanos si ya cuentas con alguno de nuestros sistemas en tu hogar.
               </p>
 
-              <div className="mt-5 space-y-3">
+              <div className="mt-4 sm:mt-5 space-y-2.5 sm:space-y-3">
                 {IS_CLIENT_OPTIONS.map((opt) => {
                   const selected = pickedId === opt.id;
                   return (
@@ -353,7 +354,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                       whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.985 }}
                       onClick={() => handleSelectIsClient(opt)}
-                      className={`w-full rounded-2xl border p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      className={`min-h-[52px] w-full rounded-2xl border p-3.5 sm:p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
                           ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
                           : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
@@ -386,14 +387,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
               transition={{ duration: 0.28 }}
               className="relative z-10"
             >
-              <h2 className="font-serif text-2xl sm:text-[26px] font-semibold text-[#22150E] leading-snug">
+              <h2 className="font-serif text-[21px] sm:text-[26px] font-semibold text-[#22150E] leading-snug">
                 Del 1 al 10, ¿cuánto califica los productos de Royal Prestige?
               </h2>
-              <p className="mt-1.5 text-sm text-[#5C4332]">
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
                 Toca el número que represente mejor tu valoración de la marca.
               </p>
 
-              <div className="mt-6 grid grid-cols-5 gap-2.5">
+              <div className="mt-5 sm:mt-6 grid grid-cols-5 gap-2 sm:gap-2.5">
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
                   const selected = pickedId === `rate-${num}` || rating === num;
                   return (
@@ -403,7 +404,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                       whileHover={{ y: -2, scale: 1.04 }}
                       whileTap={{ scale: 0.94 }}
                       onClick={() => handleSelectRating(num)}
-                      className={`rounded-2xl border py-3.5 font-serif text-lg font-bold transition-all cursor-pointer ${
+                      className={`min-h-[46px] rounded-2xl border py-2.5 sm:py-3.5 font-serif text-base sm:text-lg font-bold transition-all cursor-pointer ${
                         selected
                           ? 'border-[#8C3318] bg-[#22150E] text-[#F4CA73] shadow-md'
                           : 'border-[#DFCBB3] bg-[#FCF8F2]/90 text-[#22150E] hover:border-[#C88A2B] hover:bg-white'
@@ -430,14 +431,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
               transition={{ duration: 0.28 }}
               className="relative z-10"
             >
-              <h2 className="font-serif text-2xl sm:text-[25px] font-semibold text-[#22150E] leading-snug">
+              <h2 className="font-serif text-[21px] sm:text-[25px] font-semibold text-[#22150E] leading-snug">
                 En un futuro, ¿qué producto le gustaría tener en su casa?
               </h2>
-              <p className="mt-1.5 text-sm text-[#5C4332]">
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
                 Elige la línea que más te gustaría incorporar en tu hogar.
               </p>
 
-              <div className="mt-5 space-y-2.5">
+              <div className="mt-4 sm:mt-5 space-y-2.5">
                 {FUTURE_PRODUCTS_YES.map((opt) => {
                   const selected = pickedId === opt.id;
                   return (
@@ -447,7 +448,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                       whileHover={{ y: -1.5 }}
                       whileTap={{ scale: 0.985 }}
                       onClick={() => handleFinishYesBranch(opt)}
-                      className={`w-full rounded-2xl border px-4 py-3.5 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      className={`min-h-[48px] w-full rounded-2xl border px-3.5 sm:px-4 py-3 sm:py-3.5 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
                           ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
                           : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
@@ -477,14 +478,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
               transition={{ duration: 0.28 }}
               className="relative z-10"
             >
-              <h2 className="font-serif text-2xl sm:text-[26px] font-semibold text-[#22150E] leading-snug">
+              <h2 className="font-serif text-[21px] sm:text-[26px] font-semibold text-[#22150E] leading-snug">
                 ¿Está buscando comer de manera más saludable?
               </h2>
-              <p className="mt-1.5 text-sm text-[#5C4332]">
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
                 Cuéntanos cuál es tu enfoque actual para cuidar la nutrición en casa.
               </p>
 
-              <div className="mt-5 space-y-3">
+              <div className="mt-4 sm:mt-5 space-y-2.5 sm:space-y-3">
                 {HEALTHY_EATING_OPTIONS.map((opt) => {
                   const selected = pickedId === opt.id;
                   return (
@@ -494,7 +495,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                       whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.985 }}
                       onClick={() => handleSelectHealthyEating(opt)}
-                      className={`w-full rounded-2xl border p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      className={`min-h-[52px] w-full rounded-2xl border p-3.5 sm:p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
                           ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
                           : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
@@ -524,14 +525,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
               transition={{ duration: 0.28 }}
               className="relative z-10"
             >
-              <h2 className="font-serif text-xl sm:text-[24px] font-semibold text-[#22150E] leading-snug">
+              <h2 className="font-serif text-[19px] sm:text-[24px] font-semibold text-[#22150E] leading-snug">
                 Si en un futuro fuera a comprar un producto que le ayudaría a mejorar la salud de su familia, ¿qué producto le gustaría tener en su casa?
               </h2>
-              <p className="mt-1.5 text-sm text-[#5C4332]">
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
                 Selecciona la opción que mejor se adapte a tu hogar.
               </p>
 
-              <div className="mt-5 space-y-2.5">
+              <div className="mt-4 sm:mt-5 space-y-2.5">
                 {FUTURE_PRODUCTS_NO.map((opt) => {
                   const selected = pickedId === opt.id;
                   return (
@@ -541,7 +542,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                       whileHover={{ y: -1.5 }}
                       whileTap={{ scale: 0.985 }}
                       onClick={() => handleFinishNoBranch(opt)}
-                      className={`w-full rounded-2xl border px-4 py-3.5 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      className={`min-h-[48px] w-full rounded-2xl border px-3.5 sm:px-4 py-3 sm:py-3.5 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
                           ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
                           : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
@@ -564,14 +565,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
         </AnimatePresence>
 
         {stage !== 'knows_brand' && (
-          <div className="relative z-10 mt-6 pt-4 border-t border-[#E8DAC5] flex justify-start">
+          <div className="relative z-10 mt-5 sm:mt-6 pt-3.5 sm:pt-4 border-t border-[#E8DAC5] flex justify-start">
             <button
               type="button"
               disabled={Boolean(pickedId)}
               onClick={handleBack}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5C4332] hover:text-[#22150E] cursor-pointer disabled:opacity-50"
+              className="min-h-[44px] -ml-2.5 px-3 py-2 rounded-xl inline-flex items-center gap-1.5 text-xs sm:text-[13px] font-semibold text-[#5C4332] hover:text-[#22150E] hover:bg-[#FAF3E8]/80 transition-colors cursor-pointer disabled:opacity-50"
             >
-              <ArrowLeft className="h-3.5 w-3.5" />
+              <ArrowLeft className="h-4 w-4" />
               Pregunta anterior
             </button>
           </div>

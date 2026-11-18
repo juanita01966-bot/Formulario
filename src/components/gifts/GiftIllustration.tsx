@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
-import { motion, type MotionValue } from 'framer-motion';
+import { motion, useReducedMotion, type MotionValue } from 'framer-motion';
 import type { GiftItem, GiftVisualKey, ShowcaseStyleId } from '../../types/app';
 
 export interface ShowcasePedestalTokens {
@@ -117,17 +117,18 @@ export const StudioPlinthBase: React.FC<{
   shadowOpacity = 0.72,
 }) => {
   const tokens = resolveShowcaseTokens(showcaseStyle);
+  const prefersReduced = useReducedMotion();
 
   const dims =
     size === 'lg'
       ? {
           wrap: '-mt-1',
-          shadow: '-mb-5 h-3.5 w-32 sm:w-36 blur-[5px]',
-          upwash: 'bottom-7 h-40 w-52 sm:w-64 blur-xl',
-          recessed: 'inset-x-10 inset-y-2',
-          top: 'h-11 sm:h-12 w-56 sm:w-64',
-          side: '-mt-6 h-7 sm:h-8 w-56 sm:w-64',
-          floor: '-mt-3 h-5 w-60 sm:w-72 blur-lg',
+          shadow: '-mb-5 h-3.5 w-28 sm:w-36 blur-[5px]',
+          upwash: 'bottom-7 h-36 sm:h-40 w-44 sm:w-64 blur-xl',
+          recessed: 'inset-x-9 sm:inset-x-10 inset-y-2',
+          top: 'h-10 sm:h-12 w-48 sm:w-64',
+          side: '-mt-5 sm:-mt-6 h-6 sm:h-8 w-48 sm:w-64',
+          floor: '-mt-3 h-4 sm:h-5 w-52 sm:w-72 blur-lg',
         }
       : size === 'sm'
         ? {
@@ -154,10 +155,10 @@ export const StudioPlinthBase: React.FC<{
       {/* Soft warm museum uplight rising continuously from recessed circular podium lens onto the floating product */}
       <motion.div
         aria-hidden="true"
-        animate={{ opacity: [0.68, 1, 0.68], scaleY: [0.95, 1.05, 0.95] }}
-        transition={{ duration: 2.9, repeat: Infinity, ease: 'easeInOut' }}
+        animate={prefersReduced ? { opacity: 0.85 } : { opacity: [0.68, 1, 0.68], scaleY: [0.95, 1.05, 0.95] }}
+        transition={prefersReduced ? undefined : { duration: 2.9, repeat: Infinity, ease: 'easeInOut' }}
         style={{ background: tokens.plinthUpwashGradient, transformOrigin: 'bottom center' }}
-        className={`pointer-events-none absolute left-1/2 -translate-x-1/2 z-[15] rounded-t-full ${dims.upwash}`}
+        className={`pointer-events-none absolute left-1/2 -translate-x-1/2 z-[15] rounded-t-full will-change-transform ${dims.upwash}`}
       />
 
       {/* Grounded inverse contact shadow resting over the center of the spotlight lens */}
@@ -175,8 +176,8 @@ export const StudioPlinthBase: React.FC<{
       >
         {/* Recessed glowing showcase aperture in center of podium */}
         <motion.div
-          animate={{ opacity: [0.8, 1, 0.8] }}
-          transition={{ duration: 2.9, repeat: Infinity, ease: 'easeInOut' }}
+          animate={prefersReduced ? { opacity: 0.9 } : { opacity: [0.8, 1, 0.8] }}
+          transition={prefersReduced ? undefined : { duration: 2.9, repeat: Infinity, ease: 'easeInOut' }}
           style={{
             background: `radial-gradient(ellipse at center, ${tokens.plinthEmissiveCore} 0%, rgba(253,224,71,0.5) 45%, transparent 78%)`,
             boxShadow: '0 0 22px rgba(254, 240, 138, 0.55)',
@@ -361,6 +362,7 @@ export const GiftIllustration: React.FC<GiftIllustrationProps> = ({
   variant = 'clean',
   alt = 'Regalo de cocina Royal Prestige',
 }) => {
+  const prefersReduced = useReducedMotion();
   const [imgFailed, setImgFailed] = useState(false);
   const rawId = useId();
   const uid = rawId.replace(/:/g, '');
@@ -924,7 +926,7 @@ export const GiftIllustration: React.FC<GiftIllustrationProps> = ({
     </svg>
   );
 
-  if (!floating) {
+  if (!floating || prefersReduced) {
     return artwork;
   }
 

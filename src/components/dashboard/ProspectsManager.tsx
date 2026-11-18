@@ -228,33 +228,33 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   };
 
   return (
-    <section className="rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-4 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
+    <section className="rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-3.5 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
       {/* Toolbar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-[#EFE3D2]">
-        <div>
-          <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#22150E]">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4 pb-4 sm:pb-5 border-b border-[#EFE3D2]">
+        <div className="min-w-0">
+          <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E]">
             Prospectos del Show de Cocina
           </h2>
-          <p className="text-xs sm:text-sm text-[#7B5D4A]">
+          <p className="text-xs sm:text-sm text-[#7B5D4A] mt-0.5">
             Marca el check de llamada realizada para desbloquear la clasificación en Cita, Demo u Orden.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
             type="button"
             onClick={() => setManualOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[#22150E] px-4 py-2 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] transition-colors cursor-pointer"
+            className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full bg-[#22150E] px-4 py-2 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] transition-colors cursor-pointer"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-3.5 w-3.5 shrink-0" />
             Agregar prospecto
           </button>
           <button
             type="button"
             onClick={handleExportCsv}
-            className="inline-flex items-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-3.5 py-2 text-xs font-semibold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
+            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-4 py-2 text-xs font-semibold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer shrink-0"
           >
-            <Download className="h-3.5 w-3.5" />
+            <Download className="h-3.5 w-3.5 shrink-0" />
             CSV
           </button>
         </div>
@@ -262,18 +262,18 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
 
       {/* Search & Filter Chips */}
       <div className="mt-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1 md:max-w-md min-w-0">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#9B816E]" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por nombre, teléfono, regalo o código..."
-            className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
+            className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:overflow-visible max-w-full">
           {FILTER_PILLS.map((pill) => {
             const active = activeFilter === pill.key;
             return (
@@ -281,7 +281,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 key={pill.key}
                 type="button"
                 onClick={() => onFilterChange(pill.key)}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                className={`shrink-0 whitespace-nowrap min-h-[44px] sm:min-h-[34px] rounded-full px-3.5 py-2 sm:py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                   active
                     ? 'bg-[#B84A27] text-white shadow-sm'
                     : 'bg-[#FAF3E8] text-[#6E5341] hover:bg-[#F0E1CC]'
@@ -327,27 +327,27 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.97 }}
                   transition={{ duration: 0.25 }}
-                  className={`rounded-2xl border p-4 transition-colors ${
+                  className={`rounded-2xl border p-3.5 sm:p-4 transition-colors ${
                     lead.called
                       ? 'border-[#DFCBB3] bg-white'
                       : 'border-amber-300/90 bg-gradient-to-r from-[#FFFDF7] to-[#FEF7E8]'
                   }`}
                 >
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
                     {/* Left: Person & Revealed Gift */}
-                    <div className="flex items-start gap-3.5 min-w-0">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#FAF3E8] border border-[#E6D5BF]">
+                    <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+                      <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl bg-[#FAF3E8] border border-[#E6D5BF]">
                         <GiftIllustration
                           visualKey={matchedGift?.visualKey || lead.giftVisualKey || 'cutlery'}
                           customImageUrl={matchedGift?.customImageUrl}
                           accentColor={matchedGift?.accentColor || '#C88A2B'}
-                          size={34}
+                          size={32}
                         />
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-[15px] font-bold text-[#22150E] truncate">{lead.name}</h3>
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                          <h3 className="text-[15px] font-bold text-[#22150E] break-words">{lead.name}</h3>
                           <span className="rounded-md bg-[#FAF0E0] border border-[#E6C99E] px-2 py-0.5 font-mono text-[11px] font-semibold text-[#8C4A19] tabular-nums">
                             {lead.claimCode}
                           </span>
@@ -375,20 +375,20 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                           )}
                         </div>
 
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#6E5341]">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#6E5341]">
                           <span className="font-mono tabular-nums font-medium text-[#22150E]">{lead.phone}</span>
-                          <span>·</span>
+                          <span className="text-[#C8B29A]">·</span>
                           <span className="font-semibold text-[#8C3318]">
                             Regalo: {lead.giftName || 'Pendiente por destapar'}
                           </span>
-                          <span>·</span>
+                          <span className="text-[#C8B29A]">·</span>
                           <span>{formatRelativeOrDate(lead.createdAt)}</span>
                         </div>
 
                         {lead.address && (
-                          <div className="mt-1 flex items-center gap-1.5 text-xs text-[#5C4332]">
-                            <MapPin className="h-3.5 w-3.5 shrink-0 text-[#9E4725]" />
-                            <span className="truncate">{lead.address}</span>
+                          <div className="mt-1 flex items-start gap-1.5 text-xs text-[#5C4332] min-w-0">
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-[#9E4725] mt-0.5" />
+                            <span className="break-words min-w-0">{lead.address}</span>
                           </div>
                         )}
 
@@ -407,21 +407,21 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                         )}
 
                         {/* Quick contact & notes bar */}
-                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
                           <a
                             href={`tel:${cleanTel}`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-[#E6D5BF] bg-[#FAF3E8]/70 px-2.5 py-1 text-[11px] font-semibold text-[#4E382B] hover:bg-[#F3E4CE] transition-colors"
+                            className="inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-[#FAF3E8]/70 px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-[#4E382B] hover:bg-[#F3E4CE] transition-colors"
                           >
-                            <Phone className="h-3 w-3 text-[#B84A27]" />
+                            <Phone className="h-3.5 w-3.5 sm:h-3 sm:w-3 text-[#B84A27]" />
                             Llamar
                           </a>
                           <a
                             href={whatsappUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                            className="inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-emerald-200 bg-emerald-50 px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
                           >
-                            <MessageCircle className="h-3 w-3" />
+                            <MessageCircle className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                             WhatsApp
                           </a>
                           <button
@@ -430,25 +430,25 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                               setExpandedNotesId(notesOpen ? null : lead.id);
                               setNotesDraft((prev) => ({ ...prev, [lead.id]: lead.notes }));
                             }}
-                            className="inline-flex items-center gap-1 rounded-lg border border-[#E6D5BF] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#6E5341] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
+                            className="inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-white px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-[#6E5341] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
                           >
-                            <StickyNote className="h-3 w-3" />
+                            <StickyNote className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                             {lead.notes ? 'Ver nota' : 'Nota'}
                           </button>
 
                           {confirmDeleteId === lead.id ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-2 py-0.5 text-[11px]">
+                            <span className="inline-flex min-h-[44px] sm:min-h-[32px] items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 py-1 text-xs sm:text-[11px]">
                               <button
                                 type="button"
                                 onClick={() => onDeleteLead(lead.id)}
-                                className="font-bold text-red-700 hover:underline cursor-pointer"
+                                className="min-h-[36px] sm:min-h-0 font-bold text-red-700 hover:underline cursor-pointer"
                               >
                                 Confirmar eliminar
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteId(null)}
-                                className="text-[#6E5341] hover:text-[#22150E] cursor-pointer"
+                                className="min-h-[36px] sm:min-h-0 text-[#6E5341] hover:text-[#22150E] cursor-pointer"
                               >
                                 Cancelar
                               </button>
@@ -457,10 +457,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                             <button
                               type="button"
                               onClick={() => setConfirmDeleteId(lead.id)}
-                              className="inline-flex items-center rounded-lg p-1 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
+                              className="inline-flex min-h-[44px] min-w-[44px] sm:min-h-[32px] sm:min-w-[32px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
                               title="Eliminar prospecto"
+                              aria-label={`Eliminar a ${lead.name}`}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                             </button>
                           )}
                         </div>
@@ -468,14 +469,14 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                     </div>
 
                     {/* Right: Called Check + 3 Categories Selector */}
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 shrink-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 shrink-0 w-full lg:w-auto">
                       {/* Check "Ya se llamó" */}
                       <motion.button
                         type="button"
                         onClick={() => handleToggleCalled(lead)}
-                        animate={showLockHint ? { scale: [1, 1.07, 1], boxShadow: '0 0 0 4px rgba(184,74,39,0.28)' } : {}}
+                        animate={showLockHint ? { scale: [1, 1.04, 1], boxShadow: '0 0 0 4px rgba(184,74,39,0.28)' } : {}}
                         transition={{ duration: 0.45 }}
-                        className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold border transition-all cursor-pointer ${
+                        className={`inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold border transition-all cursor-pointer ${
                           lead.called
                             ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
                             : 'bg-[#FAF3E8] border-[#D8B994] text-[#594133] hover:bg-amber-100/70'
@@ -495,9 +496,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                       </motion.button>
 
                       {/* 3 Categories Segmented Control */}
-                      <div className="relative">
+                      <div className="relative w-full sm:w-auto">
                         <div
-                          className={`inline-flex items-center rounded-xl p-1 border transition-opacity ${
+                          className={`grid grid-cols-3 w-full sm:w-auto sm:inline-flex items-center rounded-xl p-1 border transition-opacity ${
                             lead.called
                               ? 'bg-[#FAF3E8] border-[#E3D0B8]'
                               : 'bg-stone-100 border-stone-200 opacity-60'
@@ -516,16 +517,16 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                                     ? `Asignar a ${cat.label}`
                                     : 'Marca primero el check de llamada para clasificar'
                                 }
-                                className={`relative inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                                className={`relative inline-flex min-h-[44px] sm:min-h-[34px] items-center justify-center gap-1 rounded-lg px-2 sm:px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                                   isSelected
                                     ? cat.activeClass
                                     : 'text-[#594133] hover:bg-white/70'
                                 }`}
                               >
                                 {!lead.called ? (
-                                  <Lock className="h-3 w-3 opacity-70" />
+                                  <Lock className="h-3 w-3 opacity-70 shrink-0" />
                                 ) : (
-                                  <Icon className="h-3.5 w-3.5" />
+                                  <Icon className="h-3.5 w-3.5 shrink-0" />
                                 )}
                                 <span>{cat.label}</span>
                               </button>
@@ -539,7 +540,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                               initial={{ opacity: 0, y: 4 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0 }}
-                              className="absolute right-0 -bottom-7 z-20 whitespace-nowrap rounded-lg bg-[#22150E] px-2.5 py-1 text-[10px] font-semibold text-amber-200 shadow-lg"
+                              className="mt-1.5 sm:mt-0 sm:absolute sm:right-0 sm:-bottom-8 z-20 rounded-lg bg-[#22150E] px-2.5 py-1.5 sm:py-1 text-[10px] font-semibold text-amber-200 shadow-lg text-center sm:whitespace-nowrap"
                             >
                               Primero marca el check “Ya se llamó”
                             </motion.div>
@@ -551,12 +552,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
 
                   {/* Order amount editor when category === 'orden' */}
                   {lead.category === 'orden' && (
-                    <div className="mt-3 pt-3 border-t border-emerald-100 flex flex-wrap items-center justify-between gap-3 bg-emerald-50/50 rounded-xl px-3 py-2">
+                    <div className="mt-3 pt-3 border-t border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-emerald-50/50 rounded-xl px-3 py-2.5">
                       <span className="text-xs font-semibold text-emerald-900">
                         Monto de la orden (actualiza Ticket Promedio):
                       </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-emerald-800">$</span>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <span className="text-sm sm:text-xs font-bold text-emerald-800">$</span>
                         <input
                           type="number"
                           min={0}
@@ -564,12 +565,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                           onChange={(e) =>
                             setAmountDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
                           }
-                          className="w-28 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-xs font-mono font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                          className="flex-1 sm:flex-none sm:w-28 min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-base sm:text-xs font-mono font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-400"
                         />
                         <button
                           type="button"
                           onClick={() => handleSaveOrderAmount(lead)}
-                          className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-800 transition-colors cursor-pointer"
+                          className="min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg bg-emerald-700 px-4 sm:px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 transition-colors cursor-pointer shrink-0"
                         >
                           Guardar
                         </button>
@@ -594,12 +595,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                               setNotesDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
                             }
                             placeholder="Escribe notas de la llamada, dirección o fecha de cita..."
-                            className="flex-1 rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-xs text-[#22150E] focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                            className="flex-1 min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-xs text-[#22150E] focus:bg-white focus:border-[#B84A27] focus:outline-none"
                           />
                           <button
                             type="button"
                             onClick={() => handleSaveNotes(lead)}
-                            className="rounded-xl bg-[#22150E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#3A2418] cursor-pointer"
+                            className="min-h-[44px] rounded-xl bg-[#22150E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#3A2418] cursor-pointer shrink-0"
                           >
                             Guardar nota
                           </button>
@@ -621,7 +622,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/55 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/55 backdrop-blur-xs sm:backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
             onClick={() => setManualOpen(false)}
           >
             <motion.form
@@ -630,14 +631,15 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
               exit={{ opacity: 0, scale: 0.96 }}
               onClick={(e) => e.stopPropagation()}
               onSubmit={handleManualSubmit}
-              className="w-full max-w-md rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-6 shadow-2xl space-y-4"
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-5 sm:p-6 shadow-2xl space-y-4"
             >
-              <div className="flex items-center justify-between">
-                <h3 className="font-serif text-xl font-bold text-[#22150E]">Nuevo prospecto manual</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-serif text-lg sm:text-xl font-bold text-[#22150E]">Nuevo prospecto manual</h3>
                 <button
                   type="button"
                   onClick={() => setManualOpen(false)}
-                  className="rounded-full p-1 text-[#7B5D4A] hover:bg-[#FAF3E8]"
+                  aria-label="Cerrar modal"
+                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full p-1 text-[#7B5D4A] hover:bg-[#FAF3E8] cursor-pointer"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -650,7 +652,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   value={manualName}
                   onChange={(e) => setManualName(e.target.value)}
                   placeholder="Ej. Laura Gómez"
-                  className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                  className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 />
               </div>
               <div>
@@ -661,7 +663,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   value={manualPhone}
                   onChange={(e) => setManualPhone(e.target.value)}
                   placeholder="Ej. +52 55 1234 5678"
-                  className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                  className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 />
               </div>
               <div>
@@ -671,7 +673,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   value={manualAddress}
                   onChange={(e) => setManualAddress(e.target.value)}
                   placeholder="Ej. Av. Reforma 120, Col. Centro"
-                  className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                  className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 />
               </div>
               <div>
@@ -679,7 +681,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 <select
                   value={manualGiftId}
                   onChange={(e) => setManualGiftId(e.target.value)}
-                  className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                  className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 >
                   {gifts.map((g) => (
                     <option key={g.id} value={g.id}>
@@ -688,17 +690,17 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   ))}
                 </select>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setManualOpen(false)}
-                  className="rounded-full px-4 py-2 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF3E8] cursor-pointer"
+                  className="min-h-[44px] w-full sm:w-auto rounded-full px-4 py-2 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF3E8] cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="rounded-full bg-[#22150E] px-5 py-2 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] cursor-pointer"
+                  className="min-h-[44px] w-full sm:w-auto rounded-full bg-[#22150E] px-5 py-2 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] cursor-pointer"
                 >
                   Guardar prospecto
                 </button>

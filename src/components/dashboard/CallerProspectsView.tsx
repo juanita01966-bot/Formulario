@@ -22,12 +22,12 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
   }, [leads, search]);
 
   return (
-    <section className="rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-4 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
+    <section className="rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-3.5 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-5 border-b border-[#EFE3D2]">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#22150E]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 sm:pb-5 border-b border-[#EFE3D2]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E]">
               Directorio de Clientes
             </h2>
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 border border-amber-300 px-2.5 py-0.5 text-xs font-bold text-amber-900">
@@ -40,7 +40,7 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
           </p>
         </div>
 
-        <div className="text-right">
+        <div className="text-left sm:text-right shrink-0">
           <span className="text-xs font-semibold text-[#8C6D58]">
             Total clientes:{' '}
             <strong className="text-sm font-bold text-[#22150E] tabular-nums">
@@ -59,13 +59,13 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por nombre, teléfono o dirección..."
-            className="w-full rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
+            className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
           />
         </div>
       </div>
 
       {/* Restricted Client List */}
-      <div className="mt-5 space-y-2.5">
+      <div className="mt-4 sm:mt-5 space-y-2.5">
         <AnimatePresence mode="popLayout">
           {filteredLeads.length === 0 ? (
             <motion.div
@@ -93,27 +93,27 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.98 }}
                   transition={{ duration: 0.2 }}
-                  className="rounded-2xl border border-[#DFCBB3] bg-white p-4 hover:border-[#C88A2B]/60 transition-colors shadow-sm"
+                  className="rounded-2xl border border-[#DFCBB3] bg-white p-3.5 sm:p-4 hover:border-[#C88A2B]/60 transition-colors shadow-sm"
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-3 items-start md:items-center">
                     {/* Nombre */}
                     <div className="min-w-0">
                       <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block">
                         Nombre
                       </span>
-                      <p className="text-sm sm:text-base font-bold text-[#22150E] truncate">
+                      <p className="text-sm sm:text-base font-bold text-[#22150E] break-words">
                         {lead.name || 'Sin nombre'}
                       </p>
                     </div>
 
                     {/* Teléfono */}
                     <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block mb-1 md:mb-0">
                         Teléfono
                       </span>
                       <a
                         href={cleanTel ? `tel:${cleanTel}` : undefined}
-                        className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-[#B84A27] hover:underline"
+                        className="inline-flex min-h-[44px] md:min-h-0 items-center gap-2 rounded-xl md:rounded-none border border-[#E6D5BF] md:border-0 bg-[#FAF3E8] md:bg-transparent px-3 md:px-0 py-2 md:py-0 font-mono text-sm font-semibold text-[#B84A27] hover:underline"
                       >
                         <Phone className="h-3.5 w-3.5 shrink-0 text-[#B84A27]" />
                         <span className="tabular-nums">{lead.phone || 'Sin teléfono'}</span>
@@ -125,9 +125,9 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
                       <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block">
                         Dirección
                       </span>
-                      <p className="inline-flex items-start gap-1.5 text-xs sm:text-sm text-[#4E311E]">
+                      <p className="flex items-start gap-1.5 w-full min-w-0 text-xs sm:text-sm text-[#4E311E]">
                         <MapPin className="h-3.5 w-3.5 shrink-0 text-[#9B816E] mt-0.5" />
-                        <span className="truncate">{lead.address || 'Sin dirección registrada'}</span>
+                        <span className="break-words min-w-0">{lead.address || 'Sin dirección registrada'}</span>
                       </p>
                     </div>
                   </div>
