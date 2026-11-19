@@ -66,6 +66,8 @@ export interface Lead {
   orderAmount: number | null;
   notes: string;
   qualification?: LeadQualification | null;
+  promoCodeInvalidated?: boolean;
+  promoCodeInvalidatedAt?: string | null;
   createdAt: string;
 }
 

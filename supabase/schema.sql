@@ -72,8 +72,19 @@ create table if not exists public.leads (
   order_amount numeric,
   notes text not null default '',
   qualification jsonb,
+  promo_code_invalidated boolean not null default false,
+  promo_code_invalidated_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+alter table public.leads add column if not exists promo_code_invalidated boolean not null default false;
+alter table public.leads add column if not exists promo_code_invalidated_at timestamptz;
+
+update public.leads
+set promo_code_invalidated = true,
+    promo_code_invalidated_at = coalesce(promo_code_invalidated_at, called_at, created_at, now())
+where category in ('cita', 'demo', 'orden')
+  and promo_code_invalidated = false;
 
 create index if not exists leads_created_at_idx on public.leads (created_at desc);
 
@@ -202,6 +213,33 @@ end;
 $$;
 
 revoke all on function public.dsb_verify_secret_hash(text, text) from anon, authenticated, public;
+grant execute on function public.dsb_verify_secret_hash(text, text) to service_role;
+
+create or replace function public.dsb_verify_admin_password(
+  p_password text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_auth public.dsb_auth%rowtype;
+begin
+  select * into v_auth
+  from public.dsb_auth
+  where id = 'default' and coalesce(role, 'admin') = 'admin';
+
+  if not found then
+    return false;
+  end if;
+
+  return public.dsb_verify_secret_hash(p_password, v_auth.password_hash);
+end;
+$$;
+
+revoke all on function public.dsb_verify_admin_password(text) from anon, authenticated, public;
+grant execute on function public.dsb_verify_admin_password(text) to service_role;
 
 create or replace function public.dsb_login_step1(
   p_username text,
@@ -626,7 +664,7 @@ values
     '#C88A2B',
     true,
     'Edición Exclusiva',
-    11.1,
+    30,
     1
   ),
   (
@@ -640,7 +678,7 @@ values
     '#8C6E58',
     true,
     'Disponible',
-    11.1,
+    30,
     2
   ),
   (
@@ -654,7 +692,7 @@ values
     '#B84A27',
     true,
     'Alta Demanda',
-    11.1,
+    30,
     3
   ),
   (
@@ -668,7 +706,7 @@ values
     '#8C3B20',
     true,
     'Edición Limitada',
-    11.1,
+    5,
     4
   ),
   (
@@ -682,7 +720,7 @@ values
     '#5B4636',
     true,
     'Disponible',
-    11.1,
+    3,
     5
   ),
   (
@@ -696,7 +734,7 @@ values
     '#C88A2B',
     true,
     'Disponible',
-    11.1,
+    30,
     6
   ),
   (
@@ -710,7 +748,7 @@ values
     '#7C4327',
     true,
     'Disponible',
-    11.1,
+    30,
     7
   ),
   (
@@ -724,7 +762,7 @@ values
     '#A66328',
     true,
     'Disponible',
-    11.1,
+    5,
     8
   ),
   (
@@ -738,7 +776,7 @@ values
     '#4B644A',
     true,
     'Edición Estrella',
-    11.1,
+    10,
     9
   )
 on conflict (id) do update set

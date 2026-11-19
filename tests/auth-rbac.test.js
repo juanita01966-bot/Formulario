@@ -70,7 +70,8 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
             (l) =>
               l.name === 'Cliente Prueba RBAC' ||
               l.name === 'Lead para Borrar' ||
-              l.name === 'Lead Peso Ponderado'
+              l.name === 'Lead Peso Ponderado' ||
+              l.name === 'Lead Invalidation Flow'
           );
           for (const lead of leftoverLeads) {
             await fetch(`${baseUrl}/api/leads/${lead.id}`, {
@@ -1141,6 +1142,18 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
   });
 
   describe('7b. Gift Probability Persistence, Sanitization & RBAC', () => {
+    const EXPECTED_SEEDED_PROBABILITIES = {
+      'gift-utensil-holder': 30,
+      'gift-bowls-3': 30,
+      'gift-utensils-6': 30,
+      'gift-icecream-2': 30,
+      'gift-mugs-2': 30,
+      'gift-bamboo-large': 5,
+      'gift-warmer-pro': 10,
+      'gift-santoku-5': 5,
+      'gift-cleaver-7': 3,
+    };
+
     test('Unauthenticated and Caller PATCH /api/gifts/probabilities are REJECTED (401 / 403)', async () => {
       const unauthRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
         method: 'PATCH',
@@ -1160,13 +1173,13 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
       assert.strictEqual(callerRes.status, 403);
     });
 
-    test('GET /api/state returns seeded probability 11.1 on all 9 gifts and omits gifts for Caller', async () => {
+    test('GET /api/state returns updated seeded probabilities on all 9 gifts and omits gifts for Caller', async () => {
       const publicRes = await fetch(`${baseUrl}/api/state`);
       assert.strictEqual(publicRes.status, 200);
       const publicState = await publicRes.json();
       assert.strictEqual(publicState.gifts.length, 9);
       for (const gift of publicState.gifts) {
-        assert.strictEqual(gift.probability, 11.1);
+        assert.strictEqual(gift.probability, EXPECTED_SEEDED_PROBABILITIES[gift.id]);
       }
 
       const callerRes = await fetch(`${baseUrl}/api/state`, {
@@ -1273,7 +1286,7 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
       }
     });
 
-    test('Admin PATCH /api/gifts/probabilities updates weights in bulk, respects 0-weight in POST /api/leads fallback, and POST /api/gifts/reset restores 11.1', async () => {
+    test('Admin PATCH /api/gifts/probabilities updates weights in bulk, respects 0-weight in POST /api/leads fallback, and POST /api/gifts/reset restores seeded weights', async () => {
       const bulkRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
         method: 'PATCH',
         headers: {
@@ -1324,7 +1337,7 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
         headers: { Authorization: `Bearer ${adminSessionToken}` },
       });
 
-      // Reset catalog back to default 11.1 weights
+      // Reset catalog back to default seeded weights
       const resetRes = await fetch(`${baseUrl}/api/gifts/reset`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${adminSessionToken}` },
@@ -1333,8 +1346,225 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
       const resetData = await resetRes.json();
       assert.strictEqual(resetData.state.gifts.length, 9);
       for (const gift of resetData.state.gifts) {
-        assert.strictEqual(gift.probability, 11.1);
+        assert.strictEqual(gift.probability, EXPECTED_SEEDED_PROBABILITIES[gift.id]);
       }
+    });
+  });
+
+  describe('7c. Anti-Cache Headers & Promo Code Invalidation with Admin-Password-Only Revert', () => {
+    test('GET /api/state and PATCH /api/leads/:id enforce Cache-Control: no-store and Pragma: no-cache', async () => {
+      const stateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(stateRes.status, 200);
+      const cacheControl = stateRes.headers.get('cache-control') || '';
+      assert.match(cacheControl, /no-store/i);
+      assert.match(cacheControl, /no-cache/i);
+      assert.match(cacheControl, /must-revalidate/i);
+      assert.strictEqual(stateRes.headers.get('pragma'), 'no-cache');
+
+      const patchRes = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ notes: 'Verificación no-store' }),
+      });
+      assert.strictEqual(patchRes.status, 200);
+      assert.match(patchRes.headers.get('cache-control') || '', /no-store/i);
+      assert.strictEqual(patchRes.headers.get('pragma'), 'no-cache');
+    });
+
+    test('Category assignment invalidates promo code, forward progression preserves invalidation, and revert/downgrade strictly requires valid Admin password', async () => {
+      const createRes = await fetch(`${baseUrl}/api/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Lead Invalidation Flow',
+          phone: '555-888-9999',
+          address: 'Dallas, TX',
+          claimCode: 'OTN-7788',
+        }),
+      });
+      assert.strictEqual(createRes.status, 201);
+      const created = await createRes.json();
+      const leadId = created.lead.id;
+      assert.strictEqual(created.lead.promoCodeInvalidated, false);
+      assert.strictEqual(created.lead.promoCodeInvalidatedAt, null);
+
+      // Unauthenticated and Caller cannot mutate promoCodeInvalidated
+      const unauthPatch = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promoCodeInvalidated: false }),
+      });
+      assert.strictEqual(unauthPatch.status, 401);
+
+      const callerPatch = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${callerSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ promoCodeInvalidated: false }),
+      });
+      assert.strictEqual(callerPatch.status, 403);
+
+      // Mark called first
+      const calledRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ called: true }),
+      });
+      assert.strictEqual(calledRes.status, 200);
+      const calledData = await calledRes.json();
+      assert.strictEqual(calledData.lead.called, true);
+      assert.strictEqual(calledData.lead.promoCodeInvalidated, false);
+
+      // Assign category 'cita' -> invalidates promo code
+      const citaRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'cita' }),
+      });
+      assert.strictEqual(citaRes.status, 200);
+      const citaData = await citaRes.json();
+      assert.strictEqual(citaData.lead.category, 'cita');
+      assert.strictEqual(citaData.lead.promoCodeInvalidated, true);
+      assert.strictEqual(typeof citaData.lead.promoCodeInvalidatedAt, 'string');
+      const invalidatedTimestamp = citaData.lead.promoCodeInvalidatedAt;
+
+      // Forward progression 'cita' -> 'demo' -> 'orden' works without adminPassword and preserves invalidation
+      const demoRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'demo' }),
+      });
+      assert.strictEqual(demoRes.status, 200);
+      const demoData = await demoRes.json();
+      assert.strictEqual(demoData.lead.category, 'demo');
+      assert.strictEqual(demoData.lead.promoCodeInvalidated, true);
+      assert.strictEqual(demoData.lead.promoCodeInvalidatedAt, invalidatedTimestamp);
+
+      const ordenRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'orden', orderAmount: 2792 }),
+      });
+      assert.strictEqual(ordenRes.status, 200);
+      const ordenData = await ordenRes.json();
+      assert.strictEqual(ordenData.lead.category, 'orden');
+      assert.strictEqual(ordenData.lead.orderAmount, 2792);
+      assert.strictEqual(ordenData.lead.promoCodeInvalidated, true);
+
+      // Revert / downgrade / uninvalidate / called:false WITHOUT or WITH WRONG adminPassword MUST return 403
+      const protectedPayloads = [
+        { category: 'none' },
+        { category: 'none', adminPassword: 'WrongPassword!' },
+        { promoCodeInvalidated: false },
+        { promoCodeInvalidated: false, adminPassword: 'WrongPassword!' },
+        { category: 'demo' },
+        { category: 'cita', adminPassword: 'WrongPassword!' },
+        { called: false },
+      ];
+      for (const body of protectedPayloads) {
+        const blockedRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        assert.strictEqual(
+          blockedRes.status,
+          403,
+          `Expected 403 for protected revert/downgrade payload: ${JSON.stringify(body)}`
+        );
+      }
+
+      // Downgrade 'orden' -> 'demo' WITH valid Admin password succeeds while keeping code invalidated
+      const downgradeOkRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          category: 'demo',
+          adminPassword: 'AdminMaster2026@',
+        }),
+      });
+      assert.strictEqual(downgradeOkRes.status, 200);
+      const downgradeOkData = await downgradeOkRes.json();
+      assert.strictEqual(downgradeOkData.lead.category, 'demo');
+      assert.strictEqual(downgradeOkData.lead.orderAmount, null);
+      assert.strictEqual(downgradeOkData.lead.promoCodeInvalidated, true);
+
+      // Full revert to 'none' & promoCodeInvalidated: false WITH valid Admin password succeeds
+      const revertOkRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          category: 'none',
+          promoCodeInvalidated: false,
+          adminPassword: 'AdminMaster2026@',
+        }),
+      });
+      assert.strictEqual(revertOkRes.status, 200);
+      const revertOkData = await revertOkRes.json();
+      assert.strictEqual(revertOkData.lead.category, 'none');
+      assert.strictEqual(revertOkData.lead.promoCodeInvalidated, false);
+      assert.strictEqual(revertOkData.lead.promoCodeInvalidatedAt, null);
+      assert.strictEqual(revertOkData.lead.orderAmount, null);
+
+      // Assign 'orden' again and revert solely via { promoCodeInvalidated: false, adminPassword }
+      await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'orden', orderAmount: 3100 }),
+      });
+      const reactivateRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          promoCodeInvalidated: false,
+          adminPassword: 'AdminMaster2026@',
+        }),
+      });
+      assert.strictEqual(reactivateRes.status, 200);
+      const reactivateData = await reactivateRes.json();
+      assert.strictEqual(reactivateData.lead.category, 'none');
+      assert.strictEqual(reactivateData.lead.promoCodeInvalidated, false);
+      assert.strictEqual(reactivateData.lead.promoCodeInvalidatedAt, null);
+      assert.strictEqual(reactivateData.lead.orderAmount, null);
+
+      await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
     });
   });
 

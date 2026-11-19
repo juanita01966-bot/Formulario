@@ -28,7 +28,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#C88A2B',
       active: true,
       stockLabel: 'Edición Exclusiva',
-      probability: 11.1,
+      probability: 30,
     },
     {
       id: 'gift-utensil-holder',
@@ -41,7 +41,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#8C6E58',
       active: true,
       stockLabel: 'Disponible',
-      probability: 11.1,
+      probability: 30,
     },
     {
       id: 'gift-bowls-3',
@@ -54,7 +54,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#B84A27',
       active: true,
       stockLabel: 'Alta Demanda',
-      probability: 11.1,
+      probability: 30,
     },
     {
       id: 'gift-santoku-5',
@@ -67,7 +67,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#8C3B20',
       active: true,
       stockLabel: 'Edición Limitada',
-      probability: 11.1,
+      probability: 5,
     },
     {
       id: 'gift-cleaver-7',
@@ -80,7 +80,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#5B4636',
       active: true,
       stockLabel: 'Disponible',
-      probability: 11.1,
+      probability: 3,
     },
     {
       id: 'gift-icecream-2',
@@ -93,7 +93,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#C88A2B',
       active: true,
       stockLabel: 'Disponible',
-      probability: 11.1,
+      probability: 30,
     },
     {
       id: 'gift-mugs-2',
@@ -106,7 +106,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#7C4327',
       active: true,
       stockLabel: 'Disponible',
-      probability: 11.1,
+      probability: 30,
     },
     {
       id: 'gift-bamboo-large',
@@ -119,7 +119,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#A66328',
       active: true,
       stockLabel: 'Disponible',
-      probability: 11.1,
+      probability: 5,
     },
     {
       id: 'gift-warmer-pro',
@@ -132,7 +132,7 @@ const BUNDLED_DEFAULT_STORE = {
       accentColor: '#4B644A',
       active: true,
       stockLabel: 'Edición Estrella',
-      probability: 11.1,
+      probability: 10,
     },
   ],
   leads: [],
@@ -463,6 +463,120 @@ function clearAttempts(key) {
 }
 
 const DEFAULT_GIFT_PROBABILITY = 10;
+const CATEGORY_RANK = { none: 0, cita: 1, demo: 2, orden: 3 };
+
+function applyNoStoreHeaders(res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+}
+
+function normalizeLeadRecord(lead) {
+  if (!lead || typeof lead !== 'object') return lead;
+  const category = VALID_CATEGORIES.has(lead.category) ? lead.category : 'none';
+  const promoCodeInvalidated =
+    typeof lead.promoCodeInvalidated === 'boolean'
+      ? lead.promoCodeInvalidated || category !== 'none'
+      : category !== 'none';
+  const promoCodeInvalidatedAt = promoCodeInvalidated
+    ? lead.promoCodeInvalidatedAt ?? lead.calledAt ?? lead.createdAt ?? null
+    : null;
+  return {
+    ...lead,
+    category,
+    promoCodeInvalidated,
+    promoCodeInvalidatedAt,
+  };
+}
+
+function verifySha256StoredHash(plain, storedHash) {
+  if (typeof plain !== 'string' || typeof storedHash !== 'string' || !storedHash.startsWith('sha256$')) {
+    return false;
+  }
+  const parts = storedHash.split('$');
+  if (parts.length !== 3) return false;
+  const [, salt, expectedHex] = parts;
+  if (!salt || !expectedHex) return false;
+  const actualHex = crypto.createHash('sha256').update(`${salt}:${plain}`, 'utf8').digest('hex');
+  try {
+    const actualBuf = Buffer.from(actualHex, 'hex');
+    const expectedBuf = Buffer.from(expectedHex, 'hex');
+    if (actualBuf.length !== expectedBuf.length || actualBuf.length === 0) return false;
+    return crypto.timingSafeEqual(actualBuf, expectedBuf);
+  } catch {
+    return false;
+  }
+}
+
+function verifyLocalAdminPassword(candidate) {
+  if (typeof candidate !== 'string' || !candidate) return false;
+  const auth = ensureAuthStore();
+  if (auth.passwordSalt && auth.passwordHash) {
+    if (verifySecretConstantTime(candidate, auth.passwordSalt, auth.passwordHash)) {
+      return true;
+    }
+  }
+  const users = getUsersList(auth);
+  const adminFromList = users.find((u) => (u.role || 'admin') === 'admin');
+  if (
+    adminFromList &&
+    (adminFromList.passwordSalt !== auth.passwordSalt || adminFromList.passwordHash !== auth.passwordHash)
+  ) {
+    return verifySecretConstantTime(candidate, adminFromList.passwordSalt, adminFromList.passwordHash);
+  }
+  return false;
+}
+
+async function verifyAdminPassword(candidate) {
+  if (typeof candidate !== 'string' || !candidate) return false;
+  if (!IS_TESTING && USE_SUPABASE) {
+    try {
+      const verified = await supabaseRpc('dsb_verify_admin_password', { p_password: candidate });
+      if (typeof verified === 'boolean') {
+        return verified;
+      }
+    } catch {
+      // RPC may not be deployed yet; continue to dsb_auth lookup / RPC fallback
+    }
+
+    try {
+      const rows = await supabaseRest(
+        'dsb_auth?id=eq.default&select=id,username,role,password_hash&limit=1'
+      );
+      const adminRow = Array.isArray(rows) ? rows[0] : null;
+      if (adminRow && (adminRow.role || 'admin') === 'admin' && adminRow.password_hash) {
+        if (String(adminRow.password_hash).startsWith('sha256$')) {
+          return verifySha256StoredHash(candidate, adminRow.password_hash);
+        }
+        try {
+          const verified = await supabaseRpc('dsb_verify_secret_hash', {
+            p_plain: candidate,
+            p_stored_hash: adminRow.password_hash,
+          });
+          if (typeof verified === 'boolean') {
+            return verified;
+          }
+        } catch {
+          try {
+            const step1 = await supabaseRpc('dsb_login_step1', {
+              p_username: adminRow.username || 'AdminCiprian',
+              p_password: candidate,
+            });
+            if (typeof step1?.ok === 'boolean') {
+              return step1.ok;
+            }
+          } catch {
+            // Fall back to local verification below
+          }
+        }
+      }
+    } catch {
+      // Fall back to local verification below
+    }
+  }
+
+  return verifyLocalAdminPassword(candidate);
+}
 
 function sanitizeGiftProbability(value, fallback = DEFAULT_GIFT_PROBABILITY) {
   if (
@@ -541,7 +655,7 @@ function readDefaultStore() {
             typeof parsed.settings?.randomizeGifts === 'boolean' ? parsed.settings.randomizeGifts : true,
         },
         gifts: Array.isArray(parsed.gifts)
-          ? parsed.gifts.map((g) => normalizeGiftRecord(g, 11.1))
+          ? parsed.gifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY))
           : BUNDLED_DEFAULT_STORE.gifts,
       };
     } catch {
@@ -576,7 +690,7 @@ function ensureStore() {
     return {
       settings: mergedSettings,
       gifts: rawGifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY)),
-      leads: Array.isArray(parsed.leads) ? parsed.leads : defaults.leads,
+      leads: Array.isArray(parsed.leads) ? parsed.leads.map(normalizeLeadRecord) : defaults.leads,
       qrHistory: Array.isArray(parsed.qrHistory) ? parsed.qrHistory : defaults.qrHistory || [],
     };
   } catch {
@@ -631,6 +745,7 @@ function isMissingQrTableError(err) {
 let memoryQrFallback = null;
 const memoryGiftUsageTips = new Map();
 const memoryGiftProbabilities = new Map();
+const memoryLeadPromoStates = new Map();
 const memorySettingsFallback = {};
 
 function isMissingColumnError(err, columnNames = []) {
@@ -836,6 +951,20 @@ function mapGiftRow(row) {
 }
 
 function mapLeadRow(row) {
+  const category = VALID_CATEGORIES.has(row.category) ? row.category : 'none';
+  const memPromo = memoryLeadPromoStates.get(row.id);
+  const hasColInvalidated = typeof row.promo_code_invalidated === 'boolean';
+  const promoCodeInvalidated = hasColInvalidated
+    ? row.promo_code_invalidated || category !== 'none'
+    : memPromo !== undefined
+      ? Boolean(memPromo.promoCodeInvalidated) || category !== 'none'
+      : Boolean(category && category !== 'none');
+  const promoCodeInvalidatedAt = promoCodeInvalidated
+    ? row.promo_code_invalidated_at ??
+      (memPromo ? memPromo.promoCodeInvalidatedAt : null) ??
+      (category !== 'none' ? row.called_at ?? row.created_at ?? null : null)
+    : null;
+
   return {
     id: row.id,
     name: row.name,
@@ -848,11 +977,13 @@ function mapLeadRow(row) {
     claimCode: row.claim_code,
     called: Boolean(row.called),
     calledAt: row.called_at ?? null,
-    category: VALID_CATEGORIES.has(row.category) ? row.category : 'none',
+    category,
     orderAmount:
       row.order_amount !== null && row.order_amount !== undefined ? Number(row.order_amount) : null,
     notes: row.notes || '',
     qualification: row.qualification ?? null,
+    promoCodeInvalidated,
+    promoCodeInvalidatedAt,
     createdAt: row.created_at,
   };
 }
@@ -898,7 +1029,7 @@ async function fetchSupabaseStore() {
     gifts:
       Array.isArray(giftRows) && giftRows.length > 0
         ? giftRows.map(mapGiftRow)
-        : defaults.gifts.map((g) => normalizeGiftRecord(g, 11.1)),
+        : defaults.gifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY)),
     leads: Array.isArray(leadRows) ? leadRows.map(mapLeadRow) : [],
     qrHistory: qrTableMissing
       ? getFallbackQrHistory()
@@ -990,6 +1121,10 @@ function sanitizeStateForClient(store, isAuthed, role) {
     };
   }
 
+  const normalizedLeads = Array.isArray(store.leads)
+    ? store.leads.map(normalizeLeadRecord)
+    : [];
+
   return {
     settings: {
       ...store.settings,
@@ -997,7 +1132,7 @@ function sanitizeStateForClient(store, isAuthed, role) {
       pinCode: '',
     },
     gifts: normalizedGifts,
-    leads: store.leads || [],
+    leads: normalizedLeads,
     qrHistory: isAuthed && role === 'admin' && Array.isArray(store.qrHistory) ? store.qrHistory : [],
     role: 'admin',
   };
@@ -1028,8 +1163,7 @@ app.use((_req, res, next) => {
 });
 
 app.use('/api', (_req, res, next) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
+  applyNoStoreHeaders(res);
   next();
 });
 
@@ -1381,6 +1515,20 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
     auth.pinHash = nextPin.hash;
   }
 
+  if (Array.isArray(auth.users)) {
+    const adminIdx = auth.users.findIndex((u) => (u.role || 'admin') === 'admin');
+    if (adminIdx !== -1) {
+      auth.users[adminIdx] = {
+        ...auth.users[adminIdx],
+        username: auth.username,
+        passwordSalt: auth.passwordSalt,
+        passwordHash: auth.passwordHash,
+        pinSalt: auth.pinSalt,
+        pinHash: auth.pinHash,
+      };
+    }
+  }
+
   auth.updatedAt = new Date().toISOString();
   writeAuthStore(auth);
 
@@ -1426,123 +1574,128 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
   clearAttempts(bucketKey);
   const shouldResetCatalog = resetCatalogAndSettings !== false;
 
-  try {
-    const defaults = readDefaultStore();
-    memoryQrFallback = [];
+  return withStoreMutationLock(async () => {
+    try {
+      applyNoStoreHeaders(res);
+      const defaults = readDefaultStore();
+      memoryQrFallback = [];
+      memoryLeadPromoStates.clear();
 
-    if (USE_SUPABASE) {
-      await supabaseRest('leads?id=not.is.null', { method: 'DELETE' });
-      await supabaseRest('qr_codes?id=not.is.null', { method: 'DELETE' }).catch((err) => {
-        if (!isMissingQrTableError(err)) throw err;
-      });
-
-      if (shouldResetCatalog) {
-        memoryGiftUsageTips.clear();
-        memoryGiftProbabilities.clear();
-        const giftRows = defaults.gifts.map((gift, idx) => {
-          const probability = sanitizeGiftProbability(gift.probability, 11.1);
-          memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
-          memoryGiftProbabilities.set(gift.id, probability);
-          return {
-            id: gift.id,
-            name: gift.name,
-            subtitle: gift.subtitle,
-            usage_tip: gift.usageTip || '',
-            tag: gift.tag,
-            visual_key: gift.visualKey,
-            custom_image_url: gift.customImageUrl || null,
-            accent_color: gift.accentColor,
-            active: gift.active,
-            stock_label: gift.stockLabel,
-            probability,
-            sort_order: idx + 1,
-          };
-        });
-        await supabaseWriteWithOptionalColumns(
-          'gifts',
-          'POST',
-          { Prefer: 'resolution=merge-duplicates,return=minimal' },
-          giftRows,
-          ['usage_tip', 'probability']
-        );
-        const defaultIds = defaults.gifts.map((g) => `"${g.id}"`).join(',');
-        await supabaseRest(`gifts?id=not.in.(${encodeURIComponent(defaultIds)})`, {
-          method: 'DELETE',
+      if (USE_SUPABASE) {
+        await supabaseRest('leads?id=not.is.null', { method: 'DELETE' });
+        await supabaseRest('qr_codes?id=not.is.null', { method: 'DELETE' }).catch((err) => {
+          if (!isMissingQrTableError(err)) throw err;
         });
 
-        Object.assign(memorySettingsFallback, {
-          showcaseStyle: defaults.settings.showcaseStyle || 'luminous-gold',
-          randomizeGifts:
-            typeof defaults.settings.randomizeGifts === 'boolean'
-              ? defaults.settings.randomizeGifts
-              : true,
-        });
-        await supabaseWriteWithOptionalColumns(
-          'app_settings',
-          'PATCH',
-          { Prefer: 'return=minimal' },
-          {
-            advisor_name: defaults.settings.advisorName,
-            host_title: defaults.settings.hostTitle,
-            brand_subtitle: defaults.settings.brandSubtitle,
-            default_ticket_amount: defaults.settings.defaultTicketAmount,
-            require_pin: defaults.settings.requirePin,
-            pin_code: defaults.settings.pinCode,
-            gift_theme: defaults.settings.giftTheme || 'autumn',
-            custom_box_color: defaults.settings.customBoxColor || '#C88A2B',
-            showcase_style: defaults.settings.showcaseStyle || 'luminous-gold',
-            randomize_gifts:
+        if (shouldResetCatalog) {
+          memoryGiftUsageTips.clear();
+          memoryGiftProbabilities.clear();
+          const giftRows = defaults.gifts.map((gift, idx) => {
+            const probability = sanitizeGiftProbability(gift.probability, DEFAULT_GIFT_PROBABILITY);
+            memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
+            memoryGiftProbabilities.set(gift.id, probability);
+            return {
+              id: gift.id,
+              name: gift.name,
+              subtitle: gift.subtitle,
+              usage_tip: gift.usageTip || '',
+              tag: gift.tag,
+              visual_key: gift.visualKey,
+              custom_image_url: gift.customImageUrl || null,
+              accent_color: gift.accentColor,
+              active: gift.active,
+              stock_label: gift.stockLabel,
+              probability,
+              sort_order: idx + 1,
+            };
+          });
+          await supabaseWriteWithOptionalColumns(
+            'gifts',
+            'POST',
+            { Prefer: 'resolution=merge-duplicates,return=minimal' },
+            giftRows,
+            ['usage_tip', 'probability']
+          );
+          const defaultIds = defaults.gifts.map((g) => `"${g.id}"`).join(',');
+          await supabaseRest(`gifts?id=not.in.(${encodeURIComponent(defaultIds)})`, {
+            method: 'DELETE',
+          });
+
+          Object.assign(memorySettingsFallback, {
+            showcaseStyle: defaults.settings.showcaseStyle || 'luminous-gold',
+            randomizeGifts:
               typeof defaults.settings.randomizeGifts === 'boolean'
                 ? defaults.settings.randomizeGifts
                 : true,
-            updated_at: new Date().toISOString(),
-          },
-          ['showcase_style', 'randomize_gifts']
-        );
-      }
-
-      if (!IS_VERCEL) {
-        const local = ensureStore();
-        local.leads = [];
-        local.qrHistory = [];
-        if (shouldResetCatalog) {
-          local.gifts = defaults.gifts;
-          local.settings = { ...defaults.settings };
+          });
+          await supabaseWriteWithOptionalColumns(
+            'app_settings',
+            'PATCH',
+            { Prefer: 'return=minimal' },
+            {
+              advisor_name: defaults.settings.advisorName,
+              host_title: defaults.settings.hostTitle,
+              brand_subtitle: defaults.settings.brandSubtitle,
+              default_ticket_amount: defaults.settings.defaultTicketAmount,
+              require_pin: defaults.settings.requirePin,
+              pin_code: defaults.settings.pinCode,
+              gift_theme: defaults.settings.giftTheme || 'autumn',
+              custom_box_color: defaults.settings.customBoxColor || '#C88A2B',
+              showcase_style: defaults.settings.showcaseStyle || 'luminous-gold',
+              randomize_gifts:
+                typeof defaults.settings.randomizeGifts === 'boolean'
+                  ? defaults.settings.randomizeGifts
+                  : true,
+              updated_at: new Date().toISOString(),
+            },
+            ['showcase_style', 'randomize_gifts']
+          );
         }
-        writeStore(local);
+
+        if (!IS_VERCEL) {
+          const local = ensureStore();
+          local.leads = [];
+          local.qrHistory = [];
+          if (shouldResetCatalog) {
+            local.gifts = defaults.gifts;
+            local.settings = { ...defaults.settings };
+          }
+          writeStore(local);
+        }
+
+        const updatedStore = await getActiveStore();
+        return res.json({
+          ok: true,
+          state: sanitizeStateForClient(updatedStore, true, 'admin'),
+          message: 'Todas las métricas y datos fueron reiniciados a 0.',
+        });
       }
 
-      const updatedStore = await getActiveStore();
+      const store = ensureStore();
+      store.leads = [];
+      store.qrHistory = [];
+      if (shouldResetCatalog) {
+        store.gifts = defaults.gifts;
+        store.settings = { ...defaults.settings };
+      }
+      writeStore(store);
+
       return res.json({
         ok: true,
-        state: sanitizeStateForClient(updatedStore, true, 'admin'),
+        state: sanitizeStateForClient(store, true, 'admin'),
         message: 'Todas las métricas y datos fueron reiniciados a 0.',
       });
+    } catch {
+      return res.status(503).json({
+        error: 'No se pudo completar el reinicio general. Intenta de nuevo.',
+      });
     }
-
-    const store = ensureStore();
-    store.leads = [];
-    store.qrHistory = [];
-    if (shouldResetCatalog) {
-      store.gifts = defaults.gifts;
-      store.settings = { ...defaults.settings };
-    }
-    writeStore(store);
-
-    return res.json({
-      ok: true,
-      state: sanitizeStateForClient(store, true, 'admin'),
-      message: 'Todas las métricas y datos fueron reiniciados a 0.',
-    });
-  } catch {
-    return res.status(503).json({
-      error: 'No se pudo completar el reinicio general. Intenta de nuevo.',
-    });
-  }
+  });
 });
 
 // State read: NEVER exposes leads or PIN without valid DSB session token
 app.get('/api/state', async (req, res) => {
+  applyNoStoreHeaders(res);
   try {
     const session = getAuthenticatedSession(req);
     const isAuthed = Boolean(session);
@@ -1556,6 +1709,7 @@ app.get('/api/state', async (req, res) => {
 
 // Public + DSB lead creation
 app.post('/api/leads', async (req, res) => {
+  applyNoStoreHeaders(res);
   const session = getAuthenticatedSession(req);
   if (session && session.role !== 'admin') {
     return res.status(403).json({ error: 'Acceso denegado. Permisos administrativos requeridos.' });
@@ -1575,84 +1729,97 @@ app.post('/api/leads', async (req, res) => {
     return res.status(400).json({ error: 'Ingresa un número de teléfono válido.' });
   }
 
-  try {
-    const isAuthed = Boolean(session);
-    const role = session ? (session.role || 'admin') : null;
-    const store = await getActiveStore();
-    const activeGifts = store.gifts.filter((g) => g.active);
-    const chosenGift =
-      store.gifts.find((g) => g.id === giftId) ||
-      (activeGifts.length > 0 ? pickWeightedGift(activeGifts) : null) ||
-      store.gifts[0] ||
-      null;
+  return withStoreMutationLock(async () => {
+    try {
+      const isAuthed = Boolean(session);
+      const role = session ? (session.role || 'admin') : null;
+      const store = await getActiveStore();
+      const activeGifts = store.gifts.filter((g) => g.active);
+      const chosenGift =
+        store.gifts.find((g) => g.id === giftId) ||
+        (activeGifts.length > 0 ? pickWeightedGift(activeGifts) : null) ||
+        store.gifts[0] ||
+        null;
 
-    const newLead = {
-      id: generateId('lead'),
-      name: cleanName,
-      phone: cleanPhone,
-      address: cleanAddress,
-      acceptedTerms: Boolean(acceptedTerms),
-      giftId: chosenGift ? chosenGift.id : giftId || null,
-      giftName: chosenGift ? chosenGift.name : giftName || null,
-      giftVisualKey: chosenGift ? chosenGift.visualKey : giftVisualKey || null,
-      claimCode: typeof claimCode === 'string' && claimCode.trim() ? claimCode.trim() : generateClaimCode(),
-      called: false,
-      calledAt: null,
-      category: 'none',
-      orderAmount: null,
-      notes: isAuthed && typeof notes === 'string' ? notes.trim() : '',
-      qualification: qualification && typeof qualification === 'object' ? qualification : null,
-      createdAt: new Date().toISOString(),
-    };
+      const newLead = {
+        id: generateId('lead'),
+        name: cleanName,
+        phone: cleanPhone,
+        address: cleanAddress,
+        acceptedTerms: Boolean(acceptedTerms),
+        giftId: chosenGift ? chosenGift.id : giftId || null,
+        giftName: chosenGift ? chosenGift.name : giftName || null,
+        giftVisualKey: chosenGift ? chosenGift.visualKey : giftVisualKey || null,
+        claimCode: typeof claimCode === 'string' && claimCode.trim() ? claimCode.trim() : generateClaimCode(),
+        called: false,
+        calledAt: null,
+        category: 'none',
+        orderAmount: null,
+        notes: isAuthed && typeof notes === 'string' ? notes.trim() : '',
+        qualification: qualification && typeof qualification === 'object' ? qualification : null,
+        promoCodeInvalidated: false,
+        promoCodeInvalidatedAt: null,
+        createdAt: new Date().toISOString(),
+      };
 
-    if (USE_SUPABASE) {
-      await supabaseRest('leads', {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          id: newLead.id,
-          name: newLead.name,
-          phone: newLead.phone,
-          address: newLead.address,
-          accepted_terms: newLead.acceptedTerms,
-          gift_id: newLead.giftId,
-          gift_name: newLead.giftName,
-          gift_visual_key: newLead.giftVisualKey,
-          claim_code: newLead.claimCode,
-          called: false,
-          called_at: null,
-          category: 'none',
-          order_amount: null,
-          notes: newLead.notes,
-          qualification: newLead.qualification,
-          created_at: newLead.createdAt,
-        }),
-      });
-      const updatedStore = await getActiveStore();
+      if (USE_SUPABASE) {
+        memoryLeadPromoStates.set(newLead.id, {
+          promoCodeInvalidated: false,
+          promoCodeInvalidatedAt: null,
+        });
+        await supabaseWriteWithOptionalColumns(
+          'leads',
+          'POST',
+          { Prefer: 'return=minimal' },
+          {
+            id: newLead.id,
+            name: newLead.name,
+            phone: newLead.phone,
+            address: newLead.address,
+            accepted_terms: newLead.acceptedTerms,
+            gift_id: newLead.giftId,
+            gift_name: newLead.giftName,
+            gift_visual_key: newLead.giftVisualKey,
+            claim_code: newLead.claimCode,
+            called: false,
+            called_at: null,
+            category: 'none',
+            order_amount: null,
+            notes: newLead.notes,
+            qualification: newLead.qualification,
+            promo_code_invalidated: false,
+            promo_code_invalidated_at: null,
+            created_at: newLead.createdAt,
+          },
+          ['promo_code_invalidated', 'promo_code_invalidated_at']
+        );
+        const updatedStore = await getActiveStore();
+        return res.status(201).json({
+          lead: newLead,
+          state: isAuthed
+            ? sanitizeStateForClient(updatedStore, true, role)
+            : { ...sanitizeStateForClient(updatedStore, false, null), leads: [newLead] },
+        });
+      }
+
+      store.leads.unshift(newLead);
+      writeStore(store);
+
       return res.status(201).json({
         lead: newLead,
         state: isAuthed
-          ? sanitizeStateForClient(updatedStore, true, role)
-          : { ...sanitizeStateForClient(updatedStore, false, null), leads: [newLead] },
+          ? sanitizeStateForClient(store, true, role)
+          : { ...sanitizeStateForClient(store, false, null), leads: [newLead] },
       });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo registrar el prospecto.' });
     }
-
-    store.leads.unshift(newLead);
-    writeStore(store);
-
-    return res.status(201).json({
-      lead: newLead,
-      state: isAuthed
-        ? sanitizeStateForClient(store, true, role)
-        : { ...sanitizeStateForClient(store, false, null), leads: [newLead] },
-    });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo registrar el prospecto.' });
-  }
+  });
 });
 
 // Lead update: public flow can only update qualification & chosen gift; admin fields require DSB auth
 app.patch('/api/leads/:id', async (req, res) => {
+  applyNoStoreHeaders(res);
   const { id } = req.params;
   const session = getAuthenticatedSession(req);
   const isAuthed = Boolean(session);
@@ -1668,7 +1835,10 @@ app.patch('/api/leads/:id', async (req, res) => {
     updates.name !== undefined ||
     updates.phone !== undefined ||
     updates.address !== undefined ||
-    updates.claimCode !== undefined;
+    updates.claimCode !== undefined ||
+    updates.promoCodeInvalidated !== undefined ||
+    updates.promoCodeInvalidatedAt !== undefined ||
+    updates.adminPassword !== undefined;
 
   if (session && session.role !== 'admin') {
     return res.status(403).json({ error: 'Acceso denegado. Permisos administrativos requeridos.' });
@@ -1678,157 +1848,227 @@ app.patch('/api/leads/:id', async (req, res) => {
     return res.status(401).json({ error: 'Acceso no autorizado para editar datos administrativos.' });
   }
 
-  try {
-    const store = await getActiveStore();
-    const index = store.leads.findIndex((item) => item.id === id);
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const index = store.leads.findIndex((item) => item.id === id);
 
-    if (index === -1) {
-      return res.status(404).json({ error: 'Prospecto no encontrado.' });
-    }
+      if (index === -1) {
+        return res.status(404).json({ error: 'Prospecto no encontrado.' });
+      }
 
-    const current = store.leads[index];
-    const next = { ...current };
+      const current = normalizeLeadRecord(store.leads[index]);
+      const currentCategory = current.category;
+      const currentInvalidated = Boolean(current.promoCodeInvalidated);
 
-    if (isAuthed) {
-      if (typeof updates.name === 'string' && updates.name.trim()) {
-        next.name = updates.name.trim();
+      if (isAuthed) {
+        const hasCategoryUpdate =
+          typeof updates.category === 'string' && VALID_CATEGORIES.has(updates.category);
+        const requestedCategory = hasCategoryUpdate ? updates.category : currentCategory;
+        const explicitUninvalidate = updates.promoCodeInvalidated === false;
+        const explicitCalledFalse = updates.called === false;
+        const effectiveTargetCategory =
+          explicitUninvalidate || explicitCalledFalse ? 'none' : requestedCategory;
+
+        const isExistingProtected = currentCategory !== 'none' || currentInvalidated;
+        const isCategoryDowngradeOrRevert =
+          CATEGORY_RANK[effectiveTargetCategory] < CATEGORY_RANK[currentCategory];
+        const requiresAdminPassword =
+          isExistingProtected &&
+          (explicitUninvalidate || explicitCalledFalse || isCategoryDowngradeOrRevert);
+
+        if (requiresAdminPassword) {
+          const candidatePassword =
+            typeof updates.adminPassword === 'string' ? updates.adminPassword : '';
+          if (!candidatePassword) {
+            return res.status(403).json({
+              error:
+                'Se requiere la contraseña de administrador para revertir o degradar la categoría y reactivar el código.',
+            });
+          }
+          const passwordOk = await verifyAdminPassword(candidatePassword);
+          if (!passwordOk) {
+            return res.status(403).json({
+              error:
+                'Contraseña de administrador incorrecta. No se modificó la categoría ni el código de promoción.',
+            });
+          }
+        }
       }
-      if (typeof updates.phone === 'string' && updates.phone.trim()) {
-        next.phone = updates.phone.trim();
-      }
-      if (typeof updates.address === 'string') {
-        next.address = updates.address.trim();
-      }
-      if (typeof updates.notes === 'string') {
-        next.notes = updates.notes;
-      }
-      if (typeof updates.claimCode === 'string' && updates.claimCode.trim()) {
-        next.claimCode = updates.claimCode.trim();
-      }
-      if (typeof updates.called === 'boolean') {
-        next.called = updates.called;
-        next.calledAt = updates.called ? updates.calledAt || new Date().toISOString() : null;
-        if (!updates.called) {
+
+      const next = { ...current };
+      const nowIso = new Date().toISOString();
+
+      if (isAuthed) {
+        if (typeof updates.name === 'string' && updates.name.trim()) {
+          next.name = updates.name.trim();
+        }
+        if (typeof updates.phone === 'string' && updates.phone.trim()) {
+          next.phone = updates.phone.trim();
+        }
+        if (typeof updates.address === 'string') {
+          next.address = updates.address.trim();
+        }
+        if (typeof updates.notes === 'string') {
+          next.notes = updates.notes;
+        }
+        if (typeof updates.claimCode === 'string' && updates.claimCode.trim()) {
+          next.claimCode = updates.claimCode.trim();
+        }
+        if (typeof updates.called === 'boolean') {
+          next.called = updates.called;
+          next.calledAt = updates.called ? updates.calledAt || nowIso : null;
+          if (!updates.called) {
+            next.category = 'none';
+            next.orderAmount = null;
+            next.promoCodeInvalidated = false;
+            next.promoCodeInvalidatedAt = null;
+          }
+        }
+
+        if (updates.promoCodeInvalidated === false || updates.category === 'none') {
           next.category = 'none';
           next.orderAmount = null;
+          next.promoCodeInvalidated = false;
+          next.promoCodeInvalidatedAt = null;
+        } else if (typeof updates.category === 'string' && VALID_CATEGORIES.has(updates.category)) {
+          if (updates.category !== 'none' && !next.called) {
+            return res
+              .status(400)
+              .json({ error: 'Debes marcar al prospecto como llamado antes de clasificarlo.' });
+          }
+          next.category = updates.category;
+          next.promoCodeInvalidated = true;
+          next.promoCodeInvalidatedAt = current.promoCodeInvalidatedAt || nowIso;
+          if (updates.category === 'orden') {
+            const parsedAmount =
+              typeof updates.orderAmount === 'number' &&
+              Number.isFinite(updates.orderAmount) &&
+              updates.orderAmount > 0
+                ? updates.orderAmount
+                : next.orderAmount ?? store.settings.defaultTicketAmount;
+            next.orderAmount = parsedAmount;
+          } else {
+            next.orderAmount = null;
+          }
+        } else if (updates.orderAmount !== undefined && next.category === 'orden') {
+          const parsedAmount = Number(updates.orderAmount);
+          if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
+            next.orderAmount = parsedAmount;
+          }
+        } else if (updates.promoCodeInvalidated === true) {
+          next.promoCodeInvalidated = true;
+          next.promoCodeInvalidatedAt = current.promoCodeInvalidatedAt || nowIso;
         }
       }
-      if (typeof updates.category === 'string' && VALID_CATEGORIES.has(updates.category)) {
-        if (updates.category !== 'none' && !next.called) {
-          return res.status(400).json({ error: 'Debes marcar al prospecto como llamado antes de clasificarlo.' });
-        }
-        next.category = updates.category;
-        if (updates.category === 'orden') {
-          const parsedAmount =
-            typeof updates.orderAmount === 'number' && Number.isFinite(updates.orderAmount) && updates.orderAmount > 0
-              ? updates.orderAmount
-              : next.orderAmount ?? store.settings.defaultTicketAmount;
-          next.orderAmount = parsedAmount;
-        } else {
-          next.orderAmount = null;
-        }
-      } else if (updates.orderAmount !== undefined && next.category === 'orden') {
-        const parsedAmount = Number(updates.orderAmount);
-        if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
-          next.orderAmount = parsedAmount;
-        }
+
+      if (typeof updates.giftId === 'string') {
+        next.giftId = updates.giftId;
       }
-    }
+      if (typeof updates.giftName === 'string') {
+        next.giftName = updates.giftName;
+      }
+      if (typeof updates.giftVisualKey === 'string' && VALID_VISUAL_KEYS.has(updates.giftVisualKey)) {
+        next.giftVisualKey = updates.giftVisualKey;
+      }
+      if (updates.qualification !== undefined) {
+        next.qualification =
+          updates.qualification && typeof updates.qualification === 'object' ? updates.qualification : null;
+      }
 
-    if (typeof updates.giftId === 'string') {
-      next.giftId = updates.giftId;
-    }
-    if (typeof updates.giftName === 'string') {
-      next.giftName = updates.giftName;
-    }
-    if (typeof updates.giftVisualKey === 'string' && VALID_VISUAL_KEYS.has(updates.giftVisualKey)) {
-      next.giftVisualKey = updates.giftVisualKey;
-    }
-    if (updates.qualification !== undefined) {
-      next.qualification =
-        updates.qualification && typeof updates.qualification === 'object' ? updates.qualification : null;
-    }
+      const responseLead =
+        session && session.role === 'admin'
+          ? next
+          : {
+              id: next.id,
+              name: next.name,
+              phone: next.phone,
+              address: next.address || '',
+              giftId: next.giftId,
+              giftName: next.giftName,
+              giftVisualKey: next.giftVisualKey,
+              qualification: next.qualification,
+              claimCode: next.claimCode,
+            };
 
-    const responseLead =
-      session && session.role === 'admin'
-        ? next
-        : {
-            id: next.id,
-            name: next.name,
-            phone: next.phone,
-            address: next.address || '',
-            giftId: next.giftId,
-            giftName: next.giftName,
-            giftVisualKey: next.giftVisualKey,
-            qualification: next.qualification,
-            claimCode: next.claimCode,
-          };
+      if (USE_SUPABASE) {
+        memoryLeadPromoStates.set(id, {
+          promoCodeInvalidated: Boolean(next.promoCodeInvalidated),
+          promoCodeInvalidatedAt: next.promoCodeInvalidatedAt ?? null,
+        });
+        const patchBody = {
+          name: next.name,
+          phone: next.phone,
+          address: next.address || '',
+          notes: next.notes || '',
+          gift_id: next.giftId,
+          gift_name: next.giftName,
+          gift_visual_key: next.giftVisualKey,
+          claim_code: next.claimCode,
+          called: next.called,
+          called_at: next.calledAt,
+          category: next.category,
+          order_amount: next.orderAmount,
+          qualification: next.qualification,
+          promo_code_invalidated: Boolean(next.promoCodeInvalidated),
+          promo_code_invalidated_at: next.promoCodeInvalidatedAt ?? null,
+        };
+        await supabaseWriteWithOptionalColumns(
+          `leads?id=eq.${encodeURIComponent(id)}`,
+          'PATCH',
+          { Prefer: 'return=minimal' },
+          patchBody,
+          ['promo_code_invalidated', 'promo_code_invalidated_at']
+        );
+        const updatedStore = await getActiveStore();
+        return res.json({
+          lead: responseLead,
+          state: isAuthed
+            ? sanitizeStateForClient(updatedStore, true, role)
+            : { ...sanitizeStateForClient(updatedStore, false, null), leads: [responseLead] },
+        });
+      }
 
-    if (USE_SUPABASE) {
-      const patchBody = {
-        name: next.name,
-        phone: next.phone,
-        address: next.address || '',
-        notes: next.notes || '',
-        gift_id: next.giftId,
-        gift_name: next.giftName,
-        gift_visual_key: next.giftVisualKey,
-        claim_code: next.claimCode,
-        called: next.called,
-        called_at: next.calledAt,
-        category: next.category,
-        order_amount: next.orderAmount,
-        qualification: next.qualification,
-      };
-      await supabaseRest(`leads?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify(patchBody),
-      });
-      const updatedStore = await getActiveStore();
+      store.leads[index] = next;
+      writeStore(store);
+
       return res.json({
         lead: responseLead,
         state: isAuthed
-          ? sanitizeStateForClient(updatedStore, true, role)
-          : { ...sanitizeStateForClient(updatedStore, false, null), leads: [responseLead] },
+          ? sanitizeStateForClient(store, true, role)
+          : { ...sanitizeStateForClient(store, false, null), leads: [responseLead] },
       });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo actualizar el prospecto.' });
     }
-
-    store.leads[index] = next;
-    writeStore(store);
-
-    return res.json({
-      lead: responseLead,
-      state: isAuthed
-        ? sanitizeStateForClient(store, true, role)
-        : { ...sanitizeStateForClient(store, false, null), leads: [responseLead] },
-    });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo actualizar el prospecto.' });
-  }
+  });
 });
 
 app.delete('/api/leads/:id', requireAdminRole, async (req, res) => {
+  applyNoStoreHeaders(res);
   const { id } = req.params;
-  try {
-    const store = await getActiveStore();
-    const exists = store.leads.some((item) => item.id === id);
-    if (!exists) {
-      return res.status(404).json({ error: 'Prospecto no encontrado.' });
-    }
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const exists = store.leads.some((item) => item.id === id);
+      if (!exists) {
+        return res.status(404).json({ error: 'Prospecto no encontrado.' });
+      }
 
-    if (USE_SUPABASE) {
-      await supabaseRest(`leads?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
-      const updatedStore = await getActiveStore();
-      return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
-    }
+      if (USE_SUPABASE) {
+        await supabaseRest(`leads?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+        memoryLeadPromoStates.delete(id);
+        const updatedStore = await getActiveStore();
+        return res.json({ state: sanitizeStateForClient(updatedStore, true, 'admin') });
+      }
 
-    store.leads = store.leads.filter((item) => item.id !== id);
-    writeStore(store);
-    return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo eliminar el prospecto.' });
-  }
+      store.leads = store.leads.filter((item) => item.id !== id);
+      writeStore(store);
+      return res.json({ state: sanitizeStateForClient(store, true, 'admin') });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo eliminar el prospecto.' });
+    }
+  });
 });
 
 app.post('/api/gifts', requireAdminRole, async (req, res) => {
@@ -2087,6 +2327,7 @@ app.delete('/api/gifts/:id', requireAdminRole, async (req, res) => {
 });
 
 app.post('/api/gifts/reset', requireAdminRole, async (_req, res) => {
+  applyNoStoreHeaders(res);
   return withStoreMutationLock(async () => {
     try {
       const defaults = readDefaultStore();
@@ -2095,7 +2336,7 @@ app.post('/api/gifts/reset', requireAdminRole, async (_req, res) => {
         memoryGiftUsageTips.clear();
         memoryGiftProbabilities.clear();
         const rows = defaults.gifts.map((gift, idx) => {
-          const probability = sanitizeGiftProbability(gift.probability, 11.1);
+          const probability = sanitizeGiftProbability(gift.probability, DEFAULT_GIFT_PROBABILITY);
           memoryGiftUsageTips.set(gift.id, gift.usageTip || '');
           memoryGiftProbabilities.set(gift.id, probability);
           return {
@@ -2139,79 +2380,82 @@ app.post('/api/gifts/reset', requireAdminRole, async (_req, res) => {
 });
 
 app.patch('/api/settings', requireAdminRole, async (req, res) => {
-  try {
-    const store = await getActiveStore();
-    const updates = req.body || {};
-    const nextSettings = {
-      ...store.settings,
-      advisorName:
-        typeof updates.advisorName === 'string' && updates.advisorName.trim()
-          ? updates.advisorName.trim()
-          : store.settings.advisorName,
-      hostTitle:
-        typeof updates.hostTitle === 'string' && updates.hostTitle.trim()
-          ? updates.hostTitle.trim()
-          : store.settings.hostTitle,
-      brandSubtitle:
-        typeof updates.brandSubtitle === 'string' && updates.brandSubtitle.trim()
-          ? updates.brandSubtitle.trim()
-          : store.settings.brandSubtitle,
-      defaultTicketAmount:
-        typeof updates.defaultTicketAmount === 'number' && Number.isFinite(updates.defaultTicketAmount)
-          ? Math.max(0, updates.defaultTicketAmount)
-          : store.settings.defaultTicketAmount,
-      requirePin: typeof updates.requirePin === 'boolean' ? updates.requirePin : store.settings.requirePin,
-      giftTheme: VALID_GIFT_THEMES.has(updates.giftTheme)
-        ? updates.giftTheme
-        : store.settings.giftTheme || 'autumn',
-      customBoxColor:
-        typeof updates.customBoxColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(updates.customBoxColor.trim())
-          ? updates.customBoxColor.trim()
-          : store.settings.customBoxColor || '#B84A27',
-      showcaseStyle: VALID_SHOWCASE_STYLES.has(updates.showcaseStyle)
-        ? updates.showcaseStyle
-        : store.settings.showcaseStyle || 'luminous-gold',
-      randomizeGifts:
-        typeof updates.randomizeGifts === 'boolean'
-          ? updates.randomizeGifts
-          : typeof store.settings.randomizeGifts === 'boolean'
-            ? store.settings.randomizeGifts
-            : true,
-    };
+  applyNoStoreHeaders(res);
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const updates = req.body || {};
+      const nextSettings = {
+        ...store.settings,
+        advisorName:
+          typeof updates.advisorName === 'string' && updates.advisorName.trim()
+            ? updates.advisorName.trim()
+            : store.settings.advisorName,
+        hostTitle:
+          typeof updates.hostTitle === 'string' && updates.hostTitle.trim()
+            ? updates.hostTitle.trim()
+            : store.settings.hostTitle,
+        brandSubtitle:
+          typeof updates.brandSubtitle === 'string' && updates.brandSubtitle.trim()
+            ? updates.brandSubtitle.trim()
+            : store.settings.brandSubtitle,
+        defaultTicketAmount:
+          typeof updates.defaultTicketAmount === 'number' && Number.isFinite(updates.defaultTicketAmount)
+            ? Math.max(0, updates.defaultTicketAmount)
+            : store.settings.defaultTicketAmount,
+        requirePin: typeof updates.requirePin === 'boolean' ? updates.requirePin : store.settings.requirePin,
+        giftTheme: VALID_GIFT_THEMES.has(updates.giftTheme)
+          ? updates.giftTheme
+          : store.settings.giftTheme || 'autumn',
+        customBoxColor:
+          typeof updates.customBoxColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(updates.customBoxColor.trim())
+            ? updates.customBoxColor.trim()
+            : store.settings.customBoxColor || '#B84A27',
+        showcaseStyle: VALID_SHOWCASE_STYLES.has(updates.showcaseStyle)
+          ? updates.showcaseStyle
+          : store.settings.showcaseStyle || 'luminous-gold',
+        randomizeGifts:
+          typeof updates.randomizeGifts === 'boolean'
+            ? updates.randomizeGifts
+            : typeof store.settings.randomizeGifts === 'boolean'
+              ? store.settings.randomizeGifts
+              : true,
+      };
 
-    if (USE_SUPABASE) {
-      memorySettingsFallback.showcaseStyle = nextSettings.showcaseStyle;
-      memorySettingsFallback.randomizeGifts = nextSettings.randomizeGifts;
-      await supabaseWriteWithOptionalColumns(
-        'app_settings?id=eq.default',
-        'PATCH',
-        { Prefer: 'return=minimal' },
-        {
-          advisor_name: nextSettings.advisorName,
-          host_title: nextSettings.hostTitle,
-          brand_subtitle: nextSettings.brandSubtitle,
-          default_ticket_amount: nextSettings.defaultTicketAmount,
-          require_pin: nextSettings.requirePin,
-          gift_theme: nextSettings.giftTheme,
-          custom_box_color: nextSettings.customBoxColor,
-          showcase_style: nextSettings.showcaseStyle,
-          randomize_gifts: nextSettings.randomizeGifts,
-          updated_at: new Date().toISOString(),
-        },
-        ['showcase_style', 'randomize_gifts', 'gift_theme', 'custom_box_color']
-      );
-      const updatedStore = await getActiveStore();
-      const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
+      if (USE_SUPABASE) {
+        memorySettingsFallback.showcaseStyle = nextSettings.showcaseStyle;
+        memorySettingsFallback.randomizeGifts = nextSettings.randomizeGifts;
+        await supabaseWriteWithOptionalColumns(
+          'app_settings?id=eq.default',
+          'PATCH',
+          { Prefer: 'return=minimal' },
+          {
+            advisor_name: nextSettings.advisorName,
+            host_title: nextSettings.hostTitle,
+            brand_subtitle: nextSettings.brandSubtitle,
+            default_ticket_amount: nextSettings.defaultTicketAmount,
+            require_pin: nextSettings.requirePin,
+            gift_theme: nextSettings.giftTheme,
+            custom_box_color: nextSettings.customBoxColor,
+            showcase_style: nextSettings.showcaseStyle,
+            randomize_gifts: nextSettings.randomizeGifts,
+            updated_at: new Date().toISOString(),
+          },
+          ['showcase_style', 'randomize_gifts', 'gift_theme', 'custom_box_color']
+        );
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
+        return res.json({ settings: sanitized.settings, state: sanitized });
+      }
+
+      store.settings = nextSettings;
+      writeStore(store);
+      const sanitized = sanitizeStateForClient(store, true, 'admin');
       return res.json({ settings: sanitized.settings, state: sanitized });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo guardar la configuración.' });
     }
-
-    store.settings = nextSettings;
-    writeStore(store);
-    const sanitized = sanitizeStateForClient(store, true, 'admin');
-    return res.json({ settings: sanitized.settings, state: sanitized });
-  } catch {
-    return res.status(503).json({ error: 'No se pudo guardar la configuración.' });
-  }
+  });
 });
 
 // Admin-only QR Studio & History endpoints
@@ -2362,11 +2606,14 @@ export {
   DEFAULT_GIFT_PROBABILITY,
   sanitizeGiftProbability,
   normalizeGiftRecord,
+  normalizeLeadRecord,
   pickWeightedGift,
   isMissingColumnError,
   supabaseWriteWithOptionalColumns,
   mapGiftRow,
+  mapLeadRow,
   memoryGiftProbabilities,
+  memoryLeadPromoStates,
 };
 
 export default app;

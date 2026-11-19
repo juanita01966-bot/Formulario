@@ -155,6 +155,7 @@ interface GiftsEditorProps {
   onSaveGiftProbabilities?: (updates: Array<{ id: string; probability: number }>) => Promise<void>;
   onDeleteGift: (id: string) => Promise<void>;
   onResetGifts: () => Promise<void>;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 const ACCENT_PRESETS = [
@@ -187,6 +188,7 @@ interface GiftCatalogCardProps {
   showcaseStyle?: ShowcaseStyleId;
   confirmDeleteId: string | null;
   onToggleActive: (gift: GiftItem) => void;
+  onSaveCardProbability: (giftId: string, probability: number) => Promise<void>;
   onEdit: (gift: GiftItem) => void;
   onRequestDelete: (id: string) => void;
   onConfirmDelete: (id: string) => void;
@@ -201,6 +203,7 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
   showcaseStyle = 'luminous-gold',
   confirmDeleteId,
   onToggleActive,
+  onSaveCardProbability,
   onEdit,
   onRequestDelete,
   onConfirmDelete,
@@ -208,6 +211,33 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
 }) => {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const [spotlight, setSpotlight] = useState({ x: 50, y: 40, active: false });
+  const [editingInlineProb, setEditingInlineProb] = useState(false);
+  const [inlineProbInput, setInlineProbInput] = useState(() => String(weight));
+  const [savingInlineProb, setSavingInlineProb] = useState(false);
+  const [inlineProbSaved, setInlineProbSaved] = useState(false);
+
+  useEffect(() => {
+    if (!editingInlineProb) {
+      setInlineProbInput(String(weight));
+    }
+  }, [weight, editingInlineProb]);
+
+  const handleInlineProbSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (savingInlineProb) return;
+    const nextProb = parseWeightInput(inlineProbInput);
+    setSavingInlineProb(true);
+    try {
+      await onSaveCardProbability(gift.id, nextProb);
+      setEditingInlineProb(false);
+      setInlineProbSaved(true);
+      window.setTimeout(() => setInlineProbSaved(false), 2200);
+    } catch {
+      // Error banner handled by parent GiftsEditor
+    } finally {
+      setSavingInlineProb(false);
+    }
+  };
 
   // Synchronized 60 FPS GPU floating loop & breathing oval ground shadow
   const floatDriver = useMotionValue(0);
@@ -254,7 +284,6 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
 
   return (
     <motion.div
-      layout
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.94 }}
@@ -407,48 +436,121 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
         </div>
       </div>
 
-      <div className="mt-4 pt-3 border-t border-[#EFE3D2] flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-[#8B6F5B] truncate">{gift.stockLabel}</span>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => onEdit(gift)}
-            className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-[#FAF3E8] px-3 sm:px-2.5 py-1.5 text-xs font-semibold text-[#22150E] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
-          >
-            <Edit3 className="h-3.5 w-3.5 text-[#B84A27]" />
-            Editar
-          </button>
-
-          {confirmDeleteId === gift.id ? (
-            <div className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 sm:px-2.5 py-1.5 text-xs sm:text-[11px]">
-              <button
-                type="button"
-                onClick={() => onConfirmDelete(gift.id)}
-                className="font-bold text-red-700 cursor-pointer"
-              >
-                Sí
-              </button>
-              <button
-                type="button"
-                onClick={onCancelDelete}
-                className="text-[#6E5341] cursor-pointer"
-              >
-                No
-              </button>
-            </div>
-          ) : (
+      <div className="mt-4 pt-3 border-t border-[#EFE3D2] space-y-2.5">
+        {editingInlineProb ? (
+          <form onSubmit={handleInlineProbSubmit} className="flex flex-wrap items-center gap-1.5">
+            <label
+              htmlFor={`card-prob-${gift.id}`}
+              className="text-[11px] font-bold text-[#8C4A19] mr-auto"
+            >
+              Probabilidad / Peso (%):
+            </label>
+            <input
+              id={`card-prob-${gift.id}`}
+              type="number"
+              min={0}
+              step="0.1"
+              autoFocus
+              disabled={savingInlineProb}
+              value={inlineProbInput}
+              onChange={(e) => setInlineProbInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setEditingInlineProb(false);
+                  setInlineProbInput(String(weight));
+                }
+              }}
+              className="w-20 min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-[#C88A2B] bg-white px-2.5 py-1 text-right font-mono text-base sm:text-xs font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#C88A2B]/30"
+            />
+            <button
+              type="submit"
+              disabled={savingInlineProb}
+              aria-label={`Guardar probabilidad de ${gift.name}`}
+              className="inline-flex min-h-[44px] sm:min-h-[34px] items-center justify-center gap-1 rounded-xl sm:rounded-lg bg-[#22150E] px-3 py-1.5 text-xs font-semibold text-[#F4CA73] hover:bg-[#3A2418] transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <Check className="h-3.5 w-3.5" />
+              <span>{savingInlineProb ? '...' : 'Guardar'}</span>
+            </button>
             <button
               type="button"
-              onClick={() => onRequestDelete(gift.id)}
-              className="inline-flex min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-[34px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1.5 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
-              title="Eliminar regalo"
-              aria-label={`Eliminar ${gift.name}`}
+              disabled={savingInlineProb}
+              onClick={() => {
+                setEditingInlineProb(false);
+                setInlineProbInput(String(weight));
+              }}
+              aria-label="Cancelar edición de porcentaje"
+              className="inline-flex min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-[34px] items-center justify-center rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-white text-[#6E5341] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
             >
-              <Trash2 className="h-4 w-4" />
+              <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
             </button>
-          )}
-        </div>
+          </form>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] font-medium text-[#8B6F5B] truncate">{gift.stockLabel}</span>
+              {inlineProbSaved && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700 shrink-0">
+                  <Check className="h-2.5 w-2.5" />
+                  Guardado
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setInlineProbInput(String(weight));
+                  setEditingInlineProb(true);
+                }}
+                title={`Editar probabilidad / peso (${formatWeightNumber(weight)}%)`}
+                aria-label={`Editar probabilidad de ${gift.name}: ${formatWeightNumber(weight)}%`}
+                className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-1 rounded-xl sm:rounded-lg border border-[#E6C99E] bg-[#FAF0E0] px-2.5 py-1.5 text-xs font-bold text-[#8C4A19] hover:bg-[#F3DFC0] transition-colors cursor-pointer tabular-nums"
+              >
+                <Percent className="h-3 w-3 shrink-0 text-[#B84A27]" />
+                <span>{formatWeightNumber(weight)}%</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onEdit(gift)}
+                className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-[#FAF3E8] px-3 sm:px-2.5 py-1.5 text-xs font-semibold text-[#22150E] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
+              >
+                <Edit3 className="h-3.5 w-3.5 text-[#B84A27]" />
+                Editar
+              </button>
+
+              {confirmDeleteId === gift.id ? (
+                <div className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 sm:px-2.5 py-1.5 text-xs sm:text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => onConfirmDelete(gift.id)}
+                    className="font-bold text-red-700 cursor-pointer"
+                  >
+                    Sí
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onCancelDelete}
+                    className="text-[#6E5341] cursor-pointer"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onRequestDelete(gift.id)}
+                  className="inline-flex min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-[34px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1.5 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
+                  title="Eliminar regalo"
+                  aria-label={`Eliminar ${gift.name}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -467,6 +569,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   onSaveGiftProbabilities,
   onDeleteGift,
   onResetGifts,
+  onBusyChange,
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingGiftId, setEditingGiftId] = useState<string | null>(null);
@@ -482,6 +585,11 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   const [savingProbabilities, setSavingProbabilities] = useState(false);
   const [probFeedback, setProbFeedback] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    onBusyChange?.(modalOpen || savingProbabilities || savingShowcase);
+    return () => onBusyChange?.(false);
+  }, [modalOpen, savingProbabilities, savingShowcase, onBusyChange]);
 
   const previewUid = useId().replace(/:/g, '');
   const activeCount = gifts.filter((g) => g.active).length;
@@ -604,6 +712,23 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
       setErrorMsg(err instanceof Error ? err.message : 'No se pudieron equilibrar las probabilidades.');
     } finally {
       setSavingProbabilities(false);
+    }
+  };
+
+  const handleQuickSaveCardProbability = async (giftId: string, probability: number) => {
+    setErrorMsg(null);
+    setProbFeedback(null);
+    try {
+      await onUpdateGift(giftId, { probability });
+      setEditedWeights((prev) => {
+        if (prev[giftId] === undefined) return prev;
+        const next = { ...prev };
+        delete next[giftId];
+        return next;
+      });
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'No se pudo actualizar la probabilidad.');
+      throw err;
     }
   };
 
@@ -1226,7 +1351,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-          <AnimatePresence mode="popLayout">
+          <AnimatePresence>
             {gifts.map((gift, idx) => {
               const weight = draftWeightsById.get(gift.id) ?? getGiftProbability(gift);
               const effectivePercent =
@@ -1241,6 +1366,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                   showcaseStyle={showcaseStyle}
                   confirmDeleteId={confirmDeleteId}
                   onToggleActive={handleToggleActive}
+                  onSaveCardProbability={handleQuickSaveCardProbability}
                   onEdit={openEditModal}
                   onRequestDelete={(id) => setConfirmDeleteId(id)}
                   onConfirmDelete={handleDelete}

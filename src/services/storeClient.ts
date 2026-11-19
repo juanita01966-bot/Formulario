@@ -75,6 +75,23 @@ function normalizeGift(gift: GiftItem): GiftItem {
   };
 }
 
+function normalizeLead(lead: Lead): Lead {
+  const category = lead.category || 'none';
+  const promoCodeInvalidated =
+    typeof lead.promoCodeInvalidated === 'boolean'
+      ? lead.promoCodeInvalidated || category !== 'none'
+      : category !== 'none';
+  const promoCodeInvalidatedAt = promoCodeInvalidated
+    ? lead.promoCodeInvalidatedAt ?? lead.calledAt ?? lead.createdAt ?? null
+    : null;
+  return {
+    ...lead,
+    category,
+    promoCodeInvalidated,
+    promoCodeInvalidatedAt,
+  };
+}
+
 function normalizeAppState(state: AppState): AppState {
   const role = (state as AppState & { role?: string }).role;
   if (role === 'caller') {
@@ -91,7 +108,32 @@ function normalizeAppState(state: AppState): AppState {
           : true,
     },
     gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
+    leads: Array.isArray(state.leads) ? state.leads.map(normalizeLead) : [],
   };
+}
+
+const TAB_INSTANCE_ID = `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+let stateMutationEpoch = 0;
+let activeMutationCount = 0;
+let latestCommittedState: AppState | null = null;
+let latestFetchSeq = 0;
+let lastWrittenLocalJson = '';
+
+function beginMutation(): void {
+  activeMutationCount += 1;
+  stateMutationEpoch += 1;
+}
+
+function commitMutatedState(state: AppState, broadcast = true): AppState {
+  const normalized = normalizeAppState(state);
+  stateMutationEpoch += 1;
+  latestCommittedState = normalized;
+  writeLocalState(normalized, broadcast);
+  return normalized;
+}
+
+function endMutation(): void {
+  activeMutationCount = Math.max(0, activeMutationCount - 1);
 }
 
 function cloneDefaults(): AppState {
@@ -141,7 +183,7 @@ function readLocalState(): AppState {
     return {
       settings: mergedSettings,
       gifts: rawGifts.map(normalizeGift),
-      leads: hasDsbSession && Array.isArray(parsed.leads) ? parsed.leads : [],
+      leads: hasDsbSession && Array.isArray(parsed.leads) ? parsed.leads.map(normalizeLead) : [],
       qrHistory: isAdmin && Array.isArray(parsed.qrHistory) ? parsed.qrHistory : [],
     };
   } catch {
@@ -170,14 +212,27 @@ function writeLocalState(state: AppState, broadcast = true): void {
     },
     gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
     // Never persist other people's leads or admin QR history into browser LocalStorage on public/caller routes
-    leads: hasDsbSession ? state.leads : [],
+    leads: hasDsbSession
+      ? stateRole === 'caller'
+        ? state.leads
+        : (state.leads || []).map(normalizeLead)
+      : [],
     qrHistory: isAdmin && Array.isArray(state.qrHistory) ? state.qrHistory : [],
   };
 
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizedState));
+    const serialized = JSON.stringify(sanitizedState);
+    if (serialized !== lastWrittenLocalJson) {
+      window.localStorage.setItem(STORAGE_KEY, serialized);
+      lastWrittenLocalJson = serialized;
+    }
     if (broadcast && channel) {
-      channel.postMessage({ type: 'STATE_UPDATED', state: sanitizedState });
+      channel.postMessage({
+        type: 'STATE_UPDATED',
+        state: sanitizedState,
+        tabId: TAB_INSTANCE_ID,
+        sourceAuthed: hasDsbSession,
+      });
     }
   } catch {
     // Ignore storage quota errors
@@ -240,8 +295,11 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const token = getDsbSessionToken();
   const res = await fetch(url, {
     ...init,
+    cache: init?.cache ?? 'no-store',
     headers: {
       'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
@@ -262,14 +320,44 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-export async function fetchAppState(): Promise<{ state: AppState; mode: 'api' | 'local' }> {
+export async function fetchAppState(): Promise<{
+  state: AppState;
+  mode: 'api' | 'local';
+  stale?: boolean;
+}> {
+  const startEpoch = stateMutationEpoch;
+  const mySeq = ++latestFetchSeq;
+
+  if (activeMutationCount > 0 && latestCommittedState) {
+    return { state: latestCommittedState, mode: 'api', stale: true };
+  }
+
   try {
-    const state = normalizeAppState(await requestJson<AppState>('/api/state'));
+    const state = normalizeAppState(
+      await requestJson<AppState>('/api/state', { cache: 'no-store' })
+    );
+    if (activeMutationCount > 0 || stateMutationEpoch !== startEpoch || mySeq !== latestFetchSeq) {
+      return {
+        state: latestCommittedState ?? readLocalState(),
+        mode: 'api',
+        stale: true,
+      };
+    }
+    latestCommittedState = state;
     writeLocalState(state, false);
-    return { state, mode: 'api' };
+    return { state, mode: 'api', stale: false };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
-    return { state: readLocalState(), mode: 'local' };
+    if (activeMutationCount > 0 || stateMutationEpoch !== startEpoch || mySeq !== latestFetchSeq) {
+      return {
+        state: latestCommittedState ?? readLocalState(),
+        mode: 'local',
+        stale: true,
+      };
+    }
+    const localState = readLocalState();
+    latestCommittedState = localState;
+    return { state: localState, mode: 'local', stale: false };
   }
 }
 
@@ -289,14 +377,14 @@ export interface CreateLeadPayload {
 export async function createLead(
   payload: CreateLeadPayload
 ): Promise<{ lead: Lead; state: AppState; mode: 'api' | 'local' }> {
+  beginMutation();
   try {
     const res = await requestJson<{ lead: Lead; state: AppState }>('/api/leads', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    const normalizedState = normalizeAppState(res.state);
-    writeLocalState(normalizedState, Boolean(getDsbSessionToken()));
-    return { lead: res.lead, state: normalizedState, mode: 'api' };
+    const normalizedState = commitMutatedState(res.state, Boolean(getDsbSessionToken()));
+    return { lead: normalizeLead(res.lead), state: normalizedState, mode: 'api' };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
 
@@ -324,15 +412,21 @@ export async function createLead(
       orderAmount: null,
       notes: payload.notes?.trim() || '',
       qualification: payload.qualification ?? null,
+      promoCodeInvalidated: false,
+      promoCodeInvalidatedAt: null,
       createdAt: new Date().toISOString(),
     };
 
-    const nextState: AppState = {
-      ...state,
-      leads: [lead, ...state.leads],
-    };
-    writeLocalState(nextState, true);
+    const nextState = commitMutatedState(
+      {
+        ...state,
+        leads: [lead, ...state.leads],
+      },
+      true
+    );
     return { lead, state: nextState, mode: 'local' };
+  } finally {
+    endMutation();
   }
 }
 
@@ -350,19 +444,23 @@ export interface UpdateLeadPayload {
   giftVisualKey?: GiftVisualKey | null;
   claimCode?: string;
   qualification?: LeadQualification | null;
+  promoCodeInvalidated?: boolean;
+  promoCodeInvalidatedAt?: string | null;
+  adminPassword?: string;
 }
 
 export async function updateLead(
   id: string,
   updates: UpdateLeadPayload
 ): Promise<{ lead: Lead; state: AppState }> {
+  beginMutation();
   try {
     const res = await requestJson<{ lead: Lead; state: AppState }>(`/api/leads/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
-    writeLocalState(res.state, Boolean(getDsbSessionToken()));
-    return res;
+    const normalizedState = commitMutatedState(res.state, Boolean(getDsbSessionToken()));
+    return { lead: normalizeLead(res.lead), state: normalizedState };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
 
@@ -370,7 +468,10 @@ export async function updateLead(
     const index = state.leads.findIndex((l) => l.id === id);
     if (index === -1) throw new Error('Prospecto no encontrado.');
 
-    const nextLead: Lead = { ...state.leads[index] };
+    const currentLead = normalizeLead(state.leads[index]);
+    const nextLead: Lead = { ...currentLead };
+    const nowIso = new Date().toISOString();
+
     if (updates.name !== undefined) nextLead.name = updates.name.trim();
     if (updates.phone !== undefined) nextLead.phone = updates.phone.trim();
     if (updates.address !== undefined) nextLead.address = updates.address.trim();
@@ -383,18 +484,27 @@ export async function updateLead(
 
     if (updates.called !== undefined) {
       nextLead.called = updates.called;
-      nextLead.calledAt = updates.called ? updates.calledAt || new Date().toISOString() : null;
+      nextLead.calledAt = updates.called ? updates.calledAt || nowIso : null;
       if (!updates.called) {
         nextLead.category = 'none';
         nextLead.orderAmount = null;
+        nextLead.promoCodeInvalidated = false;
+        nextLead.promoCodeInvalidatedAt = null;
       }
     }
 
-    if (updates.category !== undefined) {
-      if (updates.category !== 'none' && !nextLead.called) {
+    if (updates.promoCodeInvalidated === false || updates.category === 'none') {
+      nextLead.category = 'none';
+      nextLead.orderAmount = null;
+      nextLead.promoCodeInvalidated = false;
+      nextLead.promoCodeInvalidatedAt = null;
+    } else if (updates.category !== undefined) {
+      if (!nextLead.called) {
         throw new ApiValidationError('Debes marcar al prospecto como llamado antes de clasificarlo.');
       }
       nextLead.category = updates.category;
+      nextLead.promoCodeInvalidated = true;
+      nextLead.promoCodeInvalidatedAt = currentLead.promoCodeInvalidatedAt || nowIso;
       if (updates.category === 'orden') {
         nextLead.orderAmount = updates.orderAmount ?? nextLead.orderAmount ?? state.settings.defaultTicketAmount;
       } else {
@@ -402,29 +512,36 @@ export async function updateLead(
       }
     } else if (updates.orderAmount !== undefined && nextLead.category === 'orden') {
       nextLead.orderAmount = updates.orderAmount;
+    } else if (updates.promoCodeInvalidated === true) {
+      nextLead.promoCodeInvalidated = true;
+      nextLead.promoCodeInvalidatedAt = currentLead.promoCodeInvalidatedAt || nowIso;
     }
 
     const nextLeads = [...state.leads];
     nextLeads[index] = nextLead;
-    const nextState = { ...state, leads: nextLeads };
-    writeLocalState(nextState, true);
+    const nextState = commitMutatedState({ ...state, leads: nextLeads }, true);
     return { lead: nextLead, state: nextState };
+  } finally {
+    endMutation();
   }
 }
 
 export async function deleteLead(id: string): Promise<AppState> {
+  beginMutation();
   try {
     const res = await requestJson<{ state: AppState }>(`/api/leads/${id}`, {
       method: 'DELETE',
     });
-    writeLocalState(res.state, true);
-    return res.state;
+    return commitMutatedState(res.state, true);
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
-    const nextState = { ...state, leads: state.leads.filter((l) => l.id !== id) };
-    writeLocalState(nextState, true);
-    return nextState;
+    return commitMutatedState(
+      { ...state, leads: state.leads.filter((l) => l.id !== id) },
+      true
+    );
+  } finally {
+    endMutation();
   }
 }
 
@@ -452,13 +569,13 @@ export async function createGift(payload: UpsertGiftPayload): Promise<{ gift: Gi
     ...payload,
     probability: sanitizeGiftProbability(payload.probability, DEFAULT_GIFT_PROBABILITY),
   };
+  beginMutation();
   try {
     const res = await requestJson<{ gift: GiftItem; state: AppState }>('/api/gifts', {
       method: 'POST',
       body: JSON.stringify(sanitizedPayload),
     });
-    const normalizedState = normalizeAppState(res.state);
-    writeLocalState(normalizedState, true);
+    const normalizedState = commitMutatedState(res.state, true);
     return { gift: normalizeGift(res.gift), state: normalizedState };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
@@ -470,9 +587,10 @@ export async function createGift(payload: UpsertGiftPayload): Promise<{ gift: Gi
       customImageUrl: payload.customImageUrl?.trim() || undefined,
       probability: sanitizeGiftProbability(payload.probability, DEFAULT_GIFT_PROBABILITY),
     });
-    const nextState = { ...state, gifts: [...state.gifts, gift] };
-    writeLocalState(nextState, true);
+    const nextState = commitMutatedState({ ...state, gifts: [...state.gifts, gift] }, true);
     return { gift, state: nextState };
+  } finally {
+    endMutation();
   }
 }
 
@@ -493,13 +611,13 @@ export async function updateGift(
             : undefined,
         }
       : updates;
+  beginMutation();
   try {
     const res = await requestJson<{ gift: GiftItem; state: AppState }>(`/api/gifts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(apiUpdates),
     });
-    const normalizedState = normalizeAppState(res.state);
-    writeLocalState(normalizedState, true);
+    const normalizedState = commitMutatedState(res.state, true);
     return { gift: normalizeGift(res.gift), state: normalizedState };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
@@ -532,9 +650,10 @@ export async function updateGift(
     });
     const nextGifts = [...state.gifts];
     nextGifts[index] = nextGift;
-    const nextState = { ...state, gifts: nextGifts };
-    writeLocalState(nextState, true);
+    const nextState = commitMutatedState({ ...state, gifts: nextGifts }, true);
     return { gift: nextGift, state: nextState };
+  } finally {
+    endMutation();
   }
 }
 
@@ -555,6 +674,7 @@ export async function updateGiftProbabilities(
 
   const updatesMap = new Map(entries.map((entry) => [entry.id, entry.probability]));
 
+  beginMutation();
   try {
     const res = await requestJson<{ gifts: GiftItem[]; state: AppState }>(
       '/api/gifts/probabilities',
@@ -563,8 +683,7 @@ export async function updateGiftProbabilities(
         body: JSON.stringify({ gifts: entries }),
       }
     );
-    const normalizedState = normalizeAppState(res.state);
-    writeLocalState(normalizedState, true);
+    const normalizedState = commitMutatedState(res.state, true);
     return { gifts: normalizedState.gifts, state: normalizedState };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
@@ -574,20 +693,20 @@ export async function updateGiftProbabilities(
       const nextProb = updatesMap.get(normalized.id);
       return nextProb !== undefined ? { ...normalized, probability: nextProb } : normalized;
     });
-    const nextState = { ...state, gifts: nextGifts };
-    writeLocalState(nextState, true);
+    const nextState = commitMutatedState({ ...state, gifts: nextGifts }, true);
     return { gifts: nextGifts, state: nextState };
+  } finally {
+    endMutation();
   }
 }
 
 export async function deleteGift(id: string): Promise<AppState> {
+  beginMutation();
   try {
     const res = await requestJson<{ state: AppState }>(`/api/gifts/${id}`, {
       method: 'DELETE',
     });
-    const normalizedState = normalizeAppState(res.state);
-    writeLocalState(normalizedState, true);
-    return normalizedState;
+    return commitMutatedState(res.state, true);
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
@@ -595,39 +714,37 @@ export async function deleteGift(id: string): Promise<AppState> {
     if (remaining.filter((g) => g.active).length < 1) {
       throw new ApiValidationError('Debe quedar al menos un regalo activo en el catálogo.');
     }
-    const nextState = { ...state, gifts: remaining };
-    writeLocalState(nextState, true);
-    return nextState;
+    return commitMutatedState({ ...state, gifts: remaining }, true);
+  } finally {
+    endMutation();
   }
 }
 
 export async function resetDefaultGifts(): Promise<AppState> {
+  beginMutation();
   try {
     const res = await requestJson<{ state: AppState }>('/api/gifts/reset', {
       method: 'POST',
     });
-    const normalizedState = normalizeAppState(res.state);
-    writeLocalState(normalizedState, true);
-    return normalizedState;
+    return commitMutatedState(res.state, true);
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
     const defaults = cloneDefaults();
-    const nextState = { ...state, gifts: defaults.gifts };
-    writeLocalState(nextState, true);
-    return nextState;
+    return commitMutatedState({ ...state, gifts: defaults.gifts }, true);
+  } finally {
+    endMutation();
   }
 }
 
 export async function updateSettings(updates: Partial<AppSettings>): Promise<AppState> {
+  beginMutation();
   try {
     const res = await requestJson<{ settings: AppSettings; state: AppState }>('/api/settings', {
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
-    const normalizedState = normalizeAppState(res.state);
-    writeLocalState(normalizedState, true);
-    return normalizedState;
+    return commitMutatedState(res.state, true);
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
     const state = readLocalState();
@@ -646,9 +763,9 @@ export async function updateSettings(updates: Partial<AppSettings>): Promise<App
             ? state.settings.randomizeGifts
             : true,
     };
-    const nextState = { ...state, settings: nextSettings };
-    writeLocalState(nextState, true);
-    return nextState;
+    return commitMutatedState({ ...state, settings: nextSettings }, true);
+  } finally {
+    endMutation();
   }
 }
 
@@ -688,6 +805,7 @@ export interface CreateQrPayload {
 export async function createQrCode(
   payload: CreateQrPayload
 ): Promise<{ qr: QrCodeRecord; state: AppState }> {
+  beginMutation();
   try {
     const res = await requestJson<{ qr: QrCodeRecord; qrHistory?: QrCodeRecord[]; state: AppState }>(
       '/api/qr',
@@ -696,8 +814,8 @@ export async function createQrCode(
         body: JSON.stringify(payload),
       }
     );
-    writeLocalState(res.state, true);
-    return { qr: res.qr, state: res.state };
+    const normalizedState = commitMutatedState(res.state, true);
+    return { qr: res.qr, state: normalizedState };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
 
@@ -741,16 +859,21 @@ export async function createQrCode(
     };
 
     const state = readLocalState();
-    const nextState: AppState = {
-      ...state,
-      qrHistory: [qr, ...(state.qrHistory || [])],
-    };
-    writeLocalState(nextState, true);
+    const nextState = commitMutatedState(
+      {
+        ...state,
+        qrHistory: [qr, ...(state.qrHistory || [])],
+      },
+      true
+    );
     return { qr, state: nextState };
+  } finally {
+    endMutation();
   }
 }
 
 export async function deleteQrCode(id: string): Promise<AppState> {
+  beginMutation();
   try {
     const res = await requestJson<{ qrHistory?: QrCodeRecord[]; state: AppState }>(
       `/api/qr/${encodeURIComponent(id)}`,
@@ -758,8 +881,7 @@ export async function deleteQrCode(id: string): Promise<AppState> {
         method: 'DELETE',
       }
     );
-    writeLocalState(res.state, true);
-    return res.state;
+    return commitMutatedState(res.state, true);
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
 
@@ -768,29 +890,60 @@ export async function deleteQrCode(id: string): Promise<AppState> {
     }
 
     const state = readLocalState();
-    const nextState: AppState = {
-      ...state,
-      qrHistory: (state.qrHistory || []).filter((item) => item.id !== id),
-    };
-    writeLocalState(nextState, true);
-    return nextState;
+    return commitMutatedState(
+      {
+        ...state,
+        qrHistory: (state.qrHistory || []).filter((item) => item.id !== id),
+      },
+      true
+    );
+  } finally {
+    endMutation();
   }
 }
 
 export function subscribeStoreSync(onSync: (state: AppState) => void): () => void {
-  const handleChannel = (event: MessageEvent) => {
-    if (event.data?.type === 'STATE_UPDATED' && event.data.state) {
-      onSync(normalizeAppState(event.data.state as AppState));
+  let lastDeliveredJson = '';
+
+  const deliverIfChanged = (candidate: AppState, fromAuthedSource: boolean) => {
+    if (activeMutationCount > 0) return;
+    const isCurrentTabAuthed = Boolean(getDsbSessionToken());
+    if (isCurrentTabAuthed && !fromAuthedSource) {
+      // Never allow an unauthenticated public tab's stripped state to wipe DSB leads/QR history
+      return;
     }
+    const normalized = normalizeAppState(candidate);
+    const serialized = JSON.stringify(normalized);
+    if (serialized === lastDeliveredJson) return;
+    lastDeliveredJson = serialized;
+    latestCommittedState = normalized;
+    onSync(normalized);
+  };
+
+  const handleChannel = (event: MessageEvent) => {
+    const payload = event.data as
+      | { type?: string; state?: AppState; tabId?: string; sourceAuthed?: boolean }
+      | undefined;
+    if (payload?.type !== 'STATE_UPDATED' || !payload.state) return;
+    if (payload.tabId && payload.tabId === TAB_INSTANCE_ID) return;
+    deliverIfChanged(payload.state, Boolean(payload.sourceAuthed));
   };
 
   const handleStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY && event.newValue) {
-      try {
-        onSync(normalizeAppState(JSON.parse(event.newValue) as AppState));
-      } catch {
-        // Ignore parse failure
+    if (event.key !== STORAGE_KEY || !event.newValue) return;
+    try {
+      const parsed = JSON.parse(event.newValue) as AppState;
+      const isCurrentTabAuthed = Boolean(getDsbSessionToken());
+      const incomingHasLeads = Array.isArray(parsed.leads) && parsed.leads.length > 0;
+      const currentHasLeads =
+        Array.isArray(latestCommittedState?.leads) && latestCommittedState.leads.length > 0;
+      if (isCurrentTabAuthed && !incomingHasLeads && currentHasLeads) {
+        // Public tabs strip leads in localStorage; authed DSB resets arrive via BroadcastChannel (sourceAuthed: true)
+        return;
       }
+      deliverIfChanged(parsed, !isCurrentTabAuthed || incomingHasLeads);
+    } catch {
+      // Ignore parse failure
     }
   };
 
@@ -947,6 +1100,7 @@ export async function loginStep1(
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: cleanUser, password }),
     });
@@ -1030,6 +1184,7 @@ export async function verifyPinStep2(
     try {
       const res = await fetch('/api/auth/verify-pin', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preAuthToken, pin }),
       });
@@ -1049,6 +1204,8 @@ export async function verifyPinStep2(
           const role = data.role || 'admin';
           sessionStorage.setItem(DSB_SESSION_TOKEN_KEY, data.sessionToken);
           sessionStorage.setItem(DSB_ROLE_KEY, role);
+          stateMutationEpoch += 1;
+          latestCommittedState = null;
           return {
             sessionToken: data.sessionToken,
             username: data.username || data.user || 'AdminCiprian',
@@ -1105,6 +1262,8 @@ export async function verifyPinStep2(
   const sessionToken = `local_dsb.${role}.${Date.now() + 8 * 60 * 60 * 1000}`;
   sessionStorage.setItem(DSB_SESSION_TOKEN_KEY, sessionToken);
   sessionStorage.setItem(DSB_ROLE_KEY, role);
+  stateMutationEpoch += 1;
+  latestCommittedState = null;
   return { sessionToken, username: account.username, role };
 }
 
@@ -1131,6 +1290,7 @@ export async function verifyDsbSession(): Promise<{
 
   try {
     const res = await fetch('/api/auth/session', {
+      cache: 'no-store',
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
@@ -1159,6 +1319,9 @@ export async function verifyDsbSession(): Promise<{
 }
 
 export function logoutDsbSession(): void {
+  stateMutationEpoch += 1;
+  latestCommittedState = null;
+  lastWrittenLocalJson = '';
   sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
   sessionStorage.removeItem(DSB_ROLE_KEY);
   sessionStorage.removeItem('konverta_dsb_unlocked');
@@ -1189,6 +1352,7 @@ export async function updateDsbCredentials(
   const token = getDsbSessionToken();
   const res = await fetch('/api/auth/update-credentials', {
     method: 'POST',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1217,33 +1381,38 @@ export async function resetAllWorkspaceData(
   resetCatalogAndSettings = true
 ): Promise<{ ok: boolean; state: AppState; message: string }> {
   const token = getDsbSessionToken();
-  const res = await fetch('/api/admin/reset-all', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      masterPassword,
-      resetCatalogAndSettings,
-    }),
-  });
+  beginMutation();
+  try {
+    const res = await fetch('/api/admin/reset-all', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        masterPassword,
+        resetCatalogAndSettings,
+      }),
+    });
 
-  const data = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    state?: AppState;
-    message?: string;
-  } & AuthErrorResponse;
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      state?: AppState;
+      message?: string;
+    } & AuthErrorResponse;
 
-  if (!res.ok || !data.ok || !data.state) {
-    throw new DsbAuthError(data);
+    if (!res.ok || !data.ok || !data.state) {
+      throw new DsbAuthError(data);
+    }
+
+    const normalizedState = commitMutatedState(data.state, true);
+    return {
+      ok: true,
+      state: normalizedState,
+      message: data.message || 'Todas las métricas y datos fueron reiniciados a 0.',
+    };
+  } finally {
+    endMutation();
   }
-
-  const normalizedState = normalizeAppState(data.state);
-  writeLocalState(normalizedState, true);
-  return {
-    ok: true,
-    state: normalizedState,
-    message: data.message || 'Todas las métricas y datos fueron reiniciados a 0.',
-  };
 }

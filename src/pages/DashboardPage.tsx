@@ -1,19 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowLeft,
-  Check,
   Delete,
   Eye,
   EyeOff,
   KeyRound,
-  RotateCcw,
   ShieldAlert,
   ShieldCheck,
   User,
 } from 'lucide-react';
-import type { AppSettings, AppState, GiftThemeId, LeadCategory } from '../types/app';
+import type { AppSettings, AppState, GiftThemeId } from '../types/app';
 import {
   createGift,
   createLead,
@@ -39,7 +37,7 @@ import {
 import { AutumnAtmosphere } from '../components/autumn/AutumnAtmosphere';
 import { DashboardHeader, type DashboardTab } from '../components/dashboard/DashboardHeader';
 import { KpiGrid, type KpiFilterKey } from '../components/dashboard/KpiGrid';
-import { ProspectsManager } from '../components/dashboard/ProspectsManager';
+import { ProspectsManager, type LeadUpdatePayload } from '../components/dashboard/ProspectsManager';
 import { CallerProspectsView } from '../components/dashboard/CallerProspectsView';
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
 import { QrStudioPanel } from '../components/dashboard/QrStudioPanel';
@@ -50,6 +48,7 @@ interface DashboardPageProps {
   appState: AppState;
   syncMode: 'api' | 'local';
   onStateChange: (next: AppState) => void;
+  onSyncPauseChange?: (paused: boolean) => void;
 }
 
 type SecurityStage = 'checking' | 'filter1_credentials' | 'filter2_pin' | 'authenticated';
@@ -58,12 +57,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   appState,
   syncMode,
   onStateChange,
+  onSyncPauseChange,
 }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey>('all');
   const [userRole, setUserRole] = useState<'admin' | 'caller'>('admin');
   const [masterResetOpen, setMasterResetOpen] = useState(false);
   const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
+  const [prospectsBusy, setProspectsBusy] = useState(false);
+  const [giftsBusy, setGiftsBusy] = useState(false);
 
   // 2-Filter Cybersecurity Gateway State
   const [securityStage, setSecurityStage] = useState<SecurityStage>('checking');
@@ -75,6 +77,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [lockoutSeconds, setLockoutSeconds] = useState<number>(0);
+
+  const pinInputRef = useRef(pinInput);
+  pinInputRef.current = pinInput;
+
+  const shouldPauseSync =
+    securityStage !== 'authenticated' || masterResetOpen || prospectsBusy || giftsBusy;
+
+  useEffect(() => {
+    onSyncPauseChange?.(shouldPauseSync);
+    return () => onSyncPauseChange?.(false);
+  }, [shouldPauseSync, onSyncPauseChange]);
 
   // Check active session token on mount
   useEffect(() => {
@@ -97,16 +110,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onStateChange]);
 
   // Countdown timer when rate-limited / locked out
+  const isLockedOut = lockoutSeconds > 0;
   useEffect(() => {
-    if (lockoutSeconds <= 0) return;
+    if (!isLockedOut) return;
     const timer = window.setInterval(() => {
       setLockoutSeconds((prev) => Math.max(0, prev - 1));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [lockoutSeconds]);
+  }, [isLockedOut]);
 
   const handleFilter1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,6 +197,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     await submitPinCode(pinInput);
   };
 
+  const submitPinCodeRef = useRef(submitPinCode);
+  submitPinCodeRef.current = submitPinCode;
+
   // Physical keyboard support while on the Safe / Vault PIN screen
   useEffect(() => {
     if (securityStage !== 'filter2_pin') return;
@@ -196,12 +213,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         setPinInput((prev) => prev.slice(0, -1));
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        void submitPinCode(pinInput);
+        void submitPinCodeRef.current(pinInputRef.current);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  });
+  }, [securityStage, lockoutSeconds, authLoading]);
 
   const handleLockNow = () => {
     logoutDsbSession();
@@ -215,16 +232,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     setSecurityStage('filter1_credentials');
   };
 
-  const handleUpdateLead = async (
-    id: string,
-    updates: {
-      called?: boolean;
-      category?: LeadCategory;
-      orderAmount?: number | null;
-      notes?: string;
-    }
-  ) => {
-    const res = await updateLead(id, updates);
+  const handleUpdateLead = async (id: string, updates: LeadUpdatePayload) => {
+    const res = await updateLead(id, updates as Parameters<typeof updateLead>[1]);
     onStateChange(res.state);
   };
 
@@ -718,31 +727,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <>
               {activeTab === 'overview' && (
                 <>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
-                    {resetSuccessMessage ? (
-                      <div className="inline-flex items-center gap-2 rounded-2xl sm:rounded-full border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 shadow-xs">
-                        <Check className="h-4 w-4 shrink-0 text-emerald-600" />
-                        <span>{resetSuccessMessage}</span>
-                      </div>
-                    ) : (
-                      <div className="hidden sm:block" />
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => setMasterResetOpen(true)}
-                      className="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-full border border-[#B84A27]/35 bg-[#FFFDF9]/95 px-4 py-2 text-xs font-bold text-[#8C3318] shadow-sm hover:border-[#B84A27]/70 hover:bg-[#FFF5EC] transition-all cursor-pointer"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5 shrink-0" />
-                      Reiniciar métricas y todo desde 0
-                    </button>
-                  </div>
-
                   <KpiGrid
                     leads={appState.leads}
                     defaultTicketAmount={appState.settings.defaultTicketAmount}
                     activeFilter={kpiFilter}
                     onSelectFilter={setKpiFilter}
+                    onOpenMasterReset={() => setMasterResetOpen(true)}
+                    resetSuccessMessage={resetSuccessMessage}
                   />
 
                   <ProspectsManager
@@ -754,6 +745,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     onUpdateLead={handleUpdateLead}
                     onCreateManualLead={handleCreateManualLead}
                     onDeleteLead={handleDeleteLead}
+                    onBusyChange={setProspectsBusy}
                   />
                 </>
               )}
@@ -772,6 +764,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   onSaveGiftProbabilities={handleSaveGiftProbabilities}
                   onDeleteGift={handleDeleteGift}
                   onResetGifts={handleResetGifts}
+                  onBusyChange={setGiftsBusy}
                 />
               )}
 
@@ -788,7 +781,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 <SettingsPanel
                   settings={appState.settings}
                   onSaveSettings={handleSaveSettings}
-                  onOpenMasterReset={() => setMasterResetOpen(true)}
                 />
               )}
             </>

@@ -21,7 +21,7 @@
       "accentColor": "#C88A2B",
       "active": true,
       "stockLabel": "Edición Exclusiva",
-      "probability": 11.1
+      "probability": 30
     },
     {
       "id": "gift-utensil-holder",
@@ -34,7 +34,7 @@
       "accentColor": "#8C6E58",
       "active": true,
       "stockLabel": "Disponible",
-      "probability": 11.1
+      "probability": 30
     },
     {
       "id": "gift-bowls-3",
@@ -47,7 +47,7 @@
       "accentColor": "#B84A27",
       "active": true,
       "stockLabel": "Alta Demanda",
-      "probability": 11.1
+      "probability": 30
     },
     {
       "id": "gift-santoku-5",
@@ -60,7 +60,7 @@
       "accentColor": "#8C3B20",
       "active": true,
       "stockLabel": "Edición Limitada",
-      "probability": 11.1
+      "probability": 5
     },
     {
       "id": "gift-cleaver-7",
@@ -73,7 +73,7 @@
       "accentColor": "#5B4636",
       "active": true,
       "stockLabel": "Disponible",
-      "probability": 11.1
+      "probability": 3
     },
     {
       "id": "gift-icecream-2",
@@ -86,7 +86,7 @@
       "accentColor": "#C88A2B",
       "active": true,
       "stockLabel": "Disponible",
-      "probability": 11.1
+      "probability": 30
     },
     {
       "id": "gift-mugs-2",
@@ -99,7 +99,7 @@
       "accentColor": "#7C4327",
       "active": true,
       "stockLabel": "Disponible",
-      "probability": 11.1
+      "probability": 30
     },
     {
       "id": "gift-bamboo-large",
@@ -112,7 +112,7 @@
       "accentColor": "#A66328",
       "active": true,
       "stockLabel": "Disponible",
-      "probability": 11.1
+      "probability": 5
     },
     {
       "id": "gift-warmer-pro",
@@ -125,7 +125,7 @@
       "accentColor": "#4B644A",
       "active": true,
       "stockLabel": "Edición Estrella",
-      "probability": 11.1
+      "probability": 10
     }
   ],
   "leads": [],

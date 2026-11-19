@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Phone, MapPin, Search, UserCheck } from 'lucide-react';
 import type { Lead } from '../../types/app';
 
@@ -13,11 +12,18 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return leads;
+    const rawCode = q.replace(/^#/, '');
     return leads.filter((lead) => {
       const name = (lead.name || '').toLowerCase();
       const phone = (lead.phone || '').toLowerCase();
       const address = (lead.address || '').toLowerCase();
-      return name.includes(q) || phone.includes(q) || address.includes(q);
+      const claimCode = (lead.claimCode || '').toLowerCase();
+      return (
+        name.includes(q) ||
+        phone.includes(q) ||
+        address.includes(q) ||
+        (claimCode ? claimCode.includes(rawCode) || claimCode.replace(/^otn-/, '').includes(rawCode) : false)
+      );
     });
   }, [leads, search]);
 
@@ -58,7 +64,7 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nombre, teléfono o dirección..."
+            placeholder="Buscar por nombre, teléfono, dirección o Nº de orden..."
             className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
           />
         </div>
@@ -66,76 +72,71 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
 
       {/* Restricted Client List */}
       <div className="mt-4 sm:mt-5 space-y-2.5">
-        <AnimatePresence mode="popLayout">
-          {filteredLeads.length === 0 ? (
-            <motion.div
-              key="caller-empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="rounded-2xl border border-dashed border-[#DFCBB3] bg-[#FAF3E8]/40 py-12 text-center"
-            >
-              <p className="font-serif text-lg font-semibold text-[#594133]">
-                Sin clientes disponibles
-              </p>
-              <p className="mt-1 text-xs text-[#8B6F5B]">
-                No se encontraron registros que coincidan con la búsqueda.
-              </p>
-            </motion.div>
-          ) : (
-            filteredLeads.map((lead, index) => {
-              const cleanTel = (lead.phone || '').replace(/[^\d+]/g, '');
+        {filteredLeads.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[#DFCBB3] bg-[#FAF3E8]/40 py-12 text-center">
+            <p className="font-serif text-lg font-semibold text-[#594133]">
+              Sin clientes disponibles
+            </p>
+            <p className="mt-1 text-xs text-[#8B6F5B]">
+              No se encontraron registros que coincidan con la búsqueda.
+            </p>
+          </div>
+        ) : (
+          filteredLeads.map((lead, index) => {
+            const cleanTel = (lead.phone || '').replace(/[^\d+]/g, '');
 
-              return (
-                <motion.div
-                  layout
-                  key={lead.id || `lead-${index}`}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98 }}
-                  transition={{ duration: 0.2 }}
-                  className="rounded-2xl border border-[#DFCBB3] bg-white p-3.5 sm:p-4 hover:border-[#C88A2B]/60 transition-colors shadow-sm"
-                >
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-3 items-start md:items-center">
-                    {/* Nombre */}
-                    <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block">
-                        Nombre
-                      </span>
+            return (
+              <div
+                key={lead.id || `lead-${index}`}
+                className="rounded-2xl border border-[#DFCBB3] bg-white p-3.5 sm:p-4 hover:border-[#C88A2B]/60 transition-colors shadow-sm"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-3 items-start md:items-center">
+                  {/* Nombre */}
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block">
+                      Nombre
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <p className="text-sm sm:text-base font-bold text-[#22150E] break-words">
                         {lead.name || 'Sin nombre'}
                       </p>
-                    </div>
-
-                    {/* Teléfono */}
-                    <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block mb-1 md:mb-0">
-                        Teléfono
-                      </span>
-                      <a
-                        href={cleanTel ? `tel:${cleanTel}` : undefined}
-                        className="inline-flex min-h-[44px] md:min-h-0 items-center gap-2 rounded-xl md:rounded-none border border-[#E6D5BF] md:border-0 bg-[#FAF3E8] md:bg-transparent px-3 md:px-0 py-2 md:py-0 font-mono text-sm font-semibold text-[#B84A27] hover:underline"
-                      >
-                        <Phone className="h-3.5 w-3.5 shrink-0 text-[#B84A27]" />
-                        <span className="tabular-nums">{lead.phone || 'Sin teléfono'}</span>
-                      </a>
-                    </div>
-
-                    {/* Dirección */}
-                    <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block">
-                        Dirección
-                      </span>
-                      <p className="flex items-start gap-1.5 w-full min-w-0 text-xs sm:text-sm text-[#4E311E]">
-                        <MapPin className="h-3.5 w-3.5 shrink-0 text-[#9B816E] mt-0.5" />
-                        <span className="break-words min-w-0">{lead.address || 'Sin dirección registrada'}</span>
-                      </p>
+                      {lead.claimCode && (
+                        <span className="rounded-md bg-[#FAF0E0] border border-[#E6C99E] px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#8C4A19]">
+                          Orden {lead.claimCode}
+                        </span>
+                      )}
                     </div>
                   </div>
-                </motion.div>
-              );
-            })
-          )}
-        </AnimatePresence>
+
+                  {/* Teléfono */}
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block mb-1 md:mb-0">
+                      Teléfono
+                    </span>
+                    <a
+                      href={cleanTel ? `tel:${cleanTel}` : undefined}
+                      className="inline-flex min-h-[44px] md:min-h-0 items-center gap-2 rounded-xl md:rounded-none border border-[#E6D5BF] md:border-0 bg-[#FAF3E8] md:bg-transparent px-3 md:px-0 py-2 md:py-0 font-mono text-sm font-semibold text-[#B84A27] hover:underline"
+                    >
+                      <Phone className="h-3.5 w-3.5 shrink-0 text-[#B84A27]" />
+                      <span className="tabular-nums">{lead.phone || 'Sin teléfono'}</span>
+                    </a>
+                  </div>
+
+                  {/* Dirección */}
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#A2683A] block">
+                      Dirección
+                    </span>
+                    <p className="flex items-start gap-1.5 w-full min-w-0 text-xs sm:text-sm text-[#4E311E]">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-[#9B816E] mt-0.5" />
+                      <span className="break-words min-w-0">{lead.address || 'Sin dirección registrada'}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </section>
   );

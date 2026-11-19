@@ -162,6 +162,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
             <GiftRevealStage
               key={`step-reveal-${playRound}`}
               leadName={currentLead.name}
+              leadPhone={currentLead.phone}
               leadAddress={currentLead.address}
               gift={revealedGift}
               claimCode={currentLead.claimCode}

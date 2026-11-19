@@ -13,11 +13,14 @@ const {
   DEFAULT_GIFT_PROBABILITY,
   sanitizeGiftProbability,
   normalizeGiftRecord,
+  normalizeLeadRecord,
   pickWeightedGift,
   isMissingColumnError,
   supabaseWriteWithOptionalColumns,
   mapGiftRow,
+  mapLeadRow,
   memoryGiftProbabilities,
+  memoryLeadPromoStates,
 } = await import('../server/index.js');
 
 describe('Gift Probability Sanitization, Weighted Draw & Supabase Compatibility', () => {
@@ -212,14 +215,116 @@ describe('Gift Probability Sanitization, Weighted Draw & Supabase Compatibility'
     memoryGiftProbabilities.clear();
   });
 
-  test('defaultStore.json and supabase/schema.sql define seeded probability 11.1 and randomizeGifts true', () => {
+  test('mapLeadRow, normalizeLeadRecord, and supabaseWriteWithOptionalColumns handle missing promo_code_invalidated columns cleanly', async () => {
+    memoryLeadPromoStates.clear();
+
+    const legacyCita = mapLeadRow({
+      id: 'lead-legacy-cita',
+      name: 'Legacy',
+      phone: '555-0001',
+      claim_code: 'OTN-1111',
+      called: true,
+      category: 'cita',
+      created_at: '2026-11-18T00:00:00.000Z',
+    });
+    assert.strictEqual(legacyCita.promoCodeInvalidated, true);
+
+    const legacyNone = mapLeadRow({
+      id: 'lead-legacy-none',
+      name: 'Legacy None',
+      phone: '555-0002',
+      claim_code: 'OTN-2222',
+      called: false,
+      category: 'none',
+      created_at: '2026-11-18T00:00:00.000Z',
+    });
+    assert.strictEqual(legacyNone.promoCodeInvalidated, false);
+    assert.strictEqual(legacyNone.promoCodeInvalidatedAt, null);
+
+    memoryLeadPromoStates.set('lead-mem', {
+      promoCodeInvalidated: true,
+      promoCodeInvalidatedAt: '2026-11-18T12:00:00.000Z',
+    });
+    const memMapped = mapLeadRow({
+      id: 'lead-mem',
+      name: 'Mem Lead',
+      phone: '555-0003',
+      claim_code: 'OTN-3333',
+      called: true,
+      category: 'none',
+      created_at: '2026-11-18T00:00:00.000Z',
+    });
+    assert.strictEqual(memMapped.promoCodeInvalidated, true);
+    assert.strictEqual(memMapped.promoCodeInvalidatedAt, '2026-11-18T12:00:00.000Z');
+    memoryLeadPromoStates.clear();
+
+    const normalizedLocal = normalizeLeadRecord({
+      id: 'local-1',
+      name: 'Local',
+      phone: '555-0004',
+      category: 'demo',
+      createdAt: '2026-11-18T00:00:00.000Z',
+    });
+    assert.strictEqual(normalizedLocal.promoCodeInvalidated, true);
+
+    const patchCalls = [];
+    await supabaseWriteWithOptionalColumns(
+      'leads?id=eq.lead-1',
+      'PATCH',
+      { Prefer: 'return=minimal' },
+      {
+        name: 'Test',
+        category: 'cita',
+        promo_code_invalidated: true,
+        promo_code_invalidated_at: '2026-11-18T12:00:00.000Z',
+      },
+      ['promo_code_invalidated', 'promo_code_invalidated_at'],
+      async (_path, init) => {
+        const body = JSON.parse(init.body);
+        patchCalls.push(body);
+        if ('promo_code_invalidated' in body) {
+          const err = new Error(
+            "Could not find the 'promo_code_invalidated' column of 'leads' in the schema cache"
+          );
+          err.code = 'PGRST204';
+          throw err;
+        }
+        if ('promo_code_invalidated_at' in body) {
+          const err = new Error('column "promo_code_invalidated_at" of relation "leads" does not exist');
+          err.code = '42703';
+          throw err;
+        }
+        return null;
+      }
+    );
+    assert.strictEqual(patchCalls.length, 3);
+    assert.deepStrictEqual(Object.keys(patchCalls[2]).sort(), ['category', 'name']);
+  });
+
+  test('defaultStore.json and supabase/schema.sql define updated seeded probabilities, randomizeGifts true, and lead promo columns', () => {
+    const EXPECTED_SEEDED_PROBABILITIES = {
+      'gift-utensil-holder': 30,
+      'gift-bowls-3': 30,
+      'gift-utensils-6': 30,
+      'gift-icecream-2': 30,
+      'gift-mugs-2': 30,
+      'gift-bamboo-large': 5,
+      'gift-warmer-pro': 10,
+      'gift-santoku-5': 5,
+      'gift-cleaver-7': 3,
+    };
+
     const defaultStore = JSON.parse(
       fs.readFileSync(path.join(PROJECT_ROOT, 'src', 'shared', 'defaultStore.json'), 'utf8')
     );
     assert.strictEqual(defaultStore.settings.randomizeGifts, true);
     assert.strictEqual(defaultStore.gifts.length, 9);
     for (const gift of defaultStore.gifts) {
-      assert.strictEqual(gift.probability, 11.1, `Seeded gift ${gift.id} must default to 11.1`);
+      assert.strictEqual(
+        gift.probability,
+        EXPECTED_SEEDED_PROBABILITIES[gift.id],
+        `Seeded gift ${gift.id} must have probability ${EXPECTED_SEEDED_PROBABILITIES[gift.id]}`
+      );
     }
 
     const schemaSql = fs.readFileSync(path.join(PROJECT_ROOT, 'supabase', 'schema.sql'), 'utf8');
@@ -229,5 +334,16 @@ describe('Gift Probability Sanitization, Weighted Draw & Supabase Compatibility'
       /alter\s+table\s+public\.gifts\s+add\s+column\s+if\s+not\s+exists\s+probability\s+numeric\s+not\s+null\s+default\s+11\.1/i
     );
     assert.match(schemaSql, /probability\s*=\s*excluded\.probability/i);
+    assert.match(schemaSql, /promo_code_invalidated\s+boolean\s+not\s+null\s+default\s+false/i);
+    assert.match(schemaSql, /promo_code_invalidated_at\s+timestamptz/i);
+    assert.match(
+      schemaSql,
+      /alter\s+table\s+public\.leads\s+add\s+column\s+if\s+not\s+exists\s+promo_code_invalidated\s+boolean\s+not\s+null\s+default\s+false/i
+    );
+    assert.match(
+      schemaSql,
+      /alter\s+table\s+public\.leads\s+add\s+column\s+if\s+not\s+exists\s+promo_code_invalidated_at\s+timestamptz/i
+    );
+    assert.match(schemaSql, /create\s+or\s+replace\s+function\s+public\.dsb_verify_admin_password/i);
   });
 });

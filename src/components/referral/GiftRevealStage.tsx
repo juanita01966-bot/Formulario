@@ -7,7 +7,17 @@ import {
   useReducedMotion,
   useTransform,
 } from 'framer-motion';
-import { MapPin, MessageCircle, RotateCcw, Sparkles, User } from 'lucide-react';
+import {
+  Check,
+  Download,
+  Loader2,
+  MapPin,
+  MessageCircle,
+  Phone,
+  RotateCcw,
+  Sparkles,
+  User,
+} from 'lucide-react';
 import type { GiftItem, GiftThemeId, ShowcaseStyleId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
 import {
@@ -16,9 +26,11 @@ import {
   resolveGiftUsageTip,
   resolveShowcaseTokens,
 } from '../gifts/GiftIllustration';
+import { saveCouponInvoicePng } from './couponInvoice';
 
 interface GiftRevealStageProps {
   leadName: string;
+  leadPhone?: string;
   leadAddress?: string;
   gift: GiftItem;
   claimCode: string;
@@ -487,6 +499,7 @@ const RevealedGiftShowcase: React.FC<{
 
 export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   leadName,
+  leadPhone,
   leadAddress,
   gift,
   claimCode,
@@ -498,8 +511,20 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   const prefersReduced = Boolean(useReducedMotion());
   const [phase, setPhase] = useState<RevealPhase>(() => (prefersReduced ? 'revealed' : 'floating'));
   const [climaxFlash, setClimaxFlash] = useState(false);
+  const [savingInvoice, setSavingInvoice] = useState(false);
+  const [invoiceSaved, setInvoiceSaved] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const phaseRef = useRef<RevealPhase>(phase);
+  const invoiceTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (invoiceTimerRef.current !== null) {
+        window.clearTimeout(invoiceTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -741,11 +766,38 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   }, [prefersReduced]);
 
   const firstName = leadName.trim().split(/\s+/)[0] || 'Invitado';
+  const cleanPhone = leadPhone?.trim() || '';
   const cleanAddress = leadAddress?.trim() || '';
   const usageTip = resolveGiftUsageTip(gift);
   const whatsappText = encodeURIComponent(
-    `Hola! Acabo de activar mi experiencia en The Ciprian Company. Mi nombre es ${leadName}${cleanAddress ? ` (${cleanAddress})` : ''}, destapé el regalo "${gift.name}" con código ${claimCode}.`
+    `Hola! Acabo de activar mi experiencia en The Ciprian Company. Mi nombre es ${leadName}${cleanAddress ? ` (${cleanAddress})` : ''}, destapé el regalo "${gift.name}" con Número de orden ${claimCode}.`
   );
+
+  const handleSaveInvoice = async () => {
+    if (savingInvoice) return;
+    setSavingInvoice(true);
+    setInvoiceError(null);
+    try {
+      await saveCouponInvoicePng({
+        leadName,
+        leadPhone: cleanPhone || undefined,
+        leadAddress: cleanAddress || undefined,
+        claimCode,
+        gift,
+      });
+      setInvoiceSaved(true);
+      if (invoiceTimerRef.current !== null) {
+        window.clearTimeout(invoiceTimerRef.current);
+      }
+      invoiceTimerRef.current = window.setTimeout(() => {
+        setInvoiceSaved(false);
+      }, 3200);
+    } catch {
+      setInvoiceError('No se pudo generar la factura en este navegador. Intenta de nuevo.');
+    } finally {
+      setSavingInvoice(false);
+    }
+  };
 
   const stageHeadline =
     phase === 'floating'
@@ -921,15 +973,21 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </p>
               </div>
 
-              {/* Refined Folio & Delivery Information Card */}
+              {/* Refined Order Number & Delivery Information Card */}
               <div className="mt-3.5 sm:mt-4 w-full rounded-2xl bg-[#160B06]/68 backdrop-blur-md border border-[#C88A2B]/35 px-3.5 sm:px-5 py-3.5 sm:py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                <div className="text-center sm:text-left">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#B89B7A]">
-                    Folio de reclamación
-                  </p>
-                  <p className="mt-0.5 font-mono text-lg sm:text-2xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
-                    {claimCode}
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-left">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#B89B7A]">
+                      Número de orden
+                    </p>
+                    <p className="mt-0.5 font-mono text-lg sm:text-2xl font-bold tracking-[0.14em] text-[#F4CA73] tabular-nums">
+                      {claimCode}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/35 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300">
+                    <Check className="h-3 w-3" />
+                    Código válido
+                  </span>
                 </div>
 
                 <div className="mt-3 pt-3 border-t border-[#C88A2B]/20 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -938,8 +996,15 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                     <span className="text-[#A88D71] shrink-0">Titular:</span>
                     <span className="font-semibold text-[#FFFDF9] truncate">{leadName}</span>
                   </div>
-                  {cleanAddress && (
+                  {cleanPhone && (
                     <div className="flex items-center gap-2 text-[#E8D5BE] min-w-0">
+                      <Phone className="h-3.5 w-3.5 text-[#C88A2B] shrink-0" />
+                      <span className="text-[#A88D71] shrink-0">Tel:</span>
+                      <span className="font-semibold text-[#FFFDF9] truncate tabular-nums">{cleanPhone}</span>
+                    </div>
+                  )}
+                  {cleanAddress && (
+                    <div className={`flex items-center gap-2 text-[#E8D5BE] min-w-0 ${cleanPhone ? 'sm:col-span-2' : ''}`}>
                       <MapPin className="h-3.5 w-3.5 text-[#C88A2B] shrink-0" />
                       <span className="text-[#A88D71] shrink-0">Ubicación:</span>
                       <span className="font-semibold text-[#FFFDF9] truncate">{cleanAddress}</span>
@@ -960,24 +1025,56 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </p>
               </div>
 
-              <div className="mt-5 sm:mt-6 flex flex-col sm:flex-row items-center gap-2.5 sm:gap-3 w-full">
-                <a
-                  href={`https://wa.me/?text=${whatsappText}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full sm:flex-1 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full bg-[#E5AE4E] px-5 py-3 text-sm font-bold text-[#1E110A] shadow-md hover:bg-[#F4CA73] transition-colors"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  Guardar comprobante
-                </a>
+              {invoiceError && (
+                <p className="mt-3 w-full rounded-xl border border-red-400/40 bg-red-950/50 px-3.5 py-2 text-xs text-red-200">
+                  {invoiceError}
+                </p>
+              )}
+
+              <div className="mt-5 sm:mt-6 flex flex-col gap-2.5 w-full">
                 <button
                   type="button"
-                  onClick={onStartAnother}
-                  className="w-full sm:w-auto min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-[#C88A2B]/35 bg-transparent px-5 py-3 text-sm font-medium text-[#E8D5BE] hover:bg-white/5 transition-colors cursor-pointer"
+                  onClick={handleSaveInvoice}
+                  disabled={savingInvoice}
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#F4CA73] via-[#E5AE4E] to-[#C88A2B] px-5 py-3 text-sm font-bold text-[#1E110A] shadow-[0_12px_28px_-8px_rgba(229,174,78,0.55)] hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-75"
                 >
-                  <RotateCcw className="h-4 w-4" />
-                  Nuevo registro
+                  {savingInvoice ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Generando factura...
+                    </>
+                  ) : invoiceSaved ? (
+                    <>
+                      <Check className="h-4 w-4" />
+                      Factura guardada
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4" />
+                      Guardar cupón (Factura)
+                    </>
+                  )}
                 </button>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
+                  <a
+                    href={`https://wa.me/?text=${whatsappText}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-[#E5AE4E]/45 bg-[#2A170D]/80 px-5 py-3 text-sm font-semibold text-[#F4CA73] hover:bg-[#3A2012] transition-colors"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Enviar por WhatsApp
+                  </a>
+                  <button
+                    type="button"
+                    onClick={onStartAnother}
+                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-[#C88A2B]/35 bg-transparent px-5 py-3 text-sm font-medium text-[#E8D5BE] hover:bg-white/5 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Nuevo registro
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
