@@ -14,6 +14,7 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  QrCode,
   RotateCcw,
   Sparkles,
   User,
@@ -27,6 +28,12 @@ import {
   resolveShowcaseTokens,
 } from '../gifts/GiftIllustration';
 import { saveCouponInvoicePng } from './couponInvoice';
+import {
+  generateShareQrAssets,
+  getPublicLandingUrl,
+  triggerQrDownload,
+  type ShareQrAssets,
+} from './shareQrCard';
 
 interface GiftRevealStageProps {
   leadName: string;
@@ -514,14 +521,31 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [invoiceSaved, setInvoiceSaved] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [qrAssets, setQrAssets] = useState<ShareQrAssets | null>(null);
+  const [sharingQr, setSharingQr] = useState(false);
+  const [qrSharedFeedback, setQrSharedFeedback] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const phaseRef = useRef<RevealPhase>(phase);
   const invoiceTimerRef = useRef<number | null>(null);
+  const qrTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    let active = true;
+    generateShareQrAssets()
+      .then((assets) => {
+        if (active) setQrAssets(assets);
+      })
+      .catch(() => {
+        // Non-blocking: generated on demand if needed
+      });
+
     return () => {
+      active = false;
       if (invoiceTimerRef.current !== null) {
         window.clearTimeout(invoiceTimerRef.current);
+      }
+      if (qrTimerRef.current !== null) {
+        window.clearTimeout(qrTimerRef.current);
       }
     };
   }, []);
@@ -769,9 +793,58 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   const cleanPhone = leadPhone?.trim() || '';
   const cleanAddress = leadAddress?.trim() || '';
   const usageTip = resolveGiftUsageTip(gift);
-  const whatsappText = encodeURIComponent(
-    `Hola! Acabo de activar mi experiencia en The Ciprian Company. Mi nombre es ${leadName}${cleanAddress ? ` (${cleanAddress})` : ''}, destapé el regalo "${gift.name}" con Número de orden ${claimCode}.`
-  );
+  const publicLandingUrl = qrAssets?.targetUrl || getPublicLandingUrl();
+  const whatsappQrMessage = `¡Hola! Participa en la experiencia exclusiva de The Ciprian Company y descubre tu cajita sorpresa de cocina aquí: ${publicLandingUrl}`;
+  const whatsappQrHref = `https://wa.me/?text=${encodeURIComponent(whatsappQrMessage)}`;
+
+  const showQrFeedback = (msg: string) => {
+    setQrSharedFeedback(msg);
+    if (qrTimerRef.current !== null) {
+      window.clearTimeout(qrTimerRef.current);
+    }
+    qrTimerRef.current = window.setTimeout(() => {
+      setQrSharedFeedback(null);
+    }, 4500);
+  };
+
+  const handleShareQrWhatsApp = async () => {
+    if (sharingQr) return;
+    setSharingQr(true);
+    try {
+      const assets = qrAssets ?? (await generateShareQrAssets(publicLandingUrl));
+      if (!qrAssets) setQrAssets(assets);
+
+      const nav = navigator as Navigator & {
+        canShare?: (data?: ShareData) => boolean;
+      };
+      if (typeof nav.share === 'function' && typeof nav.canShare === 'function') {
+        try {
+          if (nav.canShare({ files: [assets.file] })) {
+            await nav.share({
+              title: 'The Ciprian Company · Código QR de Premio',
+              text: whatsappQrMessage,
+              files: [assets.file],
+            });
+            showQrFeedback('QR compartido · ¡Tus probabilidades han subido!');
+            return;
+          }
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            return;
+          }
+        }
+      }
+
+      // Desktop / fallback: save the QR card PNG and open WhatsApp with the direct link
+      triggerQrDownload(assets);
+      window.open(whatsappQrHref, '_blank', 'noopener,noreferrer');
+      showQrFeedback('QR descargado · Adjúntalo en tu chat de WhatsApp');
+    } catch {
+      window.open(whatsappQrHref, '_blank', 'noopener,noreferrer');
+    } finally {
+      setSharingQr(false);
+    }
+  };
 
   const handleSaveInvoice = async () => {
     if (savingInvoice) return;
@@ -1025,13 +1098,46 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </p>
               </div>
 
+              {/* Bonus Probability Boost & Share QR Card */}
+              <div className="mt-4 w-full rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#1A261C]/75 via-[#181B14]/82 to-[#160B06]/85 backdrop-blur-md p-3.5 sm:p-4 text-left shadow-[inset_0_1px_0_rgba(167,243,208,0.16)]">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#F4CA73]/45 bg-[#FFF9ED] p-1 shadow-sm">
+                    {qrAssets?.previewDataUrl ? (
+                      <img
+                        src={qrAssets.previewDataUrl}
+                        alt="Código QR para compartir por WhatsApp"
+                        className="h-full w-full rounded-lg object-cover"
+                      />
+                    ) : (
+                      <QrCode className="h-8 w-8 text-[#22150E]" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300 mb-1">
+                      <Sparkles className="h-2.5 w-2.5" />
+                      Aumenta tus probabilidades
+                    </div>
+                    <p className="text-xs leading-snug text-[#EFE2D0]">
+                      Al <strong className="text-[#FFFDF9]">compartir este QR por WhatsApp</strong> aumentas tus probabilidades de ganar{' '}
+                      <strong className="text-[#F4CA73]">mejores premios</strong>.
+                    </p>
+                  </div>
+                </div>
+                {qrSharedFeedback && (
+                  <p className="mt-2.5 flex items-center gap-1.5 rounded-xl border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-200">
+                    <Check className="h-3.5 w-3.5 shrink-0" />
+                    {qrSharedFeedback}
+                  </p>
+                )}
+              </div>
+
               {invoiceError && (
                 <p className="mt-3 w-full rounded-xl border border-red-400/40 bg-red-950/50 px-3.5 py-2 text-xs text-red-200">
                   {invoiceError}
                 </p>
               )}
 
-              <div className="mt-5 sm:mt-6 flex flex-col gap-2.5 w-full">
+              <div className="mt-4 sm:mt-5 flex flex-col gap-2.5 w-full">
                 <button
                   type="button"
                   onClick={handleSaveInvoice}
@@ -1057,15 +1163,19 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </button>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
-                  <a
-                    href={`https://wa.me/?text=${whatsappText}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-[#E5AE4E]/45 bg-[#2A170D]/80 px-5 py-3 text-sm font-semibold text-[#F4CA73] hover:bg-[#3A2012] transition-colors"
+                  <button
+                    type="button"
+                    onClick={handleShareQrWhatsApp}
+                    disabled={sharingQr}
+                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-emerald-400/50 bg-emerald-700/85 px-5 py-3 text-sm font-bold text-[#FFFDF9] shadow-[0_10px_24px_-8px_rgba(16,185,129,0.45)] hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-75"
                   >
-                    <MessageCircle className="h-4 w-4" />
-                    Enviar por WhatsApp
-                  </a>
+                    {sharingQr ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <MessageCircle className="h-4 w-4" />
+                    )}
+                    Compartir QR
+                  </button>
                   <button
                     type="button"
                     onClick={onStartAnother}

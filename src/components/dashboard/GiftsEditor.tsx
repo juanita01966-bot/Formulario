@@ -11,8 +11,6 @@ import {
   Percent,
   Plus,
   RotateCcw,
-  Save,
-  Scale,
   Shuffle,
   Sparkles,
   Trash2,
@@ -566,7 +564,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   onUpdateShowcaseSettings,
   onCreateGift,
   onUpdateGift,
-  onSaveGiftProbabilities,
+  onSaveGiftProbabilities: _onSaveGiftProbabilities,
   onDeleteGift,
   onResetGifts,
   onBusyChange,
@@ -581,151 +579,27 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [savingShowcase, setSavingShowcase] = useState(false);
   const [driveDetected, setDriveDetected] = useState(false);
-  const [editedWeights, setEditedWeights] = useState<Record<string, string>>({});
-  const [savingProbabilities, setSavingProbabilities] = useState(false);
-  const [probFeedback, setProbFeedback] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    onBusyChange?.(modalOpen || savingProbabilities || savingShowcase);
+    onBusyChange?.(modalOpen || savingShowcase);
     return () => onBusyChange?.(false);
-  }, [modalOpen, savingProbabilities, savingShowcase, onBusyChange]);
+  }, [modalOpen, savingShowcase, onBusyChange]);
 
   const previewUid = useId().replace(/:/g, '');
   const activeCount = gifts.filter((g) => g.active).length;
 
-  const getDraftWeightString = (gift: GiftItem): string =>
-    editedWeights[gift.id] !== undefined
-      ? editedWeights[gift.id]
-      : String(getGiftProbability(gift));
-
-  const draftWeightsById = new Map<string, number>();
   let totalActiveWeight = 0;
   for (const gift of gifts) {
-    const w = parseWeightInput(getDraftWeightString(gift));
-    draftWeightsById.set(gift.id, w);
     if (gift.active) {
-      totalActiveWeight += w;
+      totalActiveWeight += getGiftProbability(gift);
     }
   }
 
-  const changedWeightUpdates = gifts
-    .map((gift) => {
-      if (editedWeights[gift.id] === undefined) return null;
-      const nextProb = parseWeightInput(editedWeights[gift.id]);
-      const currentProb = getGiftProbability(gift);
-      if (Math.abs(nextProb - currentProb) < 0.001) return null;
-      return { id: gift.id, probability: nextProb };
-    })
-    .filter((item): item is { id: string; probability: number } => item !== null);
-
-  const hasUnsavedWeights = changedWeightUpdates.length > 0;
-
-  const persistProbabilities = async (updates: Array<{ id: string; probability: number }>) => {
-    if (updates.length === 0) return;
-    if (onSaveGiftProbabilities) {
-      await onSaveGiftProbabilities(updates);
-      return;
-    }
-    for (const item of updates) {
-      await onUpdateGift(item.id, { probability: item.probability });
-    }
-  };
-
-  const handleWeightTextChange = (giftId: string, raw: string) => {
-    setProbFeedback(null);
-    setEditedWeights((prev) => ({ ...prev, [giftId]: raw }));
-  };
-
-  const handleWeightSliderChange = (giftId: string, rawValue: number) => {
-    setProbFeedback(null);
-    const clean = Math.round(Math.max(0, rawValue) * 10) / 10;
-    setEditedWeights((prev) => ({ ...prev, [giftId]: String(clean) }));
-  };
-
-  const handleWeightInputBlur = (gift: GiftItem) => {
-    const currentRaw = editedWeights[gift.id];
-    if (currentRaw === undefined) return;
-    const normalized = parseWeightInput(currentRaw);
-    const saved = getGiftProbability(gift);
-    if (Math.abs(normalized - saved) < 0.001) {
-      setEditedWeights((prev) => {
-        const next = { ...prev };
-        delete next[gift.id];
-        return next;
-      });
-    } else {
-      setEditedWeights((prev) => ({ ...prev, [gift.id]: String(normalized) }));
-    }
-  };
-
-  const handleSaveProbabilities = async () => {
-    if (!hasUnsavedWeights || savingProbabilities) return;
-    setErrorMsg(null);
-    setProbFeedback(null);
-    setSavingProbabilities(true);
-    try {
-      await persistProbabilities(changedWeightUpdates);
-      setEditedWeights({});
-      setProbFeedback('Distribución de probabilidades guardada.');
-      window.setTimeout(() => setProbFeedback(null), 3000);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'No se pudieron guardar las probabilidades.');
-    } finally {
-      setSavingProbabilities(false);
-    }
-  };
-
-  const handleBalanceProbabilities = async () => {
-    if (gifts.length === 0 || savingProbabilities) return;
-    setErrorMsg(null);
-    setProbFeedback(null);
-
-    const targetPool = activeCount > 0 ? gifts.filter((g) => g.active) : gifts;
-    const equalWeight =
-      targetPool.length > 0 ? Math.round((100 / targetPool.length) * 10) / 10 : 11.1;
-
-    const previewDrafts: Record<string, string> = { ...editedWeights };
-    const updates: Array<{ id: string; probability: number }> = [];
-    for (const gift of targetPool) {
-      previewDrafts[gift.id] = String(equalWeight);
-      if (Math.abs(getGiftProbability(gift) - equalWeight) >= 0.001) {
-        updates.push({ id: gift.id, probability: equalWeight });
-      }
-    }
-    setEditedWeights(previewDrafts);
-
-    if (updates.length === 0) {
-      setEditedWeights({});
-      setProbFeedback(`Probabilidades ya equilibradas (${equalWeight} c/u).`);
-      window.setTimeout(() => setProbFeedback(null), 3000);
-      return;
-    }
-
-    setSavingProbabilities(true);
-    try {
-      await persistProbabilities(updates);
-      setEditedWeights({});
-      setProbFeedback(`Probabilidades equilibradas (${equalWeight} c/u).`);
-      window.setTimeout(() => setProbFeedback(null), 3000);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'No se pudieron equilibrar las probabilidades.');
-    } finally {
-      setSavingProbabilities(false);
-    }
-  };
-
   const handleQuickSaveCardProbability = async (giftId: string, probability: number) => {
     setErrorMsg(null);
-    setProbFeedback(null);
     try {
       await onUpdateGift(giftId, { probability });
-      setEditedWeights((prev) => {
-        if (prev[giftId] === undefined) return prev;
-        const next = { ...prev };
-        delete next[giftId];
-        return next;
-      });
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'No se pudo actualizar la probabilidad.');
       throw err;
@@ -742,7 +616,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   };
 
   const openEditModal = (gift: GiftItem) => {
-    const effectiveWeight = draftWeightsById.get(gift.id) ?? getGiftProbability(gift);
+    const effectiveWeight = getGiftProbability(gift);
     setEditingGiftId(gift.id);
     setDraft({
       name: gift.name,
@@ -778,12 +652,6 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     try {
       if (editingGiftId) {
         await onUpdateGift(editingGiftId, sanitizedPayload);
-        setEditedWeights((prev) => {
-          if (prev[editingGiftId] === undefined) return prev;
-          const next = { ...prev };
-          delete next[editingGiftId];
-          return next;
-        });
       } else {
         await onCreateGift(sanitizedPayload);
       }
@@ -806,12 +674,6 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     setErrorMsg(null);
     try {
       await onDeleteGift(id);
-      setEditedWeights((prev) => {
-        if (prev[id] === undefined) return prev;
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
       setConfirmDeleteId(null);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'No se pudo eliminar el regalo.');
@@ -842,7 +704,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   const otherActiveWeightSum = gifts.reduce((sum, g) => {
     if (editingGiftId && g.id === editingGiftId) return sum;
     if (!g.active) return sum;
-    return sum + (draftWeightsById.get(g.id) ?? getGiftProbability(g));
+    return sum + getGiftProbability(g);
   }, 0);
   const modalTotalActiveWeight = otherActiveWeightSum + (draft.active ? modalWeightNumber : 0);
   const modalEffectivePercent =
@@ -874,7 +736,6 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                   type="button"
                   onClick={async () => {
                     await onResetGifts();
-                    setEditedWeights({});
                     setConfirmReset(false);
                   }}
                   className="font-bold text-[#8C3318] hover:underline cursor-pointer"
@@ -1092,268 +953,46 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
           </div>
         </div>
 
-        {/* Distribución de Probabilidades (9 Espacios) + Selección Aleatoria Anti-Abuso */}
-        <div className="mt-4 rounded-2xl border border-[#DFC6A6] bg-gradient-to-br from-[#FFFDF9] via-[#FCF6EC] to-[#F7EAD7]/85 p-3.5 sm:p-5 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#22150E] text-[#F4CA73]">
-                  <Percent className="h-3.5 w-3.5" />
-                </span>
-                <h3 className="text-sm sm:text-base font-bold text-[#22150E]">
-                  Distribución de Probabilidades (9 Espacios)
-                </h3>
-              </div>
-              <p className="text-xs text-[#6E5341] mt-1">
-                Controla el peso de cada regalo (<strong>0</strong> = nunca sale, <strong>100+</strong> = muy frecuente). El porcentaje efectivo se recalcula al instante entre los regalos activos.
-              </p>
-            </div>
-
-            {/* Selección Aleatoria Anti-Abuso Toggle */}
-            <button
-              type="button"
-              disabled={savingShowcase || !onUpdateShowcaseSettings}
-              onClick={() => handleShowcaseUpdate({ randomizeGifts: !randomizeGifts })}
-              className={`flex min-h-[54px] w-full lg:w-auto items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer disabled:opacity-60 shrink-0 ${
-                randomizeGifts
-                  ? 'border-emerald-300 bg-emerald-50/90 text-emerald-950 shadow-sm'
-                  : 'border-[#DFCBB3] bg-white text-[#4E382B] hover:bg-[#FAF3E8]'
+        {/* Selección Aleatoria Anti-Abuso */}
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[#E6D5BF] bg-[#FAF3E8]/70 p-3.5 sm:px-5 sm:py-3.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                randomizeGifts ? 'bg-emerald-600 text-white' : 'bg-stone-200 text-stone-600'
               }`}
             >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                    randomizeGifts
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-stone-200 text-stone-600'
-                  }`}
-                >
-                  <Shuffle className="h-4 w-4" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold leading-tight">
-                    Selección Aleatoria Anti-Abuso
-                  </p>
-                  <p className="text-[10.5px] opacity-80 leading-snug">
-                    {randomizeGifts
-                      ? 'Activa · Sortea al tocar según estos pesos'
-                      : 'Desactivada · Orden fijo según catálogo'}
-                  </p>
-                </div>
-              </div>
-              <span
-                className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                  randomizeGifts
-                    ? 'bg-emerald-700 text-white'
-                    : 'bg-stone-200 text-stone-700'
-                }`}
-              >
-                {randomizeGifts ? 'ON' : 'OFF'}
-              </span>
-            </button>
-          </div>
-
-          {!randomizeGifts && (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
-              <strong>Modo fijo activo:</strong> Las 9 cajas seguirán el orden del catálogo. Activa{' '}
-              <strong>Selección Aleatoria Anti-Abuso</strong> arriba para que el sorteo aplique esta distribución ponderada.
-            </div>
-          )}
-
-          {activeCount > 0 && totalActiveWeight === 0 && (
-            <div className="rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-900">
-              Todos los regalos activos tienen peso <strong>0</strong>. Mientras no asignes al menos un regalo con peso mayor a 0, el sorteo repartirá de forma uniforme entre los activos.
-            </div>
-          )}
-
-          {/* Summary Readout + Bulk Actions */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-[#E6D5BF] bg-white/85 px-3.5 py-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FAF3E8] border border-[#E6D5BF] px-2.5 py-1 font-semibold text-[#4E382B] tabular-nums">
-                Activos: <strong>{activeCount}</strong>/{gifts.length}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FAF0E0] border border-[#E6C99E] px-2.5 py-1 font-semibold text-[#8C4A19] tabular-nums">
-                Peso total activo: <strong>{formatWeightNumber(totalActiveWeight)}</strong>
-              </span>
-              {probFeedback && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-1 font-semibold text-emerald-800">
-                  <Check className="h-3.5 w-3.5 text-emerald-600" />
-                  {probFeedback}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                disabled={savingProbabilities || gifts.length === 0}
-                onClick={handleBalanceProbabilities}
-                className="inline-flex min-h-[44px] sm:min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-xl sm:rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-3.5 py-2 sm:py-1.5 text-xs font-semibold text-[#4E382B] hover:bg-[#F1E2CA] transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <Scale className="h-3.5 w-3.5 text-[#B84A27] shrink-0" />
-                Equilibrar probabilidades
-              </button>
-
-              {hasUnsavedWeights && (
-                <button
-                  type="button"
-                  disabled={savingProbabilities}
-                  onClick={() => setEditedWeights({})}
-                  className="inline-flex min-h-[44px] sm:min-h-[36px] items-center justify-center rounded-xl sm:rounded-full border border-stone-200 bg-white px-3 py-2 sm:py-1.5 text-xs font-semibold text-[#6E5341] hover:bg-stone-100 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  Descartar
-                </button>
-              )}
-
-              <button
-                type="button"
-                disabled={!hasUnsavedWeights || savingProbabilities}
-                onClick={handleSaveProbabilities}
-                className={`inline-flex min-h-[44px] sm:min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-xl sm:rounded-full px-4 py-2 sm:py-1.5 text-xs font-bold transition-all cursor-pointer disabled:opacity-50 ${
-                  hasUnsavedWeights
-                    ? 'bg-gradient-to-r from-[#22150E] to-[#8C3318] text-[#FFFDF9] shadow-sm hover:brightness-110'
-                    : 'border border-[#E6D5BF] bg-stone-100 text-stone-500'
-                }`}
-              >
-                <Save className="h-3.5 w-3.5 shrink-0" />
-                {savingProbabilities
-                  ? 'Guardando...'
-                  : hasUnsavedWeights
-                    ? `Guardar probabilidades (${changedWeightUpdates.length})`
-                    : 'Sin cambios'}
-              </button>
+              <Shuffle className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-bold text-[#22150E] leading-tight">
+                Selección Aleatoria Anti-Abuso
+              </p>
+              <p className="text-[11px] text-[#6E5341] leading-snug mt-0.5">
+                {randomizeGifts
+                  ? 'Activa · Cada caja sortea según el % configurado en cada tarjeta'
+                  : 'Desactivada · Orden fijo según catálogo'}
+              </p>
             </div>
           </div>
 
-          {/* Per-Gift Weight Sliders & Live Effective % Bars */}
-          <div className="space-y-2.5">
-            {gifts.map((gift) => {
-              const rawText = getDraftWeightString(gift);
-              const weight = draftWeightsById.get(gift.id) ?? 0;
-              const effectivePct =
-                gift.active && totalActiveWeight > 0 ? (weight / totalActiveWeight) * 100 : 0;
-              const sliderMax = Math.max(100, Math.ceil(weight / 25) * 25);
-              const accent = gift.accentColor || '#C88A2B';
-              const isZero = gift.active && weight === 0;
-
-              return (
-                <div
-                  key={gift.id}
-                  className={`rounded-xl border p-3 sm:p-3.5 transition-colors ${
-                    !gift.active
-                      ? 'border-stone-200 bg-stone-50/85 opacity-80'
-                      : isZero
-                        ? 'border-rose-200 bg-rose-50/40'
-                        : 'border-[#E6D5BF] bg-white'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2.5 min-w-0">
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#E6D5BF] bg-[#FAF3E8]">
-                        <GiftIllustration
-                          visualKey={gift.visualKey}
-                          customImageUrl={gift.customImageUrl}
-                          accentColor={accent}
-                          size={28}
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs sm:text-sm font-bold text-[#22150E] truncate">
-                          {gift.name}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                              gift.active
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-stone-200 text-stone-700'
-                            }`}
-                          >
-                            {gift.active ? 'Activo' : 'Inactivo'}
-                          </span>
-                          {isZero && (
-                            <span className="inline-flex items-center rounded-full bg-rose-100 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-800">
-                              0% · Nunca sale
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Effective Probability Readout */}
-                    <div className="text-right shrink-0">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold tabular-nums ${
-                          !gift.active
-                            ? 'border-stone-200 bg-stone-100 text-stone-600'
-                            : isZero
-                              ? 'border-rose-200 bg-rose-50 text-rose-700'
-                              : 'border-[#E6C99E] bg-[#FAF0E0] text-[#8C4A19]'
-                        }`}
-                      >
-                        {gift.active ? formatProbabilityPercent(effectivePct) : '0%'}
-                      </span>
-                      <span className="block text-[10px] text-[#8B6F5B] mt-0.5 tabular-nums">
-                        {gift.active ? 'Prob. real' : 'Oculto'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Proportion Bar */}
-                  <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-[#EFE5D8]">
-                    <div
-                      className="h-full rounded-full transition-[width] duration-200 ease-out"
-                      style={{
-                        width: `${gift.active ? Math.min(100, Math.max(effectivePct > 0 ? 2 : 0, effectivePct)) : 0}%`,
-                        backgroundColor: gift.active ? accent : '#A8A29E',
-                      }}
-                    />
-                  </div>
-
-                  {/* Slider + Numeric Weight Input */}
-                  <div className="mt-2.5 flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3">
-                    <div className="flex-1 flex items-center min-h-[36px]">
-                      <input
-                        type="range"
-                        min={0}
-                        max={sliderMax}
-                        step={0.1}
-                        aria-label={`Deslizador de peso para ${gift.name}`}
-                        value={Math.min(sliderMax, weight)}
-                        onChange={(e) => handleWeightSliderChange(gift.id, Number(e.target.value))}
-                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[#EFE5D8] accent-[#B84A27]"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
-                      <label
-                        htmlFor={`gift-weight-${gift.id}`}
-                        className="text-[11px] font-semibold text-[#6E5341]"
-                      >
-                        Peso:
-                      </label>
-                      <input
-                        id={`gift-weight-${gift.id}`}
-                        type="number"
-                        min={0}
-                        step="0.1"
-                        value={rawText}
-                        onChange={(e) => handleWeightTextChange(gift.id, e.target.value)}
-                        onBlur={() => handleWeightInputBlur(gift)}
-                        className="w-24 min-h-[44px] sm:min-h-[36px] rounded-xl sm:rounded-lg border border-[#DFCBB3] bg-[#FCF8F2] px-2.5 py-1.5 text-right font-mono text-base sm:text-xs font-bold text-[#22150E] tabular-nums focus:bg-white focus:border-[#B84A27] focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            disabled={savingShowcase || !onUpdateShowcaseSettings}
+            onClick={() => handleShowcaseUpdate({ randomizeGifts: !randomizeGifts })}
+            className={`inline-flex min-h-[44px] sm:min-h-[36px] shrink-0 items-center justify-center gap-2 rounded-xl sm:rounded-full border px-4 py-2 sm:py-1.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-60 ${
+              randomizeGifts
+                ? 'border-emerald-300 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700'
+                : 'border-[#DFCBB3] bg-white text-[#4E382B] hover:bg-[#FAF3E8]'
+            }`}
+          >
+            {randomizeGifts ? 'ON · Aleatorio' : 'OFF · Fijo'}
+          </button>
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           <AnimatePresence>
             {gifts.map((gift, idx) => {
-              const weight = draftWeightsById.get(gift.id) ?? getGiftProbability(gift);
+              const weight = getGiftProbability(gift);
               const effectivePercent =
                 gift.active && totalActiveWeight > 0 ? (weight / totalActiveWeight) * 100 : 0;
               return (
