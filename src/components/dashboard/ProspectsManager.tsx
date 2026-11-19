@@ -82,9 +82,22 @@ function isPromoCodeInvalidated(lead: Lead): boolean {
   return lead.category !== 'none';
 }
 
+function isClientLead(lead: Lead): boolean | null {
+  if (!lead.qualification) return null;
+  if (typeof lead.qualification.isClient === 'boolean') {
+    return lead.qualification.isClient;
+  }
+  const profile = (lead.qualification.creditProfile || '').toLowerCase();
+  if (profile.includes('no es cliente') || profile.includes('no conoc')) return false;
+  if (profile.includes('es cliente')) return true;
+  return null;
+}
+
 const FILTER_PILLS: Array<{ key: KpiFilterKey; label: string }> = [
   { key: 'all', label: 'Todos' },
   { key: 'vip', label: '🔥 Buen Crédito (VIP)' },
+  { key: 'client', label: 'Es cliente' },
+  { key: 'non_client', label: 'No es cliente' },
   { key: 'pending', label: 'Por llamar' },
   { key: 'called', label: 'Ya llamados' },
   { key: 'cita', label: 'Citas' },
@@ -198,6 +211,8 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     const rawCodeQuery = q.replace(/^#/, '');
     return leads.filter((lead) => {
       if (activeFilter === 'vip' && lead.qualification?.tier !== 'alto') return false;
+      if (activeFilter === 'client' && isClientLead(lead) !== true) return false;
+      if (activeFilter === 'non_client' && isClientLead(lead) !== false) return false;
       if (activeFilter === 'pending' && lead.called) return false;
       if (activeFilter === 'called' && !lead.called) return false;
       if (activeFilter === 'cita' && lead.category !== 'cita') return false;
@@ -641,6 +656,17 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
 
                       {lead.qualification && (
                         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          {isClientLead(lead) !== null && (
+                            <span
+                              className={`rounded-lg border px-2 py-0.5 font-semibold ${
+                                isClientLead(lead)
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                  : 'bg-amber-50 border-amber-200 text-amber-900'
+                              }`}
+                            >
+                              {isClientLead(lead) ? 'Es cliente' : 'No es cliente'}
+                            </span>
+                          )}
                           <span className="rounded-lg bg-[#FAF3E8] border border-[#EAD9C2] px-2 py-0.5 text-[#4E382B] font-medium">
                             {lead.qualification.creditProfile}
                           </span>

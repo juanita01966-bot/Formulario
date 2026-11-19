@@ -14,7 +14,16 @@ import {
 } from 'lucide-react';
 import type { Lead } from '../../types/app';
 
-export type KpiFilterKey = 'all' | 'vip' | 'pending' | 'called' | 'cita' | 'demo' | 'orden';
+export type KpiFilterKey =
+  | 'all'
+  | 'vip'
+  | 'client'
+  | 'non_client'
+  | 'pending'
+  | 'called'
+  | 'cita'
+  | 'demo'
+  | 'orden';
 
 interface KpiGridProps {
   leads: Lead[];

@@ -145,13 +145,10 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
   const progressRatio = (() => {
     if (stage === 'knows_brand') return 0.2;
-    if (knowsBrand === true) {
-      if (stage === 'yes_is_client') return 0.45;
-      if (stage === 'yes_rating') return 0.7;
-      return 0.92;
-    }
-    if (stage === 'no_healthy_eating') return 0.55;
-    return 0.9;
+    if (stage === 'yes_is_client') return 0.45;
+    if (stage === 'yes_rating') return 0.7;
+    if (stage === 'no_healthy_eating') return knowsBrand ? 0.68 : 0.55;
+    return 0.92;
   })();
 
   const advanceWithDelay = (choiceId: string, callback: () => void) => {
@@ -166,7 +163,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
   const handleSelectKnowsBrand = (opt: OptionItem & { value: boolean }) => {
     advanceWithDelay(opt.id, () => {
       setKnowsBrand(opt.value);
-      setIsClient(null);
+      setIsClient(opt.value ? null : false);
       setRating(null);
       setHealthyInterest(null);
       setStage(opt.value ? 'yes_is_client' : 'no_healthy_eating');
@@ -176,7 +173,10 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
   const handleSelectIsClient = (opt: OptionItem & { value: boolean }) => {
     advanceWithDelay(opt.id, () => {
       setIsClient(opt.value);
-      setStage('yes_rating');
+      setRating(null);
+      setHealthyInterest(null);
+      // Only actual Royal Prestige clients rate current products; non-clients branch to the healthy-eating filter
+      setStage(opt.value ? 'yes_rating' : 'no_healthy_eating');
     });
   };
 
@@ -222,18 +222,21 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
   const handleFinishNoBranch = (productOpt: OptionItem) => {
     advanceWithDelay(productOpt.id, () => {
-      const basePoints = 15;
+      const knows = Boolean(knowsBrand);
+      const basePoints = knows ? 25 : 15;
       const healthyPts = healthyInterest?.points ?? 25;
       const score = Math.min(100, basePoints + healthyPts + productOpt.points);
       const tier: CreditTier = score >= 75 ? 'alto' : score >= 45 ? 'medio' : 'basico';
 
       onComplete({
-        creditProfile: 'No conocía Royal Prestige',
+        creditProfile: knows
+          ? 'Conoce Royal Prestige · No es cliente'
+          : 'No conocía Royal Prestige · No es cliente',
         housingStatus: healthyInterest?.label || 'Interés en alimentación saludable',
         investmentPriority: productOpt.label,
         score,
         tier,
-        knowsBrand: false,
+        knowsBrand: knows,
         isClient: false,
         productRating: null,
         healthyEatingInterest: healthyInterest?.label,
@@ -244,8 +247,10 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
   const handleBack = () => {
     if (pickedId) return;
-    if (stage === 'yes_is_client' || stage === 'no_healthy_eating') {
+    if (stage === 'yes_is_client') {
       setStage('knows_brand');
+    } else if (stage === 'no_healthy_eating') {
+      setStage(knowsBrand ? 'yes_is_client' : 'knows_brand');
     } else if (stage === 'yes_rating') {
       setStage('yes_is_client');
     } else if (stage === 'yes_future_product') {
