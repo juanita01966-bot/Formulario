@@ -4,10 +4,10 @@ import { Play, Volume2, X } from 'lucide-react';
 
 export const WelcomeSceneGate: React.FC = () => {
   const prefersReduced = useReducedMotion();
-  // Opens once per full page load/reload; closing dismisses cleanly until next reload
+  // Opens once per full page load/reload; stays paused until user taps Play (with full audio)
   const [isOpen, setIsOpen] = useState(true);
+  const [hasStarted, setHasStarted] = useState(false);
   const [hasVideoEnded, setHasVideoEnded] = useState(false);
-  const [needsPlayTap, setNeedsPlayTap] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const enforceFullVolume = useCallback((video: HTMLVideoElement) => {
@@ -18,49 +18,13 @@ export const WelcomeSceneGate: React.FC = () => {
     }
   }, []);
 
-  const attemptAutoplayWithVoice = useCallback(async () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    try {
-      enforceFullVolume(video);
-      await video.play();
-      setNeedsPlayTap(false);
-    } catch {
-      // Never fall back to muted playback: stay paused at 0s until first gesture starts it with voice
-      video.pause();
-      enforceFullVolume(video);
-      setNeedsPlayTap(true);
-    }
-  }, [enforceFullVolume]);
-
   useEffect(() => {
     if (!isOpen) return;
-    void attemptAutoplayWithVoice();
-  }, [attemptAutoplayWithVoice, isOpen]);
-
-  // If browser blocked unmuted autoplay on load, any first user interaction starts playback with full voice
-  useEffect(() => {
-    if (!isOpen || !needsPlayTap || hasVideoEnded) return;
-    const unlockWithVoice = () => {
-      const video = videoRef.current;
-      if (!video) return;
+    const video = videoRef.current;
+    if (video) {
       enforceFullVolume(video);
-      void video
-        .play()
-        .then(() => {
-          setNeedsPlayTap(false);
-        })
-        .catch(() => {});
-    };
-
-    window.addEventListener('pointerdown', unlockWithVoice, { capture: true });
-    window.addEventListener('keydown', unlockWithVoice, { capture: true });
-    return () => {
-      window.removeEventListener('pointerdown', unlockWithVoice, { capture: true });
-      window.removeEventListener('keydown', unlockWithVoice, { capture: true });
-    };
-  }, [enforceFullVolume, hasVideoEnded, isOpen, needsPlayTap]);
+    }
+  }, [enforceFullVolume, isOpen]);
 
   const handleVideoSurfaceClick = () => {
     const video = videoRef.current;
@@ -69,7 +33,7 @@ export const WelcomeSceneGate: React.FC = () => {
     if (video.paused) {
       void video
         .play()
-        .then(() => setNeedsPlayTap(false))
+        .then(() => setHasStarted(true))
         .catch(() => {});
     }
   };
@@ -91,7 +55,7 @@ export const WelcomeSceneGate: React.FC = () => {
     void video
       .play()
       .then(() => {
-        setNeedsPlayTap(false);
+        setHasStarted(true);
       })
       .catch(() => {});
   };
@@ -141,7 +105,6 @@ export const WelcomeSceneGate: React.FC = () => {
                 <video
                   ref={videoRef}
                   src="/video%20tuto.mp4"
-                  autoPlay
                   playsInline
                   preload="auto"
                   controls={false}
@@ -200,11 +163,18 @@ export const WelcomeSceneGate: React.FC = () => {
                   </motion.div>
                 )}
 
-                {/* Top-Right Close Button (44x44px touch target; gains warm orange glow on video end) */}
-                <div className="absolute right-3 top-3 sm:right-3.5 sm:top-3.5 z-30">
-                  <div className="relative flex items-center justify-center">
-                    {hasVideoEnded && (
-                      <>
+                {/* Top-Right Close Button: ONLY appears once the video finishes, and starts blinking immediately */}
+                <AnimatePresence>
+                  {hasVideoEnded && (
+                    <motion.div
+                      key="welcome-close-btn"
+                      initial={prefersReduced ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      transition={{ type: 'spring', stiffness: 360, damping: 22 }}
+                      className="absolute right-3 top-3 sm:right-3.5 sm:top-3.5 z-30"
+                    >
+                      <div className="relative flex items-center justify-center">
                         {/* Soft semi-orange outer contour aura blinking */}
                         <motion.span
                           aria-hidden="true"
@@ -212,14 +182,14 @@ export const WelcomeSceneGate: React.FC = () => {
                             prefersReduced
                               ? { opacity: 0.75, scale: 1.08 }
                               : {
-                                  opacity: [0.3, 0.95, 0.3],
-                                  scale: [1, 1.24, 1],
+                                  opacity: [0.25, 1, 0.25],
+                                  scale: [1, 1.28, 1],
                                 }
                           }
                           transition={
                             prefersReduced
                               ? undefined
-                              : { duration: 0.85, repeat: Infinity, ease: 'easeInOut' }
+                              : { duration: 0.8, repeat: Infinity, ease: 'easeInOut' }
                           }
                           className="pointer-events-none absolute -inset-2 rounded-full border-2 border-[#FB923C]/90 blur-[2px] will-change-transform"
                         />
@@ -229,14 +199,14 @@ export const WelcomeSceneGate: React.FC = () => {
                             prefersReduced
                               ? { opacity: 0.9, scale: 1.04 }
                               : {
-                                  opacity: [0.45, 1, 0.45],
-                                  scale: [1, 1.12, 1],
+                                  opacity: [0.4, 1, 0.4],
+                                  scale: [1, 1.14, 1],
                                 }
                           }
                           transition={
                             prefersReduced
                               ? undefined
-                              : { duration: 0.85, repeat: Infinity, ease: 'easeInOut' }
+                              : { duration: 0.8, repeat: Infinity, ease: 'easeInOut' }
                           }
                           className="pointer-events-none absolute -inset-[3px] rounded-full border-2 border-[#F97316] will-change-transform"
                           style={{
@@ -244,52 +214,56 @@ export const WelcomeSceneGate: React.FC = () => {
                               '0 0 18px rgba(249,115,22,0.85), 0 0 32px rgba(251,146,60,0.55)',
                           }}
                         />
-                      </>
-                    )}
 
-                    <motion.button
-                      type="button"
-                      onClick={handleClose}
-                      aria-label="Cerrar ventana promocional"
-                      whileHover={{ scale: 1.07 }}
-                      whileTap={{ scale: 0.93 }}
-                      animate={
-                        hasVideoEnded && !prefersReduced
-                          ? {
-                              boxShadow: [
-                                '0 0 10px 1px rgba(249,115,22,0.45)',
-                                '0 0 24px 3px rgba(251,146,60,0.9)',
-                                '0 0 10px 1px rgba(249,115,22,0.45)',
-                              ],
-                            }
-                          : {}
-                      }
-                      transition={
-                        hasVideoEnded && !prefersReduced
-                          ? { duration: 0.85, repeat: Infinity, ease: 'easeInOut' }
-                          : undefined
-                      }
-                      className="relative z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-[#1B0E07]/75 text-[#FFFDF9] backdrop-blur-md transition-colors hover:bg-[#1B0E07]/90 cursor-pointer"
-                    >
-                      <X className="h-5 w-5 stroke-[2.2]" />
-                    </motion.button>
-                  </div>
-                </div>
+                        <motion.button
+                          type="button"
+                          onClick={handleClose}
+                          aria-label="Cerrar ventana promocional"
+                          whileHover={{ scale: 1.07 }}
+                          whileTap={{ scale: 0.93 }}
+                          animate={
+                            !prefersReduced
+                              ? {
+                                  boxShadow: [
+                                    '0 0 10px 1px rgba(249,115,22,0.45)',
+                                    '0 0 26px 4px rgba(251,146,60,0.95)',
+                                    '0 0 10px 1px rgba(249,115,22,0.45)',
+                                  ],
+                                }
+                              : undefined
+                          }
+                          transition={
+                            !prefersReduced
+                              ? { duration: 0.8, repeat: Infinity, ease: 'easeInOut' }
+                              : undefined
+                          }
+                          className="relative z-10 flex h-11 w-11 items-center justify-center rounded-full border border-[#FDBA74]/70 bg-[#1B0E07]/85 text-[#FFFDF9] backdrop-blur-md transition-colors hover:bg-[#1B0E07] cursor-pointer"
+                        >
+                          <X className="h-5 w-5 stroke-[2.2]" />
+                        </motion.button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-                {/* Centered Play Fallback only if browser policy blocks unmuted autoplay */}
-                {needsPlayTap && !hasVideoEnded && (
+                {/* Centered Play Overlay on initial load: user taps to start video with full non-mutable audio */}
+                {!hasStarted && !hasVideoEnded && (
                   <button
                     type="button"
                     onClick={handleManualPlay}
                     aria-label="Reproducir video de bienvenida con sonido"
                     className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/35 px-4 text-[#FFFDF9] backdrop-blur-[2px] cursor-pointer"
                   >
-                    <span className="flex h-16 w-16 items-center justify-center rounded-full border border-[#F4CA73]/60 bg-[#1B0E07]/85 text-[#FFFDF9] shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur-md">
+                    <motion.span
+                      animate={prefersReduced ? undefined : { scale: [1, 1.06, 1] }}
+                      transition={prefersReduced ? undefined : { duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                      className="flex h-16 w-16 items-center justify-center rounded-full border border-[#F4CA73]/75 bg-[#1B0E07]/85 text-[#FFFDF9] shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur-md"
+                    >
                       <Play className="ml-0.5 h-7 w-7 fill-current text-[#F4CA73]" />
-                    </span>
+                    </motion.span>
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-[#1B0E07]/80 px-3.5 py-1.5 text-xs font-semibold text-[#FFF7E2] backdrop-blur-md">
                       <Volume2 className="h-3.5 w-3.5 text-[#F4CA73]" />
-                      Toca para escuchar · Sube tu volumen
+                      Toca para ver · Sube tu volumen
                     </span>
                   </button>
                 )}
