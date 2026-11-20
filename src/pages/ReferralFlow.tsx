@@ -8,9 +8,10 @@ import { QualificationQuiz } from '../components/referral/QualificationQuiz';
 import { CustomLoader } from '../components/referral/CustomLoader';
 import { MysteryCardsMenu } from '../components/referral/MysteryCardsMenu';
 import { GiftRevealStage } from '../components/referral/GiftRevealStage';
+import { GoldenTicketBooklet } from '../components/referral/GoldenTicketBooklet';
 import { WelcomeSceneGate } from '../components/referral/WelcomeSceneGate';
 
-type FlowStep = 'form' | 'quiz' | 'loading' | 'cards' | 'reveal';
+type FlowStep = 'form' | 'quiz' | 'loading' | 'cards' | 'reveal' | 'share_booklet';
 
 function cryptoRandomIntRange(min: number, maxExclusive: number): number {
   const span = maxExclusive - min;
@@ -75,7 +76,10 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
   };
 
   const handleQuizComplete = async (qualification: LeadQualification) => {
-    setStep('loading');
+    const wantsBooklet = Boolean(
+      (qualification as LeadQualification & { cedeGoldenTicket?: boolean }).cedeGoldenTicket
+    );
+    setStep(wantsBooklet ? 'share_booklet' : 'loading');
     if (currentLead) {
       try {
         const res = await updateLead(currentLead.id, { qualification });
@@ -169,6 +173,14 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
               giftTheme={appState.settings.giftTheme}
               customBoxColor={appState.settings.customBoxColor}
               showcaseStyle={appState.settings.showcaseStyle}
+              onStartAnother={handleResetFlow}
+            />
+          )}
+
+          {step === 'share_booklet' && currentLead && (
+            <GoldenTicketBooklet
+              key={`step-booklet-${playRound}`}
+              leadName={currentLead.name}
               onStartAnother={handleResetFlow}
             />
           )}

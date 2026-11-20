@@ -1561,6 +1561,36 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
       assert.strictEqual(reactivateData.lead.promoCodeInvalidatedAt, null);
       assert.strictEqual(reactivateData.lead.orderAmount, null);
 
+      // Verify qualification.cedeGoldenTicket passes cleanly through PATCH /api/leads/:id and GET /api/state
+      const cedeRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          qualification: {
+            creditProfile: 'No conocía Royal Prestige · Cede Boleto Dorado',
+            housingStatus: 'Prefiere ceder el Boleto Dorado a un amigo/familiar',
+            investmentPriority: 'Compartir QR · Programa de Anfitrión',
+            score: 55,
+            tier: 'medio',
+            knowsBrand: false,
+            isClient: false,
+            productRating: null,
+            cedeGoldenTicket: true,
+          },
+        }),
+      });
+      assert.strictEqual(cedeRes.status, 200);
+      const cedeData = await cedeRes.json();
+      assert.strictEqual(cedeData.lead.qualification?.cedeGoldenTicket, true);
+
+      const adminStateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(adminStateRes.status, 200);
+      const adminState = await adminStateRes.json();
+      const persistedLead = adminState.leads.find((l) => l.id === leadId);
+      assert.strictEqual(persistedLead?.qualification?.cedeGoldenTicket, true);
+
       await fetch(`${baseUrl}/api/leads/${leadId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${adminSessionToken}` },

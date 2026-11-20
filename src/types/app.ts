@@ -13,6 +13,7 @@ export interface LeadQualification {
   productRating?: number | null;
   healthyEatingInterest?: string;
   desiredProduct?: string;
+  cedeGoldenTicket?: boolean;
 }
 
 export type GiftVisualKey =

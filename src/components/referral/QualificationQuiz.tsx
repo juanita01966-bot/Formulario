@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowLeft, Check } from 'lucide-react';
+import { ArrowLeft, Check, Sparkles } from 'lucide-react';
 import type { CreditTier, LeadQualification } from '../../types/app';
+
+type ExtendedLeadQualification = LeadQualification & {
+  cedeGoldenTicket?: boolean;
+};
 
 interface QualificationQuizProps {
   leadName: string;
@@ -14,6 +18,7 @@ type QuizStage =
   | 'yes_rating'
   | 'yes_future_product'
   | 'no_healthy_eating'
+  | 'no_golden_ticket'
   | 'no_future_product';
 
 interface OptionItem {
@@ -103,6 +108,23 @@ const HEALTHY_EATING_OPTIONS: OptionItem[] = [
   },
 ];
 
+const GOLDEN_TICKET_OPTIONS: Array<OptionItem & { action: 'use' | 'cede' }> = [
+  {
+    id: 'use-ticket',
+    action: 'use',
+    label: 'Sí, lo utilizaría con un producto de nuestro catálogo exclusivo',
+    sublabel: 'Me gustaría conocer las líneas de cocina y descubrir mi obsequio directo.',
+    points: 35,
+  },
+  {
+    id: 'cede-ticket',
+    action: 'cede',
+    label: 'Prefiero cederlo a un amigo o familiar',
+    sublabel: 'Quiero ver el instructivo del programa y compartir mi código QR para participar.',
+    points: 30,
+  },
+];
+
 const FUTURE_PRODUCTS_NO: OptionItem[] = [
   {
     id: 'ollas-no',
@@ -147,6 +169,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
     if (stage === 'knows_brand') return 0.2;
     if (stage === 'yes_is_client') return 0.45;
     if (stage === 'yes_rating') return 0.7;
+    if (stage === 'no_golden_ticket') return 0.55;
     if (stage === 'no_healthy_eating') return knowsBrand ? 0.68 : 0.55;
     return 0.92;
   })();
@@ -166,7 +189,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
       setIsClient(opt.value ? null : false);
       setRating(null);
       setHealthyInterest(null);
-      setStage(opt.value ? 'yes_is_client' : 'no_healthy_eating');
+      setStage(opt.value ? 'yes_is_client' : 'no_golden_ticket');
     });
   };
 
@@ -220,34 +243,62 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
     });
   };
 
+  const handleSelectGoldenTicket = (opt: OptionItem & { action: 'use' | 'cede' }) => {
+    advanceWithDelay(opt.id, () => {
+      if (opt.action === 'use') {
+        setStage('no_future_product');
+        return;
+      }
+
+      const score = 55;
+      const tier: CreditTier = score >= 75 ? 'alto' : score >= 45 ? 'medio' : 'basico';
+      const payload: ExtendedLeadQualification = {
+        creditProfile: 'No conocía Royal Prestige · Cede Boleto Dorado',
+        housingStatus: 'Prefiere ceder el Boleto Dorado a un amigo/familiar',
+        investmentPriority: 'Compartir QR · Programa de Anfitrión',
+        score,
+        tier,
+        knowsBrand: false,
+        isClient: false,
+        productRating: null,
+        cedeGoldenTicket: true,
+      };
+      onComplete(payload);
+    });
+  };
+
   const handleFinishNoBranch = (productOpt: OptionItem) => {
     advanceWithDelay(productOpt.id, () => {
       const knows = Boolean(knowsBrand);
       const basePoints = knows ? 25 : 15;
-      const healthyPts = healthyInterest?.points ?? 25;
-      const score = Math.min(100, basePoints + healthyPts + productOpt.points);
+      const secondaryPts = knows ? (healthyInterest?.points ?? 25) : 35;
+      const score = Math.min(100, basePoints + secondaryPts + productOpt.points);
       const tier: CreditTier = score >= 75 ? 'alto' : score >= 45 ? 'medio' : 'basico';
 
-      onComplete({
+      const payload: ExtendedLeadQualification = {
         creditProfile: knows
           ? 'Conoce Royal Prestige · No es cliente'
-          : 'No conocía Royal Prestige · No es cliente',
-        housingStatus: healthyInterest?.label || 'Interés en alimentación saludable',
+          : 'No conocía Royal Prestige · Usaría Boleto Dorado',
+        housingStatus: knows
+          ? healthyInterest?.label || 'Interés en alimentación saludable'
+          : 'Interés en catálogo con Boleto Dorado',
         investmentPriority: productOpt.label,
         score,
         tier,
         knowsBrand: knows,
         isClient: false,
         productRating: null,
-        healthyEatingInterest: healthyInterest?.label,
+        ...(knows && healthyInterest?.label ? { healthyEatingInterest: healthyInterest.label } : {}),
         desiredProduct: productOpt.label,
-      });
+        cedeGoldenTicket: false,
+      };
+      onComplete(payload);
     });
   };
 
   const handleBack = () => {
     if (pickedId) return;
-    if (stage === 'yes_is_client') {
+    if (stage === 'yes_is_client' || stage === 'no_golden_ticket') {
       setStage('knows_brand');
     } else if (stage === 'no_healthy_eating') {
       setStage(knowsBrand ? 'yes_is_client' : 'knows_brand');
@@ -256,7 +307,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
     } else if (stage === 'yes_future_product') {
       setStage('yes_rating');
     } else if (stage === 'no_future_product') {
-      setStage('no_healthy_eating');
+      setStage(knowsBrand ? 'no_healthy_eating' : 'no_golden_ticket');
     }
   };
 
@@ -507,6 +558,60 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                       }`}
                     >
                       <span className="text-sm sm:text-[15px] font-semibold text-[#22150E]">{opt.label}</span>
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                          selected ? 'border-[#8C3318] bg-[#8C3318] text-white' : 'border-[#C6A787] bg-white'
+                        }`}
+                      >
+                        {selected && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+
+          {stage === 'no_golden_ticket' && (
+            <motion.div
+              key="stage-no-golden-ticket"
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -24 }}
+              transition={{ duration: 0.28 }}
+              className="relative z-10"
+            >
+              <div className="mb-2.5 inline-flex items-center gap-1.5 rounded-full border border-[#C88A2B]/45 bg-[#FAF0E0] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-[#8C4A19]">
+                <Sparkles className="h-3.5 w-3.5 text-[#C88A2B]" />
+                Boleto Dorado Royal Prestige
+              </div>
+              <h2 className="font-serif text-[19px] sm:text-[24px] font-semibold text-[#22150E] leading-snug">
+                Si en un futuro usted tuviera la oportunidad de utilizar el bono especial: nuestro Boleto Dorado, ¿lo utilizaría con algún producto de nuestro catálogo exclusivo o prefiere cederlo a un amigo o familiar?
+              </h2>
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
+                Elige cómo prefieres aprovechar este beneficio especial.
+              </p>
+
+              <div className="mt-4 sm:mt-5 space-y-2.5 sm:space-y-3">
+                {GOLDEN_TICKET_OPTIONS.map((opt) => {
+                  const selected = pickedId === opt.id;
+                  return (
+                    <motion.button
+                      key={opt.id}
+                      type="button"
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.985 }}
+                      onClick={() => handleSelectGoldenTicket(opt)}
+                      className={`min-h-[56px] w-full rounded-2xl border p-3.5 sm:p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        selected
+                          ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
+                          : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
+                      }`}
+                    >
+                      <div>
+                        <p className="text-sm sm:text-[15px] font-semibold text-[#22150E]">{opt.label}</p>
+                        {opt.sublabel && <p className="mt-1 text-xs text-[#6E5341]">{opt.sublabel}</p>}
+                      </div>
                       <span
                         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
                           selected ? 'border-[#8C3318] bg-[#8C3318] text-white' : 'border-[#C6A787] bg-white'

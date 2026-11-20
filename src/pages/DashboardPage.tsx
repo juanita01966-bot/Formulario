@@ -55,7 +55,6 @@ type SecurityStage = 'checking' | 'filter1_credentials' | 'filter2_pin' | 'authe
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   appState,
-  syncMode,
   onStateChange,
   onSyncPauseChange,
 }) => {
@@ -706,10 +705,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
       <div className="relative z-10">
         <DashboardHeader
-          settings={appState.settings}
           leads={appState.leads}
           activeTab={activeTab}
-          syncMode={syncMode}
           userRole={userRole}
           onTabChange={setActiveTab}
           onJumpToPending={() => {
