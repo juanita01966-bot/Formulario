@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowLeft, Check, Sparkles } from 'lucide-react';
+import { ArrowLeft, Check } from 'lucide-react';
 import type { CreditTier, LeadQualification } from '../../types/app';
 
 type ExtendedLeadQualification = LeadQualification & {
@@ -581,10 +581,6 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
               transition={{ duration: 0.28 }}
               className="relative z-10"
             >
-              <div className="mb-2.5 inline-flex items-center gap-1.5 rounded-full border border-[#C88A2B]/45 bg-[#FAF0E0] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-[#8C4A19]">
-                <Sparkles className="h-3.5 w-3.5 text-[#C88A2B]" />
-                Boleto Dorado Royal Prestige
-              </div>
               <h2 className="font-serif text-[19px] sm:text-[24px] font-semibold text-[#22150E] leading-snug">
                 Si en un futuro usted tuviera la oportunidad de utilizar el bono especial: nuestro Boleto Dorado, ¿lo utilizaría con algún producto de nuestro catálogo exclusivo o prefiere cederlo a un amigo o familiar?
               </h2>
