@@ -7,10 +7,11 @@ import {
   LogOut,
   QrCode,
   Settings,
+  Trophy,
 } from 'lucide-react';
 import type { Lead } from '../../types/app';
 
-export type DashboardTab = 'overview' | 'gifts' | 'qr' | 'settings';
+export type DashboardTab = 'overview' | 'referrals' | 'gifts' | 'qr' | 'settings';
 
 interface DashboardHeaderProps {
   leads: Lead[];
@@ -24,6 +25,7 @@ interface DashboardHeaderProps {
 
 const TABS: Array<{ id: DashboardTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Inicio', icon: LayoutDashboard },
+  { id: 'referrals', label: 'Referidos', icon: Trophy },
   { id: 'gifts', label: 'Regalos', icon: Gift },
   { id: 'qr', label: 'QR', icon: QrCode },
   { id: 'settings', label: 'Ajustes', icon: Settings },
@@ -102,7 +104,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                       key={tab.id}
                       type="button"
                       onClick={() => onTabChange(tab.id)}
-                      className={`relative flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors cursor-pointer ${
+                      className={`relative flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${
                         isActive ? 'text-[#22150E]' : 'text-[#7B5D4A] hover:text-[#22150E]'
                       }`}
                     >
@@ -213,7 +215,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           {!isCaller && (
             <nav
               aria-label="Navegación del dashboard"
-              className="grid grid-cols-4 w-full lg:hidden rounded-2xl bg-[#F3E8D9] p-1 border border-[#E3D0B8]"
+              className="grid grid-cols-5 w-full lg:hidden rounded-2xl bg-[#F3E8D9] p-1 border border-[#E3D0B8]"
             >
               {TABS.map((tab) => {
                 const Icon = tab.icon;
@@ -223,7 +225,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                     key={tab.id}
                     type="button"
                     onClick={() => onTabChange(tab.id)}
-                    className={`relative flex min-h-[44px] items-center justify-center gap-1 sm:gap-1.5 rounded-xl px-1.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold transition-colors cursor-pointer ${
+                    className={`relative flex min-h-[44px] items-center justify-center rounded-xl px-1 sm:px-2.5 py-1.5 sm:py-2 text-[10.5px] sm:text-sm font-semibold transition-colors cursor-pointer ${
                       isActive ? 'text-[#22150E]' : 'text-[#7B5D4A] hover:text-[#22150E]'
                     }`}
                   >
@@ -234,7 +236,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                         className="absolute inset-0 rounded-xl bg-[#FFFDF9] shadow-sm border border-[#E6D5BF]/70"
                       />
                     )}
-                    <span className="relative z-10 flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap">
+                    <span className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 whitespace-nowrap leading-none">
                       <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                       <span>{tab.label}</span>
                     </span>

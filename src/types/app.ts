@@ -69,6 +69,36 @@ export interface Lead {
   qualification?: LeadQualification | null;
   promoCodeInvalidated?: boolean;
   promoCodeInvalidatedAt?: string | null;
+  referralCode?: string | null;
+  referrerId?: string | null;
+  referrerName?: string | null;
+  createdAt: string;
+}
+
+export type ReferralMetricKey = 'leads' | 'citas' | 'demos' | 'ordenes' | 'points';
+
+export interface ReferralPrizeRule {
+  prizeName: string;
+  metric: ReferralMetricKey;
+  targetCount: number;
+  maxWinners: number;
+  pointsPerLead: number;
+  pointsPerCita: number;
+  pointsPerDemo: number;
+  pointsPerOrden: number;
+}
+
+export interface ReferralPartner {
+  id: string;
+  name: string;
+  code: string;
+  phone?: string;
+  notes?: string;
+  active: boolean;
+  visitsCount: number;
+  uniqueVisitsCount: number;
+  lastVisitAt?: string | null;
+  qrStyleId?: QrStyleId;
   createdAt: string;
 }
 
@@ -83,6 +113,7 @@ export interface AppSettings {
   customBoxColor?: string;
   showcaseStyle?: ShowcaseStyleId;
   randomizeGifts?: boolean;
+  referralPrizeRule?: ReferralPrizeRule;
 }
 
 export type QrStyleId =
@@ -104,6 +135,8 @@ export interface QrCodeRecord {
   backgroundColor: string;
   includeLogo: boolean;
   frameText?: string;
+  referralCode?: string | null;
+  referrerId?: string | null;
   createdAt: string;
 }
 
@@ -112,4 +145,5 @@ export interface AppState {
   gifts: GiftItem[];
   leads: Lead[];
   qrHistory?: QrCodeRecord[];
+  referrers?: ReferralPartner[];
 }

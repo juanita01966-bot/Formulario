@@ -17,6 +17,7 @@ import {
   Phone,
   PhoneCall,
   Plus,
+  QrCode,
   RotateCcw,
   Search,
   ShieldAlert,
@@ -25,7 +26,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { GiftItem, Lead, LeadCategory } from '../../types/app';
+import type { GiftItem, Lead, LeadCategory, ReferralPartner } from '../../types/app';
 import { GiftIllustration } from '../gifts/GiftIllustration';
 import type { KpiFilterKey } from './KpiGrid';
 
@@ -46,6 +47,7 @@ type LeadWithPromo = Lead & {
 interface ProspectsManagerProps {
   leads: Lead[];
   gifts: GiftItem[];
+  referrers?: ReferralPartner[];
   defaultTicketAmount: number;
   activeFilter: KpiFilterKey;
   onFilterChange: (filter: KpiFilterKey) => void;
@@ -145,6 +147,7 @@ function formatRelativeOrDate(iso: string): string {
 export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   leads,
   gifts,
+  referrers = [],
   defaultTicketAmount,
   activeFilter,
   onFilterChange,
@@ -154,6 +157,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   onBusyChange,
 }) => {
   const [search, setSearch] = useState('');
+  const [originFilter, setOriginFilter] = useState<string>('all');
   const [lockedHintId, setLockedHintId] = useState<string | null>(null);
   const [togglingLeadId, setTogglingLeadId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -206,6 +210,86 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     onBusyChange,
   ]);
 
+  const referrerById = useMemo(() => {
+    const map = new Map<string, ReferralPartner>();
+    for (const r of referrers) {
+      map.set(r.id, r);
+    }
+    return map;
+  }, [referrers]);
+
+  const referrerByCode = useMemo(() => {
+    const map = new Map<string, ReferralPartner>();
+    for (const r of referrers) {
+      map.set(r.code.trim().toUpperCase(), r);
+    }
+    return map;
+  }, [referrers]);
+
+  const resolveLeadReferral = (lead: Lead): { code: string; name: string | null; partnerId: string | null } | null => {
+    const rawCode = (lead.referralCode || '').trim().toUpperCase();
+    const matchedPartner =
+      (lead.referrerId ? referrerById.get(lead.referrerId) : undefined) ||
+      (rawCode ? referrerByCode.get(rawCode) : undefined);
+
+    if (matchedPartner) {
+      return {
+        code: rawCode || matchedPartner.code,
+        name: matchedPartner.name,
+        partnerId: matchedPartner.id,
+      };
+    }
+    if (rawCode || lead.referrerName) {
+      return {
+        code: rawCode,
+        name: lead.referrerName || null,
+        partnerId: lead.referrerId || null,
+      };
+    }
+    return null;
+  };
+
+  const originFilterOptions = useMemo(() => {
+    let organicCount = 0;
+    const countsByPartnerId = new Map<string, number>();
+    const orphanCodes = new Map<string, { label: string; count: number }>();
+
+    for (const lead of leads) {
+      const ref = resolveLeadReferral(lead);
+      if (!ref) {
+        organicCount += 1;
+        continue;
+      }
+      if (ref.partnerId && referrerById.has(ref.partnerId)) {
+        countsByPartnerId.set(ref.partnerId, (countsByPartnerId.get(ref.partnerId) || 0) + 1);
+      } else if (ref.code) {
+        const prev = orphanCodes.get(ref.code);
+        orphanCodes.set(ref.code, {
+          label: ref.name ? `${ref.name} (${ref.code})` : ref.code,
+          count: (prev?.count || 0) + 1,
+        });
+      }
+    }
+
+    const partnerEntries = referrers.map((partner) => ({
+      value: `partner:${partner.id}`,
+      label: `${partner.name} (${partner.code})`,
+      count: countsByPartnerId.get(partner.id) || 0,
+    }));
+
+    const orphanEntries = Array.from(orphanCodes.entries()).map(([code, meta]) => ({
+      value: `code:${code}`,
+      label: meta.label,
+      count: meta.count,
+    }));
+
+    return {
+      organicCount,
+      partnerEntries,
+      orphanEntries,
+    };
+  }, [leads, referrers, referrerById, referrerByCode]);
+
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rawCodeQuery = q.replace(/^#/, '');
@@ -219,19 +303,41 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       if (activeFilter === 'demo' && lead.category !== 'demo') return false;
       if (activeFilter === 'orden' && lead.category !== 'orden') return false;
 
+      if (originFilter !== 'all') {
+        const ref = resolveLeadReferral(lead);
+        if (originFilter === 'organic') {
+          if (ref !== null) return false;
+        } else if (originFilter.startsWith('partner:')) {
+          const targetId = originFilter.slice('partner:'.length);
+          const targetPartner = referrerById.get(targetId);
+          const matchesId = ref?.partnerId === targetId;
+          const matchesCode =
+            Boolean(targetPartner) &&
+            Boolean(ref?.code) &&
+            ref?.code === targetPartner!.code.trim().toUpperCase();
+          if (!matchesId && !matchesCode) return false;
+        } else if (originFilter.startsWith('code:')) {
+          const targetCode = originFilter.slice('code:'.length);
+          if (!ref || ref.code !== targetCode) return false;
+        }
+      }
+
       if (!q) return true;
       const claimLower = (lead.claimCode || '').toLowerCase();
       const claimDigits = claimLower.replace(/^otn-/, '');
+      const refInfo = resolveLeadReferral(lead);
       return (
         lead.name.toLowerCase().includes(q) ||
         lead.phone.toLowerCase().includes(q) ||
         (lead.address || '').toLowerCase().includes(q) ||
         claimLower.includes(rawCodeQuery) ||
         claimDigits.includes(rawCodeQuery) ||
-        (lead.giftName || '').toLowerCase().includes(q)
+        (lead.giftName || '').toLowerCase().includes(q) ||
+        (refInfo?.code || '').toLowerCase().includes(q) ||
+        (refInfo?.name || '').toLowerCase().includes(q)
       );
     });
-  }, [leads, activeFilter, search]);
+  }, [leads, activeFilter, originFilter, search, referrerById, referrerByCode]);
 
   const handleToggleCalled = async (lead: Lead) => {
     if (togglingLeadId) return;
@@ -406,26 +512,33 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       'Llamado',
       'Categoria',
       'MontoOrden',
+      'OrigenQR',
+      'CodigoReferido',
       'Fecha',
       'Notas',
     ];
-    const rows = filteredLeads.map((l) => [
-      `"${l.name.replace(/"/g, '""')}"`,
-      `"${l.phone}"`,
-      `"${(l.address || '').replace(/"/g, '""')}"`,
-      `"${(l.giftName || '').replace(/"/g, '""')}"`,
-      `"${l.claimCode}"`,
-      `"${l.qualification?.tier || ''}"`,
-      l.qualification?.score ?? '',
-      `"${(l.qualification?.creditProfile || '').replace(/"/g, '""')}"`,
-      `"${(l.qualification?.housingStatus || '').replace(/"/g, '""')}"`,
-      `"${(l.qualification?.investmentPriority || '').replace(/"/g, '""')}"`,
-      l.called ? 'Si' : 'No',
-      l.category,
-      l.orderAmount ?? '',
-      l.createdAt,
-      `"${(l.notes || '').replace(/"/g, '""')}"`,
-    ]);
+    const rows = filteredLeads.map((l) => {
+      const refInfo = resolveLeadReferral(l);
+      return [
+        `"${l.name.replace(/"/g, '""')}"`,
+        `"${l.phone}"`,
+        `"${(l.address || '').replace(/"/g, '""')}"`,
+        `"${(l.giftName || '').replace(/"/g, '""')}"`,
+        `"${l.claimCode}"`,
+        `"${l.qualification?.tier || ''}"`,
+        l.qualification?.score ?? '',
+        `"${(l.qualification?.creditProfile || '').replace(/"/g, '""')}"`,
+        `"${(l.qualification?.housingStatus || '').replace(/"/g, '""')}"`,
+        `"${(l.qualification?.investmentPriority || '').replace(/"/g, '""')}"`,
+        l.called ? 'Si' : 'No',
+        l.category,
+        l.orderAmount ?? '',
+        `"${(refInfo?.name || (refInfo ? 'QR' : 'Orgánico')).replace(/"/g, '""')}"`,
+        `"${(refInfo?.code || '').replace(/"/g, '""')}"`,
+        l.createdAt,
+        `"${(l.notes || '').replace(/"/g, '""')}"`,
+      ];
+    });
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -484,17 +597,48 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
         </div>
       </div>
 
-      {/* Search & Filter Chips */}
-      <div className="mt-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1 md:max-w-md min-w-0">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#9B816E]" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nombre, teléfono, Nº de orden (OTN-...) o regalo..."
-            className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
-          />
+      {/* Search, Origin Dropdown & Filter Chips */}
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <div className="relative flex-1 md:max-w-md min-w-0">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#9B816E]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por nombre, teléfono, Nº de orden, embajador o regalo..."
+              className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <QrCode className="h-4 w-4 text-[#C88A2B] shrink-0" />
+            <label
+              htmlFor="prospects-origin-filter"
+              className="text-xs font-semibold text-[#6E5341] whitespace-nowrap"
+            >
+              Origen QR:
+            </label>
+            <select
+              id="prospects-origin-filter"
+              value={originFilter}
+              onChange={(e) => setOriginFilter(e.target.value)}
+              className="min-h-[44px] max-w-full sm:max-w-[260px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-xs font-semibold text-[#22150E] focus:border-[#C88A2B] focus:bg-white focus:outline-none"
+            >
+              <option value="all">Todos los orígenes ({leads.length})</option>
+              <option value="organic">Orgánico / Sin QR ({originFilterOptions.organicCount})</option>
+              {originFilterOptions.partnerEntries.map((entry) => (
+                <option key={entry.value} value={entry.value}>
+                  {entry.label} · {entry.count}
+                </option>
+              ))}
+              {originFilterOptions.orphanEntries.map((entry) => (
+                <option key={entry.value} value={entry.value}>
+                  QR {entry.label} · {entry.count}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:overflow-visible max-w-full">
@@ -546,6 +690,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
         ) : (
           filteredLeads.map((lead) => {
             const matchedGift = gifts.find((g) => g.id === lead.giftId);
+            const referralSource = resolveLeadReferral(lead);
             const showLockHint = lockedHintId === lead.id;
             const notesOpen = expandedNotesId === lead.id;
             const promoInvalidated = isPromoCodeInvalidated(lead);
@@ -616,6 +761,18 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                         {!lead.called && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
                             Nuevo
+                          </span>
+                        )}
+                        {referralSource && (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-[#E5C17B] bg-[#FFF4DC] px-2.5 py-0.5 text-[10.5px] font-bold text-[#7A4610]"
+                            title={`Referido por ${referralSource.name || referralSource.code}`}
+                          >
+                            <QrCode className="h-3 w-3 shrink-0 text-[#C88A2B]" />
+                            <span>
+                              QR · {referralSource.name ? `${referralSource.name}` : referralSource.code}
+                              {referralSource.name && referralSource.code ? ` (${referralSource.code})` : ''}
+                            </span>
                           </span>
                         )}
                         {lead.qualification && (

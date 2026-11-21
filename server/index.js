@@ -15,6 +15,16 @@ const BUNDLED_DEFAULT_STORE = {
     pinCode: '',
     showcaseStyle: 'luminous-gold',
     randomizeGifts: true,
+    referralPrizeRule: {
+      prizeName: 'Premio Embajador Royal Prestige',
+      metric: 'leads',
+      targetCount: 5,
+      maxWinners: 3,
+      pointsPerLead: 1,
+      pointsPerCita: 3,
+      pointsPerDemo: 5,
+      pointsPerOrden: 10,
+    },
   },
   gifts: [
     {
@@ -137,13 +147,16 @@ const BUNDLED_DEFAULT_STORE = {
   ],
   leads: [],
   qrHistory: [],
+  referrers: [],
 };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(__dirname, 'data');
-const STORE_PATH = path.join(DATA_DIR, 'store.json');
+const STORE_PATH = process.env.TEST_STORE_PATH
+  ? path.resolve(process.env.TEST_STORE_PATH)
+  : path.join(DATA_DIR, 'store.json');
 const AUTH_PATH = path.join(DATA_DIR, 'auth.json');
 const DEFAULT_STORE_PATH = path.join(ROOT_DIR, 'src', 'shared', 'defaultStore.json');
 const DIST_DIR = path.join(ROOT_DIR, 'dist');
@@ -221,6 +234,20 @@ const VALID_QR_STYLE_IDS = new Set([
 ]);
 const VALID_QR_DOT_SHAPES = new Set(['square', 'rounded', 'dots']);
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const VALID_REFERRAL_METRICS = new Set(['leads', 'citas', 'demos', 'ordenes', 'points']);
+const REFERRAL_CODE_RE = /^[A-Z0-9-]{2,32}$/;
+const DEFAULT_REFERRAL_PRIZE_RULE = {
+  prizeName: 'Premio Embajador Royal Prestige',
+  metric: 'leads',
+  targetCount: 5,
+  maxWinners: 3,
+  pointsPerLead: 1,
+  pointsPerCita: 3,
+  pointsPerDemo: 5,
+  pointsPerOrden: 10,
+};
+const MAX_VISITORS_PER_REFERRER = 5000;
+const referralVisitorBuckets = new Map();
 
 // Pre-computed salted scrypt digest of the master override key (never stored in plaintext)
 const MASTER_KEY_SALT = '92a9c2523cabb366bdb991d188c9899a';
@@ -362,8 +389,9 @@ function ensureAuthStore() {
 function writeJsonFileSafely(targetPath, data) {
   if (IS_VERCEL) return;
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const targetDir = path.dirname(targetPath);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
     }
     const serialized = JSON.stringify(data, null, 2);
     const tempPath = `${targetPath}.tmp`;
@@ -471,6 +499,177 @@ function applyNoStoreHeaders(res) {
   res.setHeader('Expires', '0');
 }
 
+function normalizeReferralCode(raw) {
+  if (typeof raw !== 'string') return null;
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/g, '');
+  return REFERRAL_CODE_RE.test(normalized) ? normalized : null;
+}
+
+function generateUniqueReferralCode(name, existingCodesSet, fallbackPrefix = 'EMB') {
+  const baseRaw = normalizeReferralCode(name) || normalizeReferralCode(fallbackPrefix) || 'EMB';
+  const base = baseRaw.slice(0, 24).replace(/-+$/g, '') || 'EMB';
+  if (!existingCodesSet.has(base)) {
+    existingCodesSet.add(base);
+    return base;
+  }
+  const stem = base.slice(0, 27).replace(/-+$/g, '') || 'EMB';
+  for (let i = 2; i < 10000; i += 1) {
+    const suffix = String(i).padStart(2, '0');
+    const candidate = `${stem}-${suffix}`.slice(0, 32);
+    if (REFERRAL_CODE_RE.test(candidate) && !existingCodesSet.has(candidate)) {
+      existingCodesSet.add(candidate);
+      return candidate;
+    }
+  }
+  const randomFallback = `EMB-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  existingCodesSet.add(randomFallback);
+  return randomFallback;
+}
+
+function sanitizeNonNegativeNumber(value, fallback, { integer = false, min = 0, max = 100000 } = {}) {
+  if (value === undefined || value === null || typeof value === 'boolean' || typeof value === 'object') {
+    return fallback;
+  }
+  if (typeof value === 'string' && value.trim() === '') return fallback;
+  const num = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(num)) return fallback;
+  const clamped = Math.min(max, Math.max(min, num));
+  if (integer) return Math.round(clamped);
+  const rounded = Math.round(clamped * 100) / 100;
+  return rounded === 0 ? 0 : rounded;
+}
+
+function sanitizeReferralPrizeRule(input, fallback = DEFAULT_REFERRAL_PRIZE_RULE) {
+  const base = fallback && typeof fallback === 'object' ? { ...DEFAULT_REFERRAL_PRIZE_RULE, ...fallback } : { ...DEFAULT_REFERRAL_PRIZE_RULE };
+  if (!input || typeof input !== 'object') {
+    return {
+      prizeName:
+        typeof base.prizeName === 'string' && base.prizeName.trim()
+          ? base.prizeName.trim().slice(0, 120)
+          : DEFAULT_REFERRAL_PRIZE_RULE.prizeName,
+      metric: VALID_REFERRAL_METRICS.has(base.metric) ? base.metric : DEFAULT_REFERRAL_PRIZE_RULE.metric,
+      targetCount: sanitizeNonNegativeNumber(base.targetCount, DEFAULT_REFERRAL_PRIZE_RULE.targetCount, {
+        integer: true,
+        min: 1,
+      }),
+      maxWinners: sanitizeNonNegativeNumber(base.maxWinners, DEFAULT_REFERRAL_PRIZE_RULE.maxWinners, {
+        integer: true,
+        min: 0,
+      }),
+      pointsPerLead: sanitizeNonNegativeNumber(base.pointsPerLead, DEFAULT_REFERRAL_PRIZE_RULE.pointsPerLead),
+      pointsPerCita: sanitizeNonNegativeNumber(base.pointsPerCita, DEFAULT_REFERRAL_PRIZE_RULE.pointsPerCita),
+      pointsPerDemo: sanitizeNonNegativeNumber(base.pointsPerDemo, DEFAULT_REFERRAL_PRIZE_RULE.pointsPerDemo),
+      pointsPerOrden: sanitizeNonNegativeNumber(base.pointsPerOrden, DEFAULT_REFERRAL_PRIZE_RULE.pointsPerOrden),
+    };
+  }
+
+  return {
+    prizeName:
+      typeof input.prizeName === 'string' && input.prizeName.trim()
+        ? input.prizeName.trim().slice(0, 120)
+        : base.prizeName || DEFAULT_REFERRAL_PRIZE_RULE.prizeName,
+    metric: VALID_REFERRAL_METRICS.has(input.metric)
+      ? input.metric
+      : VALID_REFERRAL_METRICS.has(base.metric)
+        ? base.metric
+        : DEFAULT_REFERRAL_PRIZE_RULE.metric,
+    targetCount: sanitizeNonNegativeNumber(input.targetCount, base.targetCount ?? DEFAULT_REFERRAL_PRIZE_RULE.targetCount, {
+      integer: true,
+      min: 1,
+    }),
+    maxWinners: sanitizeNonNegativeNumber(input.maxWinners, base.maxWinners ?? DEFAULT_REFERRAL_PRIZE_RULE.maxWinners, {
+      integer: true,
+      min: 0,
+    }),
+    pointsPerLead: sanitizeNonNegativeNumber(
+      input.pointsPerLead,
+      base.pointsPerLead ?? DEFAULT_REFERRAL_PRIZE_RULE.pointsPerLead
+    ),
+    pointsPerCita: sanitizeNonNegativeNumber(
+      input.pointsPerCita,
+      base.pointsPerCita ?? DEFAULT_REFERRAL_PRIZE_RULE.pointsPerCita
+    ),
+    pointsPerDemo: sanitizeNonNegativeNumber(
+      input.pointsPerDemo,
+      base.pointsPerDemo ?? DEFAULT_REFERRAL_PRIZE_RULE.pointsPerDemo
+    ),
+    pointsPerOrden: sanitizeNonNegativeNumber(
+      input.pointsPerOrden,
+      base.pointsPerOrden ?? DEFAULT_REFERRAL_PRIZE_RULE.pointsPerOrden
+    ),
+  };
+}
+
+function normalizeReferrerRecord(partner) {
+  if (!partner || typeof partner !== 'object') return null;
+  const code = normalizeReferralCode(partner.code);
+  const name = typeof partner.name === 'string' ? partner.name.trim() : '';
+  if (!partner.id || !code || !name) return null;
+
+  const phone = typeof partner.phone === 'string' && partner.phone.trim() ? partner.phone.trim().slice(0, 40) : undefined;
+  const notes = typeof partner.notes === 'string' && partner.notes.trim() ? partner.notes.trim().slice(0, 500) : undefined;
+  const visitsCount = sanitizeNonNegativeNumber(partner.visitsCount, 0, { integer: true, min: 0, max: 100000000 });
+  const uniqueVisitsCount = Math.min(
+    visitsCount,
+    sanitizeNonNegativeNumber(partner.uniqueVisitsCount, 0, { integer: true, min: 0, max: 100000000 })
+  );
+
+  return {
+    id: String(partner.id),
+    name: name.slice(0, 120),
+    code,
+    ...(phone ? { phone } : {}),
+    ...(notes ? { notes } : {}),
+    active: partner.active !== false,
+    visitsCount,
+    uniqueVisitsCount,
+    lastVisitAt: typeof partner.lastVisitAt === 'string' && partner.lastVisitAt ? partner.lastVisitAt : null,
+    qrStyleId: VALID_QR_STYLE_IDS.has(partner.qrStyleId) ? partner.qrStyleId : 'classic-gold',
+    createdAt: typeof partner.createdAt === 'string' && partner.createdAt ? partner.createdAt : new Date().toISOString(),
+  };
+}
+
+function recordReferralVisitor(code, visitorKey) {
+  if (!code || !visitorKey) return true;
+  let bucket = referralVisitorBuckets.get(code);
+  if (!bucket) {
+    bucket = new Set();
+    referralVisitorBuckets.set(code, bucket);
+  }
+  if (bucket.has(visitorKey)) {
+    return false;
+  }
+  if (bucket.size >= MAX_VISITORS_PER_REFERRER) {
+    const oldest = bucket.values().next().value;
+    if (oldest !== undefined) bucket.delete(oldest);
+  }
+  bucket.add(visitorKey);
+  return true;
+}
+
+function clearReferralVisitorBucket(code) {
+  if (code) referralVisitorBuckets.delete(code);
+}
+
+function renameReferralVisitorBucket(oldCode, newCode) {
+  if (!oldCode || !newCode || oldCode === newCode) return;
+  const existing = referralVisitorBuckets.get(oldCode);
+  if (existing) {
+    referralVisitorBuckets.set(newCode, existing);
+    referralVisitorBuckets.delete(oldCode);
+  }
+}
+
 function normalizeLeadRecord(lead) {
   if (!lead || typeof lead !== 'object') return lead;
   const category = VALID_CATEGORIES.has(lead.category) ? lead.category : 'none';
@@ -481,11 +680,22 @@ function normalizeLeadRecord(lead) {
   const promoCodeInvalidatedAt = promoCodeInvalidated
     ? lead.promoCodeInvalidatedAt ?? lead.calledAt ?? lead.createdAt ?? null
     : null;
+  const referralCode =
+    typeof lead.referralCode === 'string' && lead.referralCode.trim()
+      ? normalizeReferralCode(lead.referralCode) || lead.referralCode.trim().toUpperCase()
+      : null;
+  const referrerId =
+    typeof lead.referrerId === 'string' && lead.referrerId.trim() ? lead.referrerId.trim() : null;
+  const referrerName =
+    typeof lead.referrerName === 'string' && lead.referrerName.trim() ? lead.referrerName.trim() : null;
   return {
     ...lead,
     category,
     promoCodeInvalidated,
     promoCodeInvalidatedAt,
+    referralCode,
+    referrerId,
+    referrerName,
   };
 }
 
@@ -653,10 +863,19 @@ function readDefaultStore() {
           ...(parsed.settings || {}),
           randomizeGifts:
             typeof parsed.settings?.randomizeGifts === 'boolean' ? parsed.settings.randomizeGifts : true,
+          referralPrizeRule: sanitizeReferralPrizeRule(
+            parsed.settings?.referralPrizeRule,
+            DEFAULT_REFERRAL_PRIZE_RULE
+          ),
         },
         gifts: Array.isArray(parsed.gifts)
           ? parsed.gifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY))
           : BUNDLED_DEFAULT_STORE.gifts,
+        leads: Array.isArray(parsed.leads) ? parsed.leads.map(normalizeLeadRecord) : [],
+        qrHistory: Array.isArray(parsed.qrHistory) ? parsed.qrHistory : [],
+        referrers: Array.isArray(parsed.referrers)
+          ? parsed.referrers.map(normalizeReferrerRecord).filter(Boolean)
+          : [],
       };
     } catch {
       // Fallback to bundled copy
@@ -669,8 +888,9 @@ function ensureStore() {
   if (IS_VERCEL) {
     return readDefaultStore();
   }
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  const storeDir = path.dirname(STORE_PATH);
+  if (!fs.existsSync(storeDir)) {
+    fs.mkdirSync(storeDir, { recursive: true });
   }
   if (!fs.existsSync(STORE_PATH)) {
     const initial = readDefaultStore();
@@ -681,7 +901,14 @@ function ensureStore() {
     const raw = fs.readFileSync(STORE_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     const defaults = readDefaultStore();
-    const mergedSettings = { ...defaults.settings, ...(parsed.settings || {}) };
+    const mergedSettings = {
+      ...defaults.settings,
+      ...(parsed.settings || {}),
+      referralPrizeRule: sanitizeReferralPrizeRule(
+        parsed.settings?.referralPrizeRule,
+        defaults.settings.referralPrizeRule || DEFAULT_REFERRAL_PRIZE_RULE
+      ),
+    };
     if (typeof mergedSettings.randomizeGifts !== 'boolean') {
       mergedSettings.randomizeGifts =
         typeof defaults.settings.randomizeGifts === 'boolean' ? defaults.settings.randomizeGifts : true;
@@ -692,6 +919,9 @@ function ensureStore() {
       gifts: rawGifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY)),
       leads: Array.isArray(parsed.leads) ? parsed.leads.map(normalizeLeadRecord) : defaults.leads,
       qrHistory: Array.isArray(parsed.qrHistory) ? parsed.qrHistory : defaults.qrHistory || [],
+      referrers: Array.isArray(parsed.referrers)
+        ? parsed.referrers.map(normalizeReferrerRecord).filter(Boolean)
+        : defaults.referrers || [],
     };
   } catch {
     const initial = readDefaultStore();
@@ -742,7 +972,22 @@ function isMissingQrTableError(err) {
   );
 }
 
+function isMissingReferrersTableError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '').toLowerCase();
+  const code = String(err.code || '').toUpperCase();
+  return (
+    err.status === 404 ||
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    msg.includes('42p01') ||
+    (msg.includes('referrers') &&
+      (msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('not found')))
+  );
+}
+
 let memoryQrFallback = null;
+let memoryReferrersFallback = null;
 const memoryGiftUsageTips = new Map();
 const memoryGiftProbabilities = new Map();
 const memoryLeadPromoStates = new Map();
@@ -845,6 +1090,34 @@ function removeFallbackQrCode(id) {
   return next;
 }
 
+function getFallbackReferrers() {
+  if (Array.isArray(memoryReferrersFallback)) {
+    return memoryReferrersFallback;
+  }
+  if (!IS_VERCEL) {
+    const local = ensureStore();
+    memoryReferrersFallback = Array.isArray(local.referrers)
+      ? local.referrers.map(normalizeReferrerRecord).filter(Boolean)
+      : [];
+    return memoryReferrersFallback;
+  }
+  memoryReferrersFallback = [];
+  return memoryReferrersFallback;
+}
+
+function saveFallbackReferrers(nextReferrers) {
+  const normalized = Array.isArray(nextReferrers)
+    ? nextReferrers.map(normalizeReferrerRecord).filter(Boolean)
+    : [];
+  memoryReferrersFallback = normalized;
+  if (!IS_VERCEL) {
+    const local = ensureStore();
+    local.referrers = normalized;
+    writeStore(local);
+  }
+  return normalized;
+}
+
 // ----------------------------------------------------------------------------
 // Supabase REST / RPC Helpers (Server-side only — never exposed to client)
 // ----------------------------------------------------------------------------
@@ -918,6 +1191,10 @@ function mapSettingsRow(row) {
           : typeof defaults.randomizeGifts === 'boolean'
             ? defaults.randomizeGifts
             : true,
+    referralPrizeRule: sanitizeReferralPrizeRule(
+      row.referral_prize_rule ?? memorySettingsFallback.referralPrizeRule,
+      defaults.referralPrizeRule || DEFAULT_REFERRAL_PRIZE_RULE
+    ),
   };
 }
 
@@ -984,6 +1261,13 @@ function mapLeadRow(row) {
     qualification: row.qualification ?? null,
     promoCodeInvalidated,
     promoCodeInvalidatedAt,
+    referralCode:
+      typeof row.referral_code === 'string' && row.referral_code.trim()
+        ? normalizeReferralCode(row.referral_code) || row.referral_code.trim().toUpperCase()
+        : null,
+    referrerId: typeof row.referrer_id === 'string' && row.referrer_id.trim() ? row.referrer_id.trim() : null,
+    referrerName:
+      typeof row.referrer_name === 'string' && row.referrer_name.trim() ? row.referrer_name.trim() : null,
     createdAt: row.created_at,
   };
 }
@@ -1005,20 +1289,49 @@ function mapQrRow(row) {
         : '#FFFDF9',
     includeLogo: row.include_logo !== false,
     frameText: typeof row.frame_text === 'string' && row.frame_text.trim() ? row.frame_text.trim() : undefined,
+    referralCode:
+      typeof row.referral_code === 'string' && row.referral_code.trim()
+        ? normalizeReferralCode(row.referral_code) || row.referral_code.trim().toUpperCase()
+        : null,
+    referrerId: typeof row.referrer_id === 'string' && row.referrer_id.trim() ? row.referrer_id.trim() : null,
     createdAt: row.created_at,
   };
+}
+
+function mapReferrerRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  return normalizeReferrerRecord({
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    phone: row.phone ?? undefined,
+    notes: row.notes ?? undefined,
+    active: row.active !== false,
+    visitsCount: row.visits_count ?? 0,
+    uniqueVisitsCount: row.unique_visits_count ?? 0,
+    lastVisitAt: row.last_visit_at ?? null,
+    qrStyleId: row.qr_style_id ?? 'classic-gold',
+    createdAt: row.created_at,
+  });
 }
 
 async function fetchSupabaseStore() {
   const defaults = readDefaultStore();
   let qrTableMissing = false;
-  const [settingsRows, giftRows, leadRows, qrRows] = await Promise.all([
+  let referrersTableMissing = false;
+  const [settingsRows, giftRows, leadRows, qrRows, referrerRows] = await Promise.all([
     supabaseRest('app_settings?id=eq.default&limit=1'),
     supabaseRest('gifts?order=sort_order.asc,created_at.asc'),
     supabaseRest('leads?order=created_at.desc'),
     supabaseRest('qr_codes?order=created_at.desc').catch((err) => {
       if (isMissingQrTableError(err)) {
         qrTableMissing = true;
+      }
+      return [];
+    }),
+    supabaseRest('referrers?order=created_at.desc').catch((err) => {
+      if (isMissingReferrersTableError(err)) {
+        referrersTableMissing = true;
       }
       return [];
     }),
@@ -1035,6 +1348,11 @@ async function fetchSupabaseStore() {
       ? getFallbackQrHistory()
       : Array.isArray(qrRows)
         ? qrRows.map(mapQrRow)
+        : [],
+    referrers: referrersTableMissing
+      ? getFallbackReferrers()
+      : Array.isArray(referrerRows)
+        ? referrerRows.map(mapReferrerRow).filter(Boolean)
         : [],
   };
 }
@@ -1083,19 +1401,28 @@ function sanitizeStateForClient(store, isAuthed, role) {
   const normalizedGifts = Array.isArray(store.gifts)
     ? store.gifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY))
     : [];
+  const normalizedReferrers = Array.isArray(store.referrers)
+    ? store.referrers.map(normalizeReferrerRecord).filter(Boolean)
+    : [];
   const defaultRandomize =
     typeof store.settings?.randomizeGifts === 'boolean' ? store.settings.randomizeGifts : true;
+  const referralPrizeRule = sanitizeReferralPrizeRule(
+    store.settings?.referralPrizeRule,
+    DEFAULT_REFERRAL_PRIZE_RULE
+  );
 
   if (!isAuthed) {
     return {
       settings: {
         ...store.settings,
         randomizeGifts: defaultRandomize,
+        referralPrizeRule,
         pinCode: '',
       },
       gifts: normalizedGifts,
       leads: [],
       qrHistory: [],
+      referrers: [],
     };
   }
 
@@ -1117,6 +1444,7 @@ function sanitizeStateForClient(store, isAuthed, role) {
         address: l.address || '',
       })),
       qrHistory: [],
+      referrers: normalizedReferrers,
       role: 'caller',
     };
   }
@@ -1129,11 +1457,13 @@ function sanitizeStateForClient(store, isAuthed, role) {
     settings: {
       ...store.settings,
       randomizeGifts: defaultRandomize,
+      referralPrizeRule,
       pinCode: '',
     },
     gifts: normalizedGifts,
     leads: normalizedLeads,
     qrHistory: isAuthed && role === 'admin' && Array.isArray(store.qrHistory) ? store.qrHistory : [],
+    referrers: normalizedReferrers,
     role: 'admin',
   };
 }
@@ -1539,8 +1869,8 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
   });
 });
 
-// Master-key protected full reset: wipes all leads, metrics, QR history (and optionally gifts/settings)
-app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, res) => {
+// Master-key protected full reset: wipes all leads, metrics, QR history, resets referrer visit counters (and optionally gifts/settings)
+async function handleMasterReset(req, res) {
   const bucketKey = getBucketKey(req, 'master');
   const status = checkRateLimit(bucketKey);
   if (status.locked) {
@@ -1580,11 +1910,31 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
       const defaults = readDefaultStore();
       memoryQrFallback = [];
       memoryLeadPromoStates.clear();
+      referralVisitorBuckets.clear();
+      if (Array.isArray(memoryReferrersFallback)) {
+        memoryReferrersFallback = memoryReferrersFallback.map((r) => ({
+          ...r,
+          visitsCount: 0,
+          uniqueVisitsCount: 0,
+          lastVisitAt: null,
+        }));
+      }
 
       if (USE_SUPABASE) {
         await supabaseRest('leads?id=not.is.null', { method: 'DELETE' });
         await supabaseRest('qr_codes?id=not.is.null', { method: 'DELETE' }).catch((err) => {
           if (!isMissingQrTableError(err)) throw err;
+        });
+        await supabaseRest('referrers?id=not.is.null', {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            visits_count: 0,
+            unique_visits_count: 0,
+            last_visit_at: null,
+          }),
+        }).catch((err) => {
+          if (!isMissingReferrersTableError(err)) throw err;
         });
 
         if (shouldResetCatalog) {
@@ -1621,12 +1971,17 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
             method: 'DELETE',
           });
 
+          const defaultPrizeRule = sanitizeReferralPrizeRule(
+            defaults.settings.referralPrizeRule,
+            DEFAULT_REFERRAL_PRIZE_RULE
+          );
           Object.assign(memorySettingsFallback, {
             showcaseStyle: defaults.settings.showcaseStyle || 'luminous-gold',
             randomizeGifts:
               typeof defaults.settings.randomizeGifts === 'boolean'
                 ? defaults.settings.randomizeGifts
                 : true,
+            referralPrizeRule: defaultPrizeRule,
           });
           await supabaseWriteWithOptionalColumns(
             'app_settings',
@@ -1646,9 +2001,10 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
                 typeof defaults.settings.randomizeGifts === 'boolean'
                   ? defaults.settings.randomizeGifts
                   : true,
+              referral_prize_rule: defaultPrizeRule,
               updated_at: new Date().toISOString(),
             },
-            ['showcase_style', 'randomize_gifts']
+            ['showcase_style', 'randomize_gifts', 'referral_prize_rule']
           );
         }
 
@@ -1656,6 +2012,12 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
           const local = ensureStore();
           local.leads = [];
           local.qrHistory = [];
+          local.referrers = (local.referrers || []).map((r) => ({
+            ...r,
+            visitsCount: 0,
+            uniqueVisitsCount: 0,
+            lastVisitAt: null,
+          }));
           if (shouldResetCatalog) {
             local.gifts = defaults.gifts;
             local.settings = { ...defaults.settings };
@@ -1674,6 +2036,12 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
       const store = ensureStore();
       store.leads = [];
       store.qrHistory = [];
+      store.referrers = (store.referrers || []).map((r) => ({
+        ...r,
+        visitsCount: 0,
+        uniqueVisitsCount: 0,
+        lastVisitAt: null,
+      }));
       if (shouldResetCatalog) {
         store.gifts = defaults.gifts;
         store.settings = { ...defaults.settings };
@@ -1691,7 +2059,10 @@ app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, async (req, r
       });
     }
   });
-});
+}
+
+app.post('/api/admin/reset-all', requireDsbAuth, requireAdminRole, handleMasterReset);
+app.post('/api/admin/master-reset', requireDsbAuth, requireAdminRole, handleMasterReset);
 
 // State read: NEVER exposes leads or PIN without valid DSB session token
 app.get('/api/state', async (req, res) => {
@@ -1715,8 +2086,19 @@ app.post('/api/leads', async (req, res) => {
     return res.status(403).json({ error: 'Acceso denegado. Permisos administrativos requeridos.' });
   }
 
-  const { name, phone, address, acceptedTerms, giftId, giftName, giftVisualKey, claimCode, notes, qualification } =
-    req.body || {};
+  const {
+    name,
+    phone,
+    address,
+    acceptedTerms,
+    giftId,
+    giftName,
+    giftVisualKey,
+    claimCode,
+    notes,
+    qualification,
+    referralCode,
+  } = req.body || {};
 
   const cleanName = typeof name === 'string' ? name.trim() : '';
   const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
@@ -1741,6 +2123,11 @@ app.post('/api/leads', async (req, res) => {
         store.gifts[0] ||
         null;
 
+      const normalizedRefCode = normalizeReferralCode(referralCode);
+      const matchedPartner = normalizedRefCode
+        ? (store.referrers || []).find((p) => p.code === normalizedRefCode) || null
+        : null;
+
       const newLead = {
         id: generateId('lead'),
         name: cleanName,
@@ -1759,6 +2146,9 @@ app.post('/api/leads', async (req, res) => {
         qualification: qualification && typeof qualification === 'object' ? qualification : null,
         promoCodeInvalidated: false,
         promoCodeInvalidatedAt: null,
+        referralCode: normalizedRefCode,
+        referrerId: matchedPartner ? matchedPartner.id : null,
+        referrerName: matchedPartner ? matchedPartner.name : null,
         createdAt: new Date().toISOString(),
       };
 
@@ -1789,9 +2179,18 @@ app.post('/api/leads', async (req, res) => {
             qualification: newLead.qualification,
             promo_code_invalidated: false,
             promo_code_invalidated_at: null,
+            referral_code: newLead.referralCode,
+            referrer_id: newLead.referrerId,
+            referrer_name: newLead.referrerName,
             created_at: newLead.createdAt,
           },
-          ['promo_code_invalidated', 'promo_code_invalidated_at']
+          [
+            'promo_code_invalidated',
+            'promo_code_invalidated_at',
+            'referral_code',
+            'referrer_id',
+            'referrer_name',
+          ]
         );
         const updatedStore = await getActiveStore();
         return res.status(201).json({
@@ -2420,11 +2819,22 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
             : typeof store.settings.randomizeGifts === 'boolean'
               ? store.settings.randomizeGifts
               : true,
+        referralPrizeRule:
+          updates.referralPrizeRule !== undefined
+            ? sanitizeReferralPrizeRule(
+                updates.referralPrizeRule,
+                store.settings.referralPrizeRule || DEFAULT_REFERRAL_PRIZE_RULE
+              )
+            : sanitizeReferralPrizeRule(
+                store.settings.referralPrizeRule,
+                DEFAULT_REFERRAL_PRIZE_RULE
+              ),
       };
 
       if (USE_SUPABASE) {
         memorySettingsFallback.showcaseStyle = nextSettings.showcaseStyle;
         memorySettingsFallback.randomizeGifts = nextSettings.randomizeGifts;
+        memorySettingsFallback.referralPrizeRule = nextSettings.referralPrizeRule;
         await supabaseWriteWithOptionalColumns(
           'app_settings?id=eq.default',
           'PATCH',
@@ -2439,9 +2849,16 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
             custom_box_color: nextSettings.customBoxColor,
             showcase_style: nextSettings.showcaseStyle,
             randomize_gifts: nextSettings.randomizeGifts,
+            referral_prize_rule: nextSettings.referralPrizeRule,
             updated_at: new Date().toISOString(),
           },
-          ['showcase_style', 'randomize_gifts', 'gift_theme', 'custom_box_color']
+          [
+            'showcase_style',
+            'randomize_gifts',
+            'gift_theme',
+            'custom_box_color',
+            'referral_prize_rule',
+          ]
         );
         const updatedStore = await getActiveStore();
         const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
@@ -2459,7 +2876,7 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
 });
 
 // Admin-only QR Studio & History endpoints
-app.get('/api/qr', requireDsbAuth, requireAdminRole, async (_req, res) => {
+async function handleGetQrHistory(_req, res) {
   try {
     const store = await getActiveStore();
     const sanitized = sanitizeStateForClient(store, true, 'admin');
@@ -2467,11 +2884,21 @@ app.get('/api/qr', requireDsbAuth, requireAdminRole, async (_req, res) => {
   } catch {
     return res.status(503).json({ error: 'No se pudo consultar el historial de códigos QR.' });
   }
-});
+}
 
-app.post('/api/qr', requireDsbAuth, requireAdminRole, async (req, res) => {
-  const { name, targetUrl, styleId, dotShape, foregroundColor, backgroundColor, includeLogo, frameText } =
-    req.body || {};
+async function handleCreateQrCode(req, res) {
+  const {
+    name,
+    targetUrl,
+    styleId,
+    dotShape,
+    foregroundColor,
+    backgroundColor,
+    includeLogo,
+    frameText,
+    referralCode,
+    referrerId,
+  } = req.body || {};
 
   const cleanName = typeof name === 'string' ? name.trim() : '';
   const cleanTargetUrl = typeof targetUrl === 'string' ? targetUrl.trim() : '';
@@ -2484,107 +2911,721 @@ app.post('/api/qr', requireDsbAuth, requireAdminRole, async (req, res) => {
   }
 
   const cleanFrameText = typeof frameText === 'string' ? frameText.trim().slice(0, 120) : '';
-  const newQr = {
-    id: generateId('qr'),
-    name: cleanName.slice(0, 120),
-    targetUrl: cleanTargetUrl,
-    styleId: VALID_QR_STYLE_IDS.has(styleId) ? styleId : 'classic-gold',
-    dotShape: VALID_QR_DOT_SHAPES.has(dotShape) ? dotShape : 'rounded',
-    foregroundColor:
-      typeof foregroundColor === 'string' && HEX_COLOR_RE.test(foregroundColor.trim())
-        ? foregroundColor.trim()
-        : '#22150E',
-    backgroundColor:
-      typeof backgroundColor === 'string' && HEX_COLOR_RE.test(backgroundColor.trim())
-        ? backgroundColor.trim()
-        : '#FFFDF9',
-    includeLogo: typeof includeLogo === 'boolean' ? includeLogo : true,
-    ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
-    createdAt: new Date().toISOString(),
-  };
+  let cleanReferralCode = normalizeReferralCode(referralCode);
+  let cleanReferrerId =
+    typeof referrerId === 'string' && referrerId.trim() ? referrerId.trim().slice(0, 120) : null;
 
-  try {
-    if (USE_SUPABASE) {
-      try {
-        await supabaseRest('qr_codes', {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            id: newQr.id,
-            name: newQr.name,
-            target_url: newQr.targetUrl,
-            style_id: newQr.styleId,
-            dot_shape: newQr.dotShape,
-            foreground_color: newQr.foregroundColor,
-            background_color: newQr.backgroundColor,
-            include_logo: newQr.includeLogo,
-            frame_text: cleanFrameText,
-            created_at: newQr.createdAt,
-          }),
-        });
-        const updatedStore = await getActiveStore();
-        const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
-        return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
-      } catch (err) {
-        if (!isMissingQrTableError(err)) throw err;
-        addFallbackQrCode(newQr);
-        const updatedStore = await getActiveStore();
-        const sanitized = sanitizeStateForClient(
-          { ...updatedStore, qrHistory: getFallbackQrHistory() },
-          true,
-          'admin'
-        );
-        return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const referrers = Array.isArray(store.referrers) ? store.referrers : [];
+      if (cleanReferrerId && !cleanReferralCode) {
+        const byId = referrers.find((p) => p.id === cleanReferrerId);
+        if (byId) cleanReferralCode = byId.code;
+      } else if (cleanReferralCode && !cleanReferrerId) {
+        const byCode = referrers.find((p) => p.code === cleanReferralCode);
+        if (byCode) cleanReferrerId = byCode.id;
       }
-    }
 
+      const newQr = {
+        id: generateId('qr'),
+        name: cleanName.slice(0, 120),
+        targetUrl: cleanTargetUrl,
+        styleId: VALID_QR_STYLE_IDS.has(styleId) ? styleId : 'classic-gold',
+        dotShape: VALID_QR_DOT_SHAPES.has(dotShape) ? dotShape : 'rounded',
+        foregroundColor:
+          typeof foregroundColor === 'string' && HEX_COLOR_RE.test(foregroundColor.trim())
+            ? foregroundColor.trim()
+            : '#22150E',
+        backgroundColor:
+          typeof backgroundColor === 'string' && HEX_COLOR_RE.test(backgroundColor.trim())
+            ? backgroundColor.trim()
+            : '#FFFDF9',
+        includeLogo: typeof includeLogo === 'boolean' ? includeLogo : true,
+        ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
+        referralCode: cleanReferralCode || null,
+        referrerId: cleanReferrerId || null,
+        createdAt: new Date().toISOString(),
+      };
+
+      if (USE_SUPABASE) {
+        try {
+          await supabaseWriteWithOptionalColumns(
+            'qr_codes',
+            'POST',
+            { Prefer: 'return=minimal' },
+            {
+              id: newQr.id,
+              name: newQr.name,
+              target_url: newQr.targetUrl,
+              style_id: newQr.styleId,
+              dot_shape: newQr.dotShape,
+              foreground_color: newQr.foregroundColor,
+              background_color: newQr.backgroundColor,
+              include_logo: newQr.includeLogo,
+              frame_text: cleanFrameText,
+              referral_code: newQr.referralCode,
+              referrer_id: newQr.referrerId,
+              created_at: newQr.createdAt,
+            },
+            ['referral_code', 'referrer_id']
+          );
+          const updatedStore = await getActiveStore();
+          const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
+          return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+        } catch (err) {
+          if (!isMissingQrTableError(err)) throw err;
+          addFallbackQrCode(newQr);
+          const updatedStore = await getActiveStore();
+          const sanitized = sanitizeStateForClient(
+            { ...updatedStore, qrHistory: getFallbackQrHistory() },
+            true,
+            'admin'
+          );
+          return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+        }
+      }
+
+      store.qrHistory = Array.isArray(store.qrHistory) ? store.qrHistory : [];
+      store.qrHistory.unshift(newQr);
+      writeStore(store);
+      const sanitized = sanitizeStateForClient(store, true, 'admin');
+      return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo guardar el código QR.' });
+    }
+  });
+}
+
+async function handleDeleteQrCode(req, res) {
+  const { id } = req.params;
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const history = Array.isArray(store.qrHistory) ? store.qrHistory : [];
+      const exists = history.some((item) => item.id === id);
+      if (!exists) {
+        return res.status(404).json({ error: 'Código QR no encontrado.' });
+      }
+
+      if (USE_SUPABASE) {
+        try {
+          await supabaseRest(`qr_codes?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+          const updatedStore = await getActiveStore();
+          const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
+          return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
+        } catch (err) {
+          if (!isMissingQrTableError(err)) throw err;
+          removeFallbackQrCode(id);
+          const updatedStore = await getActiveStore();
+          const sanitized = sanitizeStateForClient(
+            { ...updatedStore, qrHistory: getFallbackQrHistory() },
+            true,
+            'admin'
+          );
+          return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
+        }
+      }
+
+      store.qrHistory = history.filter((item) => item.id !== id);
+      writeStore(store);
+      const sanitized = sanitizeStateForClient(store, true, 'admin');
+      return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo eliminar el código QR.' });
+    }
+  });
+}
+
+app.get('/api/qr', requireDsbAuth, requireAdminRole, handleGetQrHistory);
+app.post('/api/qr', requireDsbAuth, requireAdminRole, handleCreateQrCode);
+app.delete('/api/qr/:id', requireDsbAuth, requireAdminRole, handleDeleteQrCode);
+
+app.get('/api/qr-codes', requireDsbAuth, requireAdminRole, handleGetQrHistory);
+app.post('/api/qr-codes', requireDsbAuth, requireAdminRole, handleCreateQrCode);
+app.delete('/api/qr-codes/:id', requireDsbAuth, requireAdminRole, handleDeleteQrCode);
+
+// ----------------------------------------------------------------------------
+// Referral QR / Ambassador Tracking & Prize System Endpoints
+// ----------------------------------------------------------------------------
+
+// Public: resolve referral code to safe public partner info (NEVER exposes phone, notes, or counts)
+app.get('/api/referrals/resolve/:code', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const normalizedCode = normalizeReferralCode(req.params.code);
+  if (!normalizedCode) {
+    return res.json({ ok: true, partner: null });
+  }
+  try {
     const store = await getActiveStore();
-    store.qrHistory = Array.isArray(store.qrHistory) ? store.qrHistory : [];
-    store.qrHistory.unshift(newQr);
-    writeStore(store);
-    const sanitized = sanitizeStateForClient(store, true, 'admin');
-    return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+    const partner = (store.referrers || []).find((p) => p.code === normalizedCode) || null;
+    if (!partner) {
+      return res.json({ ok: true, partner: null });
+    }
+    return res.json({
+      ok: true,
+      partner: {
+        id: partner.id,
+        name: partner.name,
+        code: partner.code,
+        active: Boolean(partner.active),
+      },
+    });
   } catch {
-    return res.status(503).json({ error: 'No se pudo guardar el código QR.' });
+    return res.status(503).json({ error: 'No se pudo verificar el código de referido.' });
   }
 });
 
-app.delete('/api/qr/:id', requireDsbAuth, requireAdminRole, async (req, res) => {
-  const { id } = req.params;
+// Public: record a visit to a referral QR link (with unique visitor deduplication)
+app.post('/api/referrals/visit', async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { code, visitorId } = req.body || {};
+  const normalizedCode = normalizeReferralCode(code);
+  if (!normalizedCode) {
+    return res.json({ ok: true, counted: false, partner: null });
+  }
+
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const referrers = Array.isArray(store.referrers) ? store.referrers : [];
+      const index = referrers.findIndex((p) => p.code === normalizedCode);
+      if (index === -1 || referrers[index].active !== true) {
+        return res.json({ ok: true, counted: false, partner: null });
+      }
+
+      const partner = referrers[index];
+      let visitorKey =
+        typeof visitorId === 'string' && visitorId.trim() ? visitorId.trim().slice(0, 128) : '';
+      if (!visitorKey) {
+        const forwarded = req.headers['x-forwarded-for'];
+        const ip =
+          (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
+          req.ip ||
+          req.socket?.remoteAddress ||
+          'local';
+        const ua = String(req.headers['user-agent'] || '');
+        visitorKey = `anon:${crypto
+          .createHash('sha256')
+          .update(`${ip}|${ua}`)
+          .digest('hex')
+          .slice(0, 24)}`;
+      }
+
+      const isUnique = recordReferralVisitor(partner.code, visitorKey);
+      const nowIso = new Date().toISOString();
+      const nextPartner = {
+        ...partner,
+        visitsCount: (partner.visitsCount || 0) + 1,
+        uniqueVisitsCount: (partner.uniqueVisitsCount || 0) + (isUnique ? 1 : 0),
+        lastVisitAt: nowIso,
+      };
+
+      if (USE_SUPABASE) {
+        try {
+          await supabaseRest(`referrers?id=eq.${encodeURIComponent(partner.id)}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              visits_count: nextPartner.visitsCount,
+              unique_visits_count: nextPartner.uniqueVisitsCount,
+              last_visit_at: nextPartner.lastVisitAt,
+            }),
+          });
+        } catch (err) {
+          if (!isMissingReferrersTableError(err)) throw err;
+          const fallback = getFallbackReferrers();
+          const fbIdx = fallback.findIndex((p) => p.id === partner.id);
+          if (fbIdx !== -1) {
+            fallback[fbIdx] = nextPartner;
+            saveFallbackReferrers(fallback);
+          }
+        }
+      } else {
+        referrers[index] = nextPartner;
+        store.referrers = referrers;
+        writeStore(store);
+      }
+
+      return res.json({
+        ok: true,
+        counted: true,
+        partner: {
+          id: nextPartner.id,
+          name: nextPartner.name,
+          code: nextPartner.code,
+        },
+      });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo registrar la visita del referido.' });
+    }
+  });
+});
+
+// DSB authenticated (admin or caller): list referral partners
+app.get('/api/referrals', requireDsbAuth, async (_req, res) => {
+  applyNoStoreHeaders(res);
   try {
     const store = await getActiveStore();
-    const history = Array.isArray(store.qrHistory) ? store.qrHistory : [];
-    const exists = history.some((item) => item.id === id);
-    if (!exists) {
-      return res.status(404).json({ error: 'Código QR no encontrado.' });
-    }
-
-    if (USE_SUPABASE) {
-      try {
-        await supabaseRest(`qr_codes?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
-        const updatedStore = await getActiveStore();
-        const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
-        return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
-      } catch (err) {
-        if (!isMissingQrTableError(err)) throw err;
-        removeFallbackQrCode(id);
-        const updatedStore = await getActiveStore();
-        const sanitized = sanitizeStateForClient(
-          { ...updatedStore, qrHistory: getFallbackQrHistory() },
-          true,
-          'admin'
-        );
-        return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
-      }
-    }
-
-    store.qrHistory = history.filter((item) => item.id !== id);
-    writeStore(store);
-    const sanitized = sanitizeStateForClient(store, true, 'admin');
-    return res.json({ qrHistory: sanitized.qrHistory, state: sanitized });
+    const referrers = Array.isArray(store.referrers)
+      ? store.referrers.map(normalizeReferrerRecord).filter(Boolean)
+      : [];
+    return res.json({ ok: true, referrers });
   } catch {
-    return res.status(503).json({ error: 'No se pudo eliminar el código QR.' });
+    return res.status(503).json({ error: 'No se pudo consultar la lista de embajadores.' });
   }
+});
+
+// Admin-only: batch create up to 50 referral partners
+app.post('/api/referrals/batch', requireAdminRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { items, count, namePrefix, codePrefix, qrStyleId } = req.body || {};
+
+  const hasItems = Array.isArray(items);
+  const hasCount = count !== undefined && count !== null;
+
+  if (!hasItems && !hasCount) {
+    return res.status(400).json({
+      error: 'Debes proporcionar una lista de embajadores (items) o una cantidad (count).',
+    });
+  }
+
+  if (hasItems) {
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'La lista de embajadores está vacía.' });
+    }
+    if (items.length > 50) {
+      return res.status(400).json({ error: 'Máximo 50 embajadores por lote.' });
+    }
+  } else {
+    const parsedCount = Number(count);
+    if (!Number.isInteger(parsedCount) || parsedCount < 1 || parsedCount > 50) {
+      return res.status(400).json({ error: 'La cantidad debe ser un entero entre 1 y 50.' });
+    }
+  }
+
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const existing = Array.isArray(store.referrers) ? store.referrers : [];
+      const existingCodes = new Set(existing.map((p) => p.code));
+      const defaultStyle = VALID_QR_STYLE_IDS.has(qrStyleId) ? qrStyleId : 'classic-gold';
+      const created = [];
+      const skipped = [];
+      const nowBase = Date.now();
+
+      if (hasItems) {
+        for (let i = 0; i < items.length; i += 1) {
+          const entry = items[i];
+          const cleanName = typeof entry?.name === 'string' ? entry.name.trim() : '';
+          if (cleanName.length < 2) {
+            skipped.push(cleanName || `Fila ${i + 1}`);
+            continue;
+          }
+
+          let finalCode = null;
+          if (typeof entry.code === 'string' && entry.code.trim()) {
+            const normalized = normalizeReferralCode(entry.code);
+            if (!normalized || existingCodes.has(normalized)) {
+              skipped.push(normalized || entry.code.trim());
+              continue;
+            }
+            existingCodes.add(normalized);
+            finalCode = normalized;
+          } else {
+            finalCode = generateUniqueReferralCode(cleanName, existingCodes);
+          }
+
+          const cleanPhone =
+            typeof entry.phone === 'string' && entry.phone.trim()
+              ? entry.phone.trim().slice(0, 40)
+              : undefined;
+          const cleanNotes =
+            typeof entry.notes === 'string' && entry.notes.trim()
+              ? entry.notes.trim().slice(0, 500)
+              : undefined;
+
+          created.push({
+            id: generateId('ref'),
+            name: cleanName.slice(0, 120),
+            code: finalCode,
+            ...(cleanPhone ? { phone: cleanPhone } : {}),
+            ...(cleanNotes ? { notes: cleanNotes } : {}),
+            active: entry.active !== false,
+            visitsCount: 0,
+            uniqueVisitsCount: 0,
+            lastVisitAt: null,
+            qrStyleId: VALID_QR_STYLE_IDS.has(entry.qrStyleId) ? entry.qrStyleId : defaultStyle,
+            createdAt: new Date(nowBase + i).toISOString(),
+          });
+        }
+      } else {
+        const parsedCount = Number(count);
+        const cleanNamePrefix =
+          typeof namePrefix === 'string' && namePrefix.trim()
+            ? namePrefix.trim().slice(0, 60)
+            : 'Embajador';
+        const rawCodePrefix =
+          typeof codePrefix === 'string' && codePrefix.trim()
+            ? normalizeReferralCode(codePrefix)
+            : 'EMB';
+        const cleanCodePrefix = (rawCodePrefix || 'EMB').slice(0, 24).replace(/-+$/g, '') || 'EMB';
+
+        let seq = 1;
+        for (let i = 0; i < parsedCount; i += 1) {
+          let candidate = '';
+          while (seq < 10000) {
+            const numLabel = String(seq).padStart(2, '0');
+            candidate = `${cleanCodePrefix}-${numLabel}`.slice(0, 32);
+            if (REFERRAL_CODE_RE.test(candidate) && !existingCodes.has(candidate)) {
+              break;
+            }
+            seq += 1;
+          }
+          existingCodes.add(candidate);
+          const numLabel = String(seq).padStart(2, '0');
+          seq += 1;
+
+          created.push({
+            id: generateId('ref'),
+            name: `${cleanNamePrefix} ${numLabel}`.slice(0, 120),
+            code: candidate,
+            active: true,
+            visitsCount: 0,
+            uniqueVisitsCount: 0,
+            lastVisitAt: null,
+            qrStyleId: defaultStyle,
+            createdAt: new Date(nowBase + i).toISOString(),
+          });
+        }
+      }
+
+      if (created.length > 0) {
+        if (USE_SUPABASE) {
+          const rows = created.map((partner) => ({
+            id: partner.id,
+            name: partner.name,
+            code: partner.code,
+            phone: partner.phone || null,
+            notes: partner.notes || null,
+            active: partner.active,
+            visits_count: 0,
+            unique_visits_count: 0,
+            last_visit_at: null,
+            qr_style_id: partner.qrStyleId || 'classic-gold',
+            created_at: partner.createdAt,
+          }));
+          try {
+            await supabaseRest('referrers', {
+              method: 'POST',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify(rows),
+            });
+          } catch (err) {
+            if (!isMissingReferrersTableError(err)) throw err;
+            saveFallbackReferrers([...created.slice().reverse(), ...getFallbackReferrers()]);
+          }
+        } else {
+          store.referrers = [...created.slice().reverse(), ...existing];
+          writeStore(store);
+        }
+      }
+
+      const updatedStore = USE_SUPABASE ? await getActiveStore() : store;
+      return res.status(201).json({
+        ok: true,
+        created,
+        skipped,
+        state: sanitizeStateForClient(updatedStore, true, 'admin'),
+      });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo crear el lote de embajadores.' });
+    }
+  });
+});
+
+// Admin-only: create a single referral partner
+app.post('/api/referrals', requireAdminRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { name, code, phone, notes, qrStyleId, active } = req.body || {};
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  if (cleanName.length < 2) {
+    return res.status(400).json({ error: 'El nombre del embajador debe tener al menos 2 caracteres.' });
+  }
+
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const existing = Array.isArray(store.referrers) ? store.referrers : [];
+      const existingCodes = new Set(existing.map((p) => p.code));
+
+      let finalCode = null;
+      if (typeof code === 'string' && code.trim()) {
+        const normalized = normalizeReferralCode(code);
+        if (!normalized) {
+          return res.status(400).json({
+            error: 'El código de referido debe tener entre 2 y 32 caracteres alfanuméricos o guiones.',
+          });
+        }
+        if (existingCodes.has(normalized)) {
+          return res.status(409).json({
+            error: `Ya existe un embajador con el código "${normalized}".`,
+          });
+        }
+        finalCode = normalized;
+      } else {
+        finalCode = generateUniqueReferralCode(cleanName, existingCodes);
+      }
+
+      const cleanPhone =
+        typeof phone === 'string' && phone.trim() ? phone.trim().slice(0, 40) : undefined;
+      const cleanNotes =
+        typeof notes === 'string' && notes.trim() ? notes.trim().slice(0, 500) : undefined;
+
+      const newReferrer = {
+        id: generateId('ref'),
+        name: cleanName.slice(0, 120),
+        code: finalCode,
+        ...(cleanPhone ? { phone: cleanPhone } : {}),
+        ...(cleanNotes ? { notes: cleanNotes } : {}),
+        active: active !== false,
+        visitsCount: 0,
+        uniqueVisitsCount: 0,
+        lastVisitAt: null,
+        qrStyleId: VALID_QR_STYLE_IDS.has(qrStyleId) ? qrStyleId : 'classic-gold',
+        createdAt: new Date().toISOString(),
+      };
+
+      if (USE_SUPABASE) {
+        try {
+          await supabaseRest('referrers', {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              id: newReferrer.id,
+              name: newReferrer.name,
+              code: newReferrer.code,
+              phone: newReferrer.phone || null,
+              notes: newReferrer.notes || null,
+              active: newReferrer.active,
+              visits_count: 0,
+              unique_visits_count: 0,
+              last_visit_at: null,
+              qr_style_id: newReferrer.qrStyleId,
+              created_at: newReferrer.createdAt,
+            }),
+          });
+        } catch (err) {
+          if (err?.code === '23505' || err?.status === 409) {
+            return res.status(409).json({
+              error: `Ya existe un embajador con el código "${newReferrer.code}".`,
+            });
+          }
+          if (!isMissingReferrersTableError(err)) throw err;
+          saveFallbackReferrers([newReferrer, ...getFallbackReferrers()]);
+        }
+        const updatedStore = await getActiveStore();
+        return res.status(201).json({
+          ok: true,
+          referrer: newReferrer,
+          state: sanitizeStateForClient(updatedStore, true, 'admin'),
+        });
+      }
+
+      store.referrers = [newReferrer, ...existing];
+      writeStore(store);
+      return res.status(201).json({
+        ok: true,
+        referrer: newReferrer,
+        state: sanitizeStateForClient(store, true, 'admin'),
+      });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo crear el embajador.' });
+    }
+  });
+});
+
+// Admin-only: update a referral partner (including resetVisits)
+app.patch('/api/referrals/:id', requireAdminRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { id } = req.params;
+  const updates = req.body || {};
+
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const existing = Array.isArray(store.referrers) ? store.referrers : [];
+      const index = existing.findIndex((p) => p.id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Embajador no encontrado.' });
+      }
+
+      const current = existing[index];
+      let nextName = current.name;
+      if (updates.name !== undefined) {
+        const cleanName = typeof updates.name === 'string' ? updates.name.trim() : '';
+        if (cleanName.length < 2) {
+          return res.status(400).json({ error: 'El nombre del embajador debe tener al menos 2 caracteres.' });
+        }
+        nextName = cleanName.slice(0, 120);
+      }
+
+      let nextCode = current.code;
+      if (updates.code !== undefined) {
+        const normalized = normalizeReferralCode(updates.code);
+        if (!normalized) {
+          return res.status(400).json({
+            error: 'El código de referido debe tener entre 2 y 32 caracteres alfanuméricos o guiones.',
+          });
+        }
+        const duplicate = existing.some((p) => p.id !== id && p.code === normalized);
+        if (duplicate) {
+          return res.status(409).json({
+            error: `Ya existe un embajador con el código "${normalized}".`,
+          });
+        }
+        nextCode = normalized;
+      }
+
+      let nextPhone = current.phone;
+      if (updates.phone !== undefined) {
+        nextPhone =
+          typeof updates.phone === 'string' && updates.phone.trim()
+            ? updates.phone.trim().slice(0, 40)
+            : undefined;
+      }
+
+      let nextNotes = current.notes;
+      if (updates.notes !== undefined) {
+        nextNotes =
+          typeof updates.notes === 'string' && updates.notes.trim()
+            ? updates.notes.trim().slice(0, 500)
+            : undefined;
+      }
+
+      const nextActive = typeof updates.active === 'boolean' ? updates.active : current.active;
+      const nextQrStyleId = VALID_QR_STYLE_IDS.has(updates.qrStyleId)
+        ? updates.qrStyleId
+        : current.qrStyleId || 'classic-gold';
+
+      const resetVisits = updates.resetVisits === true;
+      const nextVisitsCount = resetVisits ? 0 : current.visitsCount || 0;
+      const nextUniqueVisitsCount = resetVisits ? 0 : current.uniqueVisitsCount || 0;
+      const nextLastVisitAt = resetVisits ? null : current.lastVisitAt ?? null;
+
+      if (resetVisits) {
+        clearReferralVisitorBucket(current.code);
+        clearReferralVisitorBucket(nextCode);
+      } else if (nextCode !== current.code) {
+        renameReferralVisitorBucket(current.code, nextCode);
+      }
+
+      const nextReferrer = {
+        id: current.id,
+        name: nextName,
+        code: nextCode,
+        ...(nextPhone ? { phone: nextPhone } : {}),
+        ...(nextNotes ? { notes: nextNotes } : {}),
+        active: nextActive,
+        visitsCount: nextVisitsCount,
+        uniqueVisitsCount: nextUniqueVisitsCount,
+        lastVisitAt: nextLastVisitAt,
+        qrStyleId: nextQrStyleId,
+        createdAt: current.createdAt,
+      };
+
+      if (USE_SUPABASE) {
+        try {
+          await supabaseRest(`referrers?id=eq.${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              name: nextReferrer.name,
+              code: nextReferrer.code,
+              phone: nextReferrer.phone || null,
+              notes: nextReferrer.notes || null,
+              active: nextReferrer.active,
+              visits_count: nextReferrer.visitsCount,
+              unique_visits_count: nextReferrer.uniqueVisitsCount,
+              last_visit_at: nextReferrer.lastVisitAt,
+              qr_style_id: nextReferrer.qrStyleId,
+            }),
+          });
+        } catch (err) {
+          if (err?.code === '23505' || err?.status === 409) {
+            return res.status(409).json({
+              error: `Ya existe un embajador con el código "${nextReferrer.code}".`,
+            });
+          }
+          if (!isMissingReferrersTableError(err)) throw err;
+          const fallback = getFallbackReferrers();
+          const fbIdx = fallback.findIndex((p) => p.id === id);
+          if (fbIdx !== -1) {
+            fallback[fbIdx] = nextReferrer;
+            saveFallbackReferrers(fallback);
+          }
+        }
+        const updatedStore = await getActiveStore();
+        return res.json({
+          ok: true,
+          referrer: nextReferrer,
+          state: sanitizeStateForClient(updatedStore, true, 'admin'),
+        });
+      }
+
+      existing[index] = nextReferrer;
+      store.referrers = existing;
+      writeStore(store);
+      return res.json({
+        ok: true,
+        referrer: nextReferrer,
+        state: sanitizeStateForClient(store, true, 'admin'),
+      });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo actualizar el embajador.' });
+    }
+  });
+});
+
+// Admin-only: delete a referral partner
+app.delete('/api/referrals/:id', requireAdminRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { id } = req.params;
+  return withStoreMutationLock(async () => {
+    try {
+      const store = await getActiveStore();
+      const existing = Array.isArray(store.referrers) ? store.referrers : [];
+      const target = existing.find((p) => p.id === id);
+      if (!target) {
+        return res.status(404).json({ error: 'Embajador no encontrado.' });
+      }
+
+      clearReferralVisitorBucket(target.code);
+
+      if (USE_SUPABASE) {
+        try {
+          await supabaseRest(`referrers?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+        } catch (err) {
+          if (!isMissingReferrersTableError(err)) throw err;
+          saveFallbackReferrers(getFallbackReferrers().filter((p) => p.id !== id));
+        }
+        const updatedStore = await getActiveStore();
+        return res.json({
+          ok: true,
+          state: sanitizeStateForClient(updatedStore, true, 'admin'),
+        });
+      }
+
+      store.referrers = existing.filter((p) => p.id !== id);
+      writeStore(store);
+      return res.json({
+        ok: true,
+        state: sanitizeStateForClient(store, true, 'admin'),
+      });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo eliminar el embajador.' });
+    }
+  });
 });
 
 
@@ -2604,14 +3645,20 @@ if (!IS_VERCEL && !IS_TESTING) {
 
 export {
   DEFAULT_GIFT_PROBABILITY,
+  DEFAULT_REFERRAL_PRIZE_RULE,
   sanitizeGiftProbability,
   normalizeGiftRecord,
   normalizeLeadRecord,
+  normalizeReferralCode,
+  sanitizeReferralPrizeRule,
+  normalizeReferrerRecord,
   pickWeightedGift,
   isMissingColumnError,
   supabaseWriteWithOptionalColumns,
   mapGiftRow,
   mapLeadRow,
+  mapQrRow,
+  mapReferrerRow,
   memoryGiftProbabilities,
   memoryLeadPromoStates,
 };

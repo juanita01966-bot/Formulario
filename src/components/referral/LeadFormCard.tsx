@@ -1,14 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { AlertCircle, Building2, Check, ChevronRight, Globe, MapPin, Phone, Share2, User } from 'lucide-react';
+import {
+  AlertCircle,
+  Building2,
+  Check,
+  ChevronRight,
+  Globe,
+  MapPin,
+  Phone,
+  Share2,
+  Sparkles,
+  User,
+} from 'lucide-react';
 import type { AppSettings, GiftThemeId } from '../../types/app';
 import { resolveBoxPalette } from '../../shared/giftThemes';
 import { OTHER_CITY_VALUE, US_STATES } from '../../shared/usLocations';
 import { LocationDropdown } from './LocationDropdown';
 import { TermsModal } from './TermsModal';
 
+export interface ActiveReferralInfo {
+  code: string;
+  name: string;
+}
+
 interface LeadFormCardProps {
   settings: AppSettings;
+  referralPartner?: ActiveReferralInfo | null;
   onSubmit: (data: {
     name: string;
     phone: string;
@@ -154,7 +171,11 @@ function StylizedHeroGift3D({
   );
 }
 
-export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }) => {
+export const LeadFormCard: React.FC<LeadFormCardProps> = ({
+  settings,
+  referralPartner = null,
+  onSubmit,
+}) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [selectedStateCode, setSelectedStateCode] = useState('');
@@ -315,6 +336,39 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({ settings, onSubmit }
               className="h-full w-full object-cover"
             />
           </motion.div>
+
+          {/* Subtle Ambassador Invitation Pill (only rendered when a valid referral is active) */}
+          <AnimatePresence>
+            {referralPartner && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className="relative z-10 mb-3.5 sm:mb-4 flex justify-center"
+              >
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="inline-flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-full border border-[#D8B274]/75 bg-gradient-to-r from-[#FAF0DF] via-[#FFF9EE] to-[#FAF0DF] px-3.5 py-1.5 text-[11.5px] sm:text-xs text-[#5C4332] shadow-[0_6px_18px_-10px_rgba(140,51,24,0.35)] text-center leading-snug"
+                >
+                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#B8791F]" aria-hidden="true" />
+                  <span>
+                    Invitación especial de{' '}
+                    <strong className="font-semibold text-[#3D2114]">
+                      {referralPartner.name}
+                    </strong>
+                  </span>
+                  <span className="text-[#C88A2B]/80" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="font-mono text-[10.5px] sm:text-[11px] font-semibold tracking-wider text-[#8C3318] uppercase">
+                    Código {referralPartner.code}
+                  </span>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Hero Copy */}
           <div className="relative z-10 text-center space-y-2 sm:space-y-2.5 mb-4 sm:mb-5">

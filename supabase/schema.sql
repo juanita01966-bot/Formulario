@@ -21,6 +21,7 @@ create table if not exists public.app_settings (
   custom_box_color text not null default '#C88A2B',
   showcase_style text not null default 'luminous-gold',
   randomize_gifts boolean not null default true,
+  referral_prize_rule jsonb not null default '{"prizeName":"Premio Embajador Royal Prestige","metric":"leads","targetCount":5,"maxWinners":3,"pointsPerLead":1,"pointsPerCita":3,"pointsPerDemo":5,"pointsPerOrden":10}'::jsonb,
   updated_at timestamptz not null default now()
 );
 
@@ -28,6 +29,7 @@ alter table public.app_settings add column if not exists gift_theme text not nul
 alter table public.app_settings add column if not exists custom_box_color text not null default '#C88A2B';
 alter table public.app_settings add column if not exists showcase_style text not null default 'luminous-gold';
 alter table public.app_settings add column if not exists randomize_gifts boolean not null default true;
+alter table public.app_settings add column if not exists referral_prize_rule jsonb not null default '{"prizeName":"Premio Embajador Royal Prestige","metric":"leads","targetCount":5,"maxWinners":3,"pointsPerLead":1,"pointsPerCita":3,"pointsPerDemo":5,"pointsPerOrden":10}'::jsonb;
 
 -- ----------------------------------------------------------------------------
 -- 2. Catálogo de obsequios exclusivos
@@ -74,11 +76,17 @@ create table if not exists public.leads (
   qualification jsonb,
   promo_code_invalidated boolean not null default false,
   promo_code_invalidated_at timestamptz,
+  referral_code text,
+  referrer_id text,
+  referrer_name text,
   created_at timestamptz not null default now()
 );
 
 alter table public.leads add column if not exists promo_code_invalidated boolean not null default false;
 alter table public.leads add column if not exists promo_code_invalidated_at timestamptz;
+alter table public.leads add column if not exists referral_code text;
+alter table public.leads add column if not exists referrer_id text;
+alter table public.leads add column if not exists referrer_name text;
 
 update public.leads
 set promo_code_invalidated = true,
@@ -87,6 +95,8 @@ where category in ('cita', 'demo', 'orden')
   and promo_code_invalidated = false;
 
 create index if not exists leads_created_at_idx on public.leads (created_at desc);
+create index if not exists leads_referral_code_idx on public.leads (referral_code);
+create index if not exists leads_referrer_id_idx on public.leads (referrer_id);
 
 -- ----------------------------------------------------------------------------
 -- 4. Bóveda de autenticación 2FA del DSB (acceso exclusivo vía RPC SECURITY DEFINER)
@@ -126,10 +136,35 @@ create table if not exists public.qr_codes (
   background_color text not null default '#FFFDF9',
   include_logo boolean not null default true,
   frame_text text not null default '',
+  referral_code text,
+  referrer_id text,
   created_at timestamptz not null default now()
 );
 
+alter table public.qr_codes add column if not exists referral_code text;
+alter table public.qr_codes add column if not exists referrer_id text;
+
 create index if not exists qr_codes_created_at_idx on public.qr_codes (created_at desc);
+
+-- ----------------------------------------------------------------------------
+-- 4c. Embajadores / Referidos QR (acceso exclusivo admin / service_role)
+-- ----------------------------------------------------------------------------
+create table if not exists public.referrers (
+  id text primary key,
+  name text not null,
+  code text not null unique,
+  phone text,
+  notes text,
+  active boolean not null default true,
+  visits_count int not null default 0,
+  unique_visits_count int not null default 0,
+  last_visit_at timestamptz,
+  qr_style_id text not null default 'classic-gold',
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists referrers_code_upper_idx on public.referrers (upper(code));
+create index if not exists referrers_created_at_idx on public.referrers (created_at desc);
 
 -- ----------------------------------------------------------------------------
 -- 5. Row Level Security (RLS)
@@ -139,12 +174,14 @@ alter table public.gifts enable row level security;
 alter table public.leads enable row level security;
 alter table public.dsb_auth enable row level security;
 alter table public.qr_codes enable row level security;
+alter table public.referrers enable row level security;
 
 -- Revocar acceso directo desde cliente a tablas sensibles
 revoke all on table public.dsb_auth from anon, authenticated, public;
 revoke all on table public.leads from anon, public;
 revoke all on table public.qr_codes from anon, public;
 revoke all on table public.qr_codes from authenticated;
+revoke all on table public.referrers from anon, authenticated, public;
 
 drop policy if exists "app_settings_public_access" on public.app_settings;
 create policy "app_settings_public_access"
@@ -178,9 +215,17 @@ create policy "qr_codes_service_only"
   using (true)
   with check (true);
 
+drop policy if exists "referrers_service_only" on public.referrers;
+create policy "referrers_service_only"
+  on public.referrers
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
 grant usage on schema public to anon, authenticated, service_role;
 grant select on public.app_settings, public.gifts to anon, authenticated;
-grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth, public.qr_codes to service_role;
+grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth, public.qr_codes, public.referrers to service_role;
 
 -- ----------------------------------------------------------------------------
 -- 6. Funciones RPC de seguridad (2FA: Usuario/Clave + PIN Caja Fuerte + Llave Maestra)
@@ -618,7 +663,8 @@ insert into public.app_settings (
   gift_theme,
   custom_box_color,
   showcase_style,
-  randomize_gifts
+  randomize_gifts,
+  referral_prize_rule
 )
 values (
   'default',
@@ -631,7 +677,8 @@ values (
   'autumn',
   '#C88A2B',
   'luminous-gold',
-  true
+  true,
+  '{"prizeName":"Premio Embajador Royal Prestige","metric":"leads","targetCount":5,"maxWinners":3,"pointsPerLead":1,"pointsPerCita":3,"pointsPerDemo":5,"pointsPerOrden":10}'::jsonb
 )
 on conflict (id) do nothing;
 

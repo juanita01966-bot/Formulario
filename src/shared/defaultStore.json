@@ -7,7 +7,17 @@
     "requirePin": false,
     "pinCode": "",
     "showcaseStyle": "luminous-gold",
-    "randomizeGifts": true
+    "randomizeGifts": true,
+    "referralPrizeRule": {
+      "prizeName": "Premio Embajador Royal Prestige",
+      "metric": "leads",
+      "targetCount": 5,
+      "maxWinners": 3,
+      "pointsPerLead": 1,
+      "pointsPerCita": 3,
+      "pointsPerDemo": 5,
+      "pointsPerOrden": 10
+    }
   },
   "gifts": [
     {
@@ -129,5 +139,6 @@
     }
   ],
   "leads": [],
-  "qrHistory": []
+  "qrHistory": [],
+  "referrers": []
 }

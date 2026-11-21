@@ -11,14 +11,17 @@ import {
   ShieldCheck,
   User,
 } from 'lucide-react';
-import type { AppSettings, AppState, GiftThemeId } from '../types/app';
+import type { AppSettings, AppState, GiftThemeId, ReferralPrizeRule } from '../types/app';
 import {
+  batchCreateReferralPartners,
   createGift,
   createLead,
   createQrCode,
+  createReferralPartner,
   deleteGift,
   deleteLead,
   deleteQrCode,
+  deleteReferralPartner,
   DsbAuthError,
   fetchAppState,
   loginStep1,
@@ -28,10 +31,14 @@ import {
   updateGift,
   updateGiftProbabilities,
   updateLead,
+  updateReferralPartner,
   updateSettings,
   verifyDsbSession,
   verifyPinStep2,
+  type BatchCreateReferralsPayload,
   type CreateQrPayload,
+  type CreateReferralPayload,
+  type UpdateReferralPayload,
   type UpsertGiftPayload,
 } from '../services/storeClient';
 import { AutumnAtmosphere } from '../components/autumn/AutumnAtmosphere';
@@ -41,6 +48,7 @@ import { ProspectsManager, type LeadUpdatePayload } from '../components/dashboar
 import { CallerProspectsView } from '../components/dashboard/CallerProspectsView';
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
 import { QrStudioPanel } from '../components/dashboard/QrStudioPanel';
+import { ReferralsLeaderboardPanel } from '../components/dashboard/ReferralsLeaderboardPanel';
 import { SettingsPanel } from '../components/dashboard/SettingsPanel';
 import { MasterResetModal } from '../components/dashboard/MasterResetModal';
 
@@ -65,6 +73,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
   const [prospectsBusy, setProspectsBusy] = useState(false);
   const [giftsBusy, setGiftsBusy] = useState(false);
+  const [referralsBusy, setReferralsBusy] = useState(false);
 
   // 2-Filter Cybersecurity Gateway State
   const [securityStage, setSecurityStage] = useState<SecurityStage>('checking');
@@ -81,7 +90,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   pinInputRef.current = pinInput;
 
   const shouldPauseSync =
-    securityStage !== 'authenticated' || masterResetOpen || prospectsBusy || giftsBusy;
+    securityStage !== 'authenticated' ||
+    masterResetOpen ||
+    prospectsBusy ||
+    giftsBusy ||
+    referralsBusy;
 
   useEffect(() => {
     onSyncPauseChange?.(shouldPauseSync);
@@ -227,7 +240,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     setPasswordInput('');
     setPinInput('');
     setAuthError(null);
-    onStateChange({ ...appState, leads: [], qrHistory: [] });
+    onStateChange({ ...appState, leads: [], qrHistory: [], referrers: [] });
     setSecurityStage('filter1_credentials');
   };
 
@@ -309,6 +322,32 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   const handleDeleteQr = async (id: string) => {
     const next = await deleteQrCode(id);
+    onStateChange(next);
+  };
+
+  const handleCreateReferralPartner = async (payload: CreateReferralPayload) => {
+    const res = await createReferralPartner(payload);
+    onStateChange(res.state);
+  };
+
+  const handleBatchCreateReferralPartners = async (payload: BatchCreateReferralsPayload) => {
+    const res = await batchCreateReferralPartners(payload);
+    onStateChange(res.state);
+    return { created: res.created, skipped: res.skipped };
+  };
+
+  const handleUpdateReferralPartner = async (id: string, updates: UpdateReferralPayload) => {
+    const res = await updateReferralPartner(id, updates);
+    onStateChange(res.state);
+  };
+
+  const handleDeleteReferralPartner = async (id: string) => {
+    const res = await deleteReferralPartner(id);
+    onStateChange(res.state);
+  };
+
+  const handleSaveReferralPrizeRule = async (referralPrizeRule: ReferralPrizeRule) => {
+    const next = await updateSettings({ referralPrizeRule });
     onStateChange(next);
   };
 
@@ -719,7 +758,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         <main className="mx-auto max-w-6xl px-3.5 sm:px-6 pt-4 sm:pt-6 space-y-5 sm:space-y-6">
           {userRole === 'caller' ? (
-            <CallerProspectsView leads={appState.leads} />
+            <CallerProspectsView
+              leads={appState.leads}
+              referrers={appState.referrers ?? []}
+            />
           ) : (
             <>
               {activeTab === 'overview' && (
@@ -736,6 +778,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   <ProspectsManager
                     leads={appState.leads}
                     gifts={appState.gifts}
+                    referrers={appState.referrers ?? []}
                     defaultTicketAmount={appState.settings.defaultTicketAmount}
                     activeFilter={kpiFilter}
                     onFilterChange={setKpiFilter}
@@ -745,6 +788,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     onBusyChange={setProspectsBusy}
                   />
                 </>
+              )}
+
+              {activeTab === 'referrals' && (
+                <ReferralsLeaderboardPanel
+                  referrers={appState.referrers ?? []}
+                  leads={appState.leads}
+                  settings={appState.settings}
+                  defaultOriginUrl={window.location.origin + '/'}
+                  onCreatePartner={handleCreateReferralPartner}
+                  onBatchCreatePartners={handleBatchCreateReferralPartners}
+                  onUpdatePartner={handleUpdateReferralPartner}
+                  onDeletePartner={handleDeleteReferralPartner}
+                  onSavePrizeRule={handleSaveReferralPrizeRule}
+                  onBusyChange={setReferralsBusy}
+                />
               )}
 
               {activeTab === 'gifts' && (
@@ -768,6 +826,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               {activeTab === 'qr' && (
                 <QrStudioPanel
                   qrHistory={appState.qrHistory || []}
+                  referrers={appState.referrers ?? []}
                   defaultUrl={window.location.origin + '/'}
                   onCreateQr={handleCreateQr}
                   onDeleteQr={handleDeleteQr}

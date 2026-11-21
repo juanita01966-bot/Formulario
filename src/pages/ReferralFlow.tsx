@@ -1,9 +1,21 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import type { AppState, GiftItem, Lead, LeadQualification } from '../types/app';
-import { createLead, updateLead } from '../services/storeClient';
+import {
+  createLead,
+  recordReferralVisit,
+  resolveReferralCode,
+  updateLead,
+} from '../services/storeClient';
+import {
+  captureReferralCode,
+  getOrCreateVisitorId,
+  getStoredReferralCode,
+  hasPingedReferralVisitThisSession,
+  markReferralVisitPinged,
+} from '../utils/referralTracking';
 import { AutumnAtmosphere } from '../components/autumn/AutumnAtmosphere';
-import { LeadFormCard } from '../components/referral/LeadFormCard';
+import { LeadFormCard, type ActiveReferralInfo } from '../components/referral/LeadFormCard';
 import { QualificationQuiz } from '../components/referral/QualificationQuiz';
 import { CustomLoader } from '../components/referral/CustomLoader';
 import { MysteryCardsMenu } from '../components/referral/MysteryCardsMenu';
@@ -41,10 +53,73 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
   const [playRound, setPlayRound] = useState(0);
   const [currentLead, setCurrentLead] = useState<Lead | null>(null);
   const [revealedGift, setRevealedGift] = useState<GiftItem | null>(null);
+  const [capturedReferralCode, setCapturedReferralCode] = useState<string | null>(null);
+  const [activeReferralPartner, setActiveReferralPartner] = useState<ActiveReferralInfo | null>(null);
   const lastClaimCodeRef = useRef<string | null>(null);
 
   const activeGifts = appState.gifts.filter((g) => g.active);
   const safeActiveGifts = activeGifts.length > 0 ? activeGifts : appState.gifts;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncReferralAttribution = async () => {
+      const code = captureReferralCode();
+      if (cancelled) return;
+      setCapturedReferralCode(code);
+
+      if (!code) {
+        setActiveReferralPartner(null);
+        return;
+      }
+
+      try {
+        if (!hasPingedReferralVisitThisSession(code)) {
+          markReferralVisitPinged(code);
+          const visitorId = getOrCreateVisitorId();
+          const visitRes = await recordReferralVisit(code, visitorId);
+          if (cancelled) return;
+
+          if (visitRes.partner && visitRes.partner.active) {
+            setActiveReferralPartner({
+              code: visitRes.partner.code,
+              name: visitRes.partner.name,
+            });
+            return;
+          }
+        }
+
+        const resolved = await resolveReferralCode(code);
+        if (cancelled) return;
+        if (resolved && resolved.active) {
+          setActiveReferralPartner({
+            code: resolved.code,
+            name: resolved.name,
+          });
+        } else {
+          setActiveReferralPartner(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveReferralPartner(null);
+        }
+      }
+    };
+
+    void syncReferralAttribution();
+
+    const handleUrlChange = () => {
+      void syncReferralAttribution();
+    };
+    window.addEventListener('hashchange', handleUrlChange);
+    window.addEventListener('popstate', handleUrlChange);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('hashchange', handleUrlChange);
+      window.removeEventListener('popstate', handleUrlChange);
+    };
+  }, []);
 
   const generateFreshClaimCode = useCallback((): string => {
     let candidate = '';
@@ -62,12 +137,15 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
     address: string;
     acceptedTerms: boolean;
   }) => {
+    const referralCode =
+      activeReferralPartner?.code || capturedReferralCode || getStoredReferralCode() || undefined;
     const res = await createLead({
       name: formData.name,
       phone: formData.phone,
       address: formData.address,
       acceptedTerms: formData.acceptedTerms,
       claimCode: generateFreshClaimCode(),
+      ...(referralCode ? { referralCode } : {}),
     });
     lastClaimCodeRef.current = res.lead.claimCode;
     setCurrentLead(res.lead);
@@ -130,6 +208,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
             <LeadFormCard
               key={`step-form-${playRound}`}
               settings={appState.settings}
+              referralPartner={activeReferralPartner}
               onSubmit={handleFormSubmit}
             />
           )}

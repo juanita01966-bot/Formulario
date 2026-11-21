@@ -1,13 +1,39 @@
 import React, { useMemo, useState } from 'react';
-import { Phone, MapPin, Search, UserCheck } from 'lucide-react';
-import type { Lead } from '../../types/app';
+import { Phone, MapPin, QrCode, Search, UserCheck } from 'lucide-react';
+import type { Lead, ReferralPartner } from '../../types/app';
 
 interface CallerProspectsViewProps {
   leads: Lead[];
+  referrers?: ReferralPartner[];
 }
 
-export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads }) => {
+export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({
+  leads,
+  referrers = [],
+}) => {
   const [search, setSearch] = useState('');
+
+  const referrerLookup = useMemo(() => {
+    const byId = new Map<string, ReferralPartner>();
+    const byCode = new Map<string, ReferralPartner>();
+    for (const r of referrers) {
+      byId.set(r.id, r);
+      byCode.set(r.code.trim().toUpperCase(), r);
+    }
+    return { byId, byCode };
+  }, [referrers]);
+
+  const resolveReferralLabel = (lead: Lead): string | null => {
+    const code = (lead.referralCode || '').trim().toUpperCase();
+    const partner =
+      (lead.referrerId ? referrerLookup.byId.get(lead.referrerId) : undefined) ||
+      (code ? referrerLookup.byCode.get(code) : undefined);
+    const name = partner?.name || lead.referrerName || '';
+    const finalCode = code || partner?.code || '';
+    if (!name && !finalCode) return null;
+    if (name && finalCode) return `QR · ${name} (${finalCode})`;
+    return `QR · ${name || finalCode}`;
+  };
 
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -18,14 +44,16 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
       const phone = (lead.phone || '').toLowerCase();
       const address = (lead.address || '').toLowerCase();
       const claimCode = (lead.claimCode || '').toLowerCase();
+      const refBadge = (resolveReferralLabel(lead) || '').toLowerCase();
       return (
         name.includes(q) ||
         phone.includes(q) ||
         address.includes(q) ||
+        refBadge.includes(q) ||
         (claimCode ? claimCode.includes(rawCode) || claimCode.replace(/^otn-/, '').includes(rawCode) : false)
       );
     });
-  }, [leads, search]);
+  }, [leads, search, referrerLookup]);
 
   return (
     <section className="rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-3.5 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
@@ -84,6 +112,7 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
         ) : (
           filteredLeads.map((lead, index) => {
             const cleanTel = (lead.phone || '').replace(/[^\d+]/g, '');
+            const referralBadge = resolveReferralLabel(lead);
 
             return (
               <div
@@ -103,6 +132,12 @@ export const CallerProspectsView: React.FC<CallerProspectsViewProps> = ({ leads 
                       {lead.claimCode && (
                         <span className="rounded-md bg-[#FAF0E0] border border-[#E6C99E] px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#8C4A19]">
                           Orden {lead.claimCode}
+                        </span>
+                      )}
+                      {referralBadge && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[#E5C17B] bg-[#FFF4DC] px-2 py-0.5 text-[10px] font-bold text-[#7A4610]">
+                          <QrCode className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
+                          {referralBadge}
                         </span>
                       )}
                     </div>

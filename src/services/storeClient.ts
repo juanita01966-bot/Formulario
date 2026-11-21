@@ -10,6 +10,9 @@ import type {
   QrCodeRecord,
   QrDotShape,
   QrStyleId,
+  ReferralMetricKey,
+  ReferralPartner,
+  ReferralPrizeRule,
   ShowcaseStyleId,
 } from '../types/app';
 
@@ -42,6 +45,139 @@ function isDsbAdminSession(): boolean {
 }
 
 export const DEFAULT_GIFT_PROBABILITY = 10;
+
+export const DEFAULT_REFERRAL_PRIZE_RULE: ReferralPrizeRule = {
+  prizeName: 'Premio Embajador Royal Prestige',
+  metric: 'leads',
+  targetCount: 5,
+  maxWinners: 3,
+  pointsPerLead: 1,
+  pointsPerCita: 3,
+  pointsPerDemo: 5,
+  pointsPerOrden: 10,
+};
+
+const VALID_REFERRAL_METRICS = new Set<ReferralMetricKey>([
+  'leads',
+  'citas',
+  'demos',
+  'ordenes',
+  'points',
+]);
+
+export function normalizeReferralCode(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const cleaned = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/g, '');
+  return cleaned.length >= 2 ? cleaned : '';
+}
+
+function normalizePositiveInt(value: unknown, fallback: number, min = 1, max = 100000): number {
+  if (
+    value === undefined ||
+    value === null ||
+    typeof value === 'boolean' ||
+    (typeof value === 'string' && value.trim() === '')
+  ) {
+    return fallback;
+  }
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(num)));
+}
+
+export function normalizeReferralPrizeRule(
+  rule?: Partial<ReferralPrizeRule> | null
+): ReferralPrizeRule {
+  const src = rule && typeof rule === 'object' ? rule : {};
+  const prizeName =
+    typeof src.prizeName === 'string' && src.prizeName.trim()
+      ? src.prizeName.trim().slice(0, 140)
+      : DEFAULT_REFERRAL_PRIZE_RULE.prizeName;
+  const metric: ReferralMetricKey =
+    typeof src.metric === 'string' && VALID_REFERRAL_METRICS.has(src.metric as ReferralMetricKey)
+      ? (src.metric as ReferralMetricKey)
+      : DEFAULT_REFERRAL_PRIZE_RULE.metric;
+
+  return {
+    prizeName,
+    metric,
+    targetCount: normalizePositiveInt(
+      src.targetCount,
+      DEFAULT_REFERRAL_PRIZE_RULE.targetCount,
+      1,
+      100000
+    ),
+    maxWinners: normalizePositiveInt(
+      src.maxWinners,
+      DEFAULT_REFERRAL_PRIZE_RULE.maxWinners,
+      0,
+      1000
+    ),
+    pointsPerLead: normalizePositiveInt(
+      src.pointsPerLead,
+      DEFAULT_REFERRAL_PRIZE_RULE.pointsPerLead,
+      0,
+      10000
+    ),
+    pointsPerCita: normalizePositiveInt(
+      src.pointsPerCita,
+      DEFAULT_REFERRAL_PRIZE_RULE.pointsPerCita,
+      0,
+      10000
+    ),
+    pointsPerDemo: normalizePositiveInt(
+      src.pointsPerDemo,
+      DEFAULT_REFERRAL_PRIZE_RULE.pointsPerDemo,
+      0,
+      10000
+    ),
+    pointsPerOrden: normalizePositiveInt(
+      src.pointsPerOrden,
+      DEFAULT_REFERRAL_PRIZE_RULE.pointsPerOrden,
+      0,
+      10000
+    ),
+  };
+}
+
+function normalizeReferralPartner(partner: ReferralPartner): ReferralPartner {
+  const visitsCount = Math.max(0, Math.round(Number(partner.visitsCount) || 0));
+  const uniqueVisitsCount = Math.max(0, Math.round(Number(partner.uniqueVisitsCount) || 0));
+  const code =
+    normalizeReferralCode(partner.code) ||
+    String(partner.code || '')
+      .trim()
+      .toUpperCase();
+  return {
+    id: String(partner.id || ''),
+    name: String(partner.name || '').trim(),
+    code,
+    ...(typeof partner.phone === 'string' && partner.phone.trim()
+      ? { phone: partner.phone.trim() }
+      : {}),
+    ...(typeof partner.notes === 'string' && partner.notes.trim()
+      ? { notes: partner.notes.trim() }
+      : {}),
+    active: typeof partner.active === 'boolean' ? partner.active : true,
+    visitsCount,
+    uniqueVisitsCount: Math.min(uniqueVisitsCount, visitsCount || uniqueVisitsCount),
+    lastVisitAt: partner.lastVisitAt ?? null,
+    ...(partner.qrStyleId && VALID_QR_STYLE_IDS.has(partner.qrStyleId)
+      ? { qrStyleId: partner.qrStyleId }
+      : {}),
+    createdAt: partner.createdAt || new Date().toISOString(),
+  };
+}
 
 export function sanitizeGiftProbability(
   value: unknown,
@@ -84,18 +220,40 @@ function normalizeLead(lead: Lead): Lead {
   const promoCodeInvalidatedAt = promoCodeInvalidated
     ? lead.promoCodeInvalidatedAt ?? lead.calledAt ?? lead.createdAt ?? null
     : null;
+  const referralCode =
+    typeof lead.referralCode === 'string' && lead.referralCode.trim()
+      ? normalizeReferralCode(lead.referralCode) || lead.referralCode.trim().toUpperCase()
+      : null;
+  const referrerId =
+    typeof lead.referrerId === 'string' && lead.referrerId.trim() ? lead.referrerId.trim() : null;
+  const referrerName =
+    typeof lead.referrerName === 'string' && lead.referrerName.trim()
+      ? lead.referrerName.trim()
+      : null;
   return {
     ...lead,
     category,
     promoCodeInvalidated,
     promoCodeInvalidatedAt,
+    referralCode,
+    referrerId,
+    referrerName,
   };
 }
 
 function normalizeAppState(state: AppState): AppState {
   const role = (state as AppState & { role?: string }).role;
   if (role === 'caller') {
-    return state;
+    return {
+      ...state,
+      settings: {
+        ...state.settings,
+        referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
+      },
+      referrers: Array.isArray(state.referrers)
+        ? state.referrers.map(normalizeReferralPartner)
+        : [],
+    };
   }
   return {
     ...state,
@@ -106,9 +264,13 @@ function normalizeAppState(state: AppState): AppState {
         typeof state.settings?.randomizeGifts === 'boolean'
           ? state.settings.randomizeGifts
           : true,
+      referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
     },
     gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
     leads: Array.isArray(state.leads) ? state.leads.map(normalizeLead) : [],
+    referrers: Array.isArray(state.referrers)
+      ? state.referrers.map(normalizeReferralPartner)
+      : [],
   };
 }
 
@@ -147,10 +309,12 @@ function cloneDefaults(): AppState {
         typeof defaults.settings?.randomizeGifts === 'boolean'
           ? defaults.settings.randomizeGifts
           : true,
+      referralPrizeRule: normalizeReferralPrizeRule(defaults.settings?.referralPrizeRule),
     },
     gifts: Array.isArray(defaults.gifts) ? defaults.gifts.map(normalizeGift) : [],
     leads: [],
     qrHistory: [],
+    referrers: [],
   };
 }
 
@@ -173,6 +337,9 @@ function readLocalState(): AppState {
       ...defaults.settings,
       ...(parsed.settings || {}),
       pinCode: '',
+      referralPrizeRule: normalizeReferralPrizeRule(
+        parsed.settings?.referralPrizeRule ?? defaults.settings.referralPrizeRule
+      ),
     };
     if (typeof mergedSettings.randomizeGifts !== 'boolean') {
       mergedSettings.randomizeGifts =
@@ -185,6 +352,10 @@ function readLocalState(): AppState {
       gifts: rawGifts.map(normalizeGift),
       leads: hasDsbSession && Array.isArray(parsed.leads) ? parsed.leads.map(normalizeLead) : [],
       qrHistory: isAdmin && Array.isArray(parsed.qrHistory) ? parsed.qrHistory : [],
+      referrers:
+        hasDsbSession && Array.isArray(parsed.referrers)
+          ? parsed.referrers.map(normalizeReferralPartner)
+          : [],
     };
   } catch {
     return cloneDefaults();
@@ -201,6 +372,7 @@ function writeLocalState(state: AppState, broadcast = true): void {
     settings: {
       ...state.settings,
       pinCode: '',
+      referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
       ...(stateRole === 'caller'
         ? {}
         : {
@@ -211,13 +383,17 @@ function writeLocalState(state: AppState, broadcast = true): void {
           }),
     },
     gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
-    // Never persist other people's leads or admin QR history into browser LocalStorage on public/caller routes
+    // Never persist other people's leads, admin QR history, or private referrers into browser LocalStorage on public routes
     leads: hasDsbSession
       ? stateRole === 'caller'
         ? state.leads
         : (state.leads || []).map(normalizeLead)
       : [],
     qrHistory: isAdmin && Array.isArray(state.qrHistory) ? state.qrHistory : [],
+    referrers:
+      hasDsbSession && Array.isArray(state.referrers)
+        ? state.referrers.map(normalizeReferralPartner)
+        : [],
   };
 
   try {
@@ -372,6 +548,7 @@ export interface CreateLeadPayload {
   claimCode?: string;
   notes?: string;
   qualification?: LeadQualification | null;
+  referralCode?: string | null;
 }
 
 export async function createLead(
@@ -396,6 +573,13 @@ export async function createLead(
       state.gifts[0] ||
       null;
 
+    const normalizedRefCode = payload.referralCode
+      ? normalizeReferralCode(payload.referralCode)
+      : '';
+    const matchedReferrer = normalizedRefCode
+      ? (state.referrers || []).find((r) => r.code === normalizedRefCode) || null
+      : null;
+
     const lead: Lead = {
       id: generateLocalId('lead'),
       name: payload.name.trim(),
@@ -414,6 +598,9 @@ export async function createLead(
       qualification: payload.qualification ?? null,
       promoCodeInvalidated: false,
       promoCodeInvalidatedAt: null,
+      referralCode: normalizedRefCode || null,
+      referrerId: matchedReferrer ? matchedReferrer.id : null,
+      referrerName: matchedReferrer ? matchedReferrer.name : null,
       createdAt: new Date().toISOString(),
     };
 
@@ -762,6 +949,11 @@ export async function updateSettings(updates: Partial<AppSettings>): Promise<App
           : typeof state.settings.randomizeGifts === 'boolean'
             ? state.settings.randomizeGifts
             : true,
+      referralPrizeRule: normalizeReferralPrizeRule(
+        updates.referralPrizeRule !== undefined
+          ? { ...state.settings.referralPrizeRule, ...updates.referralPrizeRule }
+          : state.settings.referralPrizeRule
+      ),
     };
     return commitMutatedState({ ...state, settings: nextSettings }, true);
   } finally {
@@ -800,6 +992,8 @@ export interface CreateQrPayload {
   backgroundColor?: string;
   includeLogo?: boolean;
   frameText?: string;
+  referralCode?: string | null;
+  referrerId?: string | null;
 }
 
 export async function createQrCode(
@@ -833,6 +1027,8 @@ export async function createQrCode(
     }
 
     const cleanFrameText = payload.frameText?.trim().slice(0, 120) || undefined;
+    const cleanReferralCode = payload.referralCode ? normalizeReferralCode(payload.referralCode) : '';
+    const cleanReferrerId = payload.referrerId?.trim() || '';
     const qr: QrCodeRecord = {
       id: generateLocalId('qr'),
       name: cleanName.slice(0, 120),
@@ -855,6 +1051,8 @@ export async function createQrCode(
           : '#FFFDF9',
       includeLogo: typeof payload.includeLogo === 'boolean' ? payload.includeLogo : true,
       ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
+      ...(cleanReferralCode ? { referralCode: cleanReferralCode } : {}),
+      ...(cleanReferrerId ? { referrerId: cleanReferrerId } : {}),
       createdAt: new Date().toISOString(),
     };
 
@@ -897,6 +1095,488 @@ export async function deleteQrCode(id: string): Promise<AppState> {
       },
       true
     );
+  } finally {
+    endMutation();
+  }
+}
+
+export interface CreateReferralPayload {
+  name: string;
+  code?: string;
+  phone?: string;
+  notes?: string;
+  qrStyleId?: QrStyleId;
+  active?: boolean;
+}
+
+export interface BatchCreateReferralsPayload {
+  items?: Array<{ name: string; code?: string; phone?: string; notes?: string }>;
+  count?: number;
+  namePrefix?: string;
+  codePrefix?: string;
+}
+
+export interface UpdateReferralPayload {
+  name?: string;
+  code?: string;
+  phone?: string;
+  notes?: string;
+  active?: boolean;
+  qrStyleId?: QrStyleId;
+  resetVisits?: boolean;
+}
+
+export interface ResolvedReferralPartner {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+}
+
+const localSeenVisitorsByCode = new Map<string, Set<string>>();
+
+function generateUniqueReferralCode(baseInput: string, existingCodes: Set<string>): string {
+  const rawBase = baseInput
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 12);
+  const base = rawBase.length >= 2 ? rawBase : 'EMB';
+
+  let candidate = `${base}01`;
+  if (rawBase.length >= 3 && !existingCodes.has(rawBase)) {
+    candidate = rawBase;
+  } else {
+    let idx = 1;
+    while (idx < 9999) {
+      const suffix = String(idx).padStart(2, '0');
+      const next = `${base.slice(0, 28 - suffix.length)}${suffix}`;
+      if (!existingCodes.has(next)) {
+        candidate = next;
+        break;
+      }
+      idx += 1;
+    }
+  }
+  existingCodes.add(candidate);
+  return candidate;
+}
+
+export async function resolveReferralCode(code: string): Promise<ResolvedReferralPartner | null> {
+  const normalized = normalizeReferralCode(code);
+  if (!normalized) return null;
+
+  try {
+    const res = await requestJson<{ ok?: boolean; partner?: ResolvedReferralPartner | null }>(
+      `/api/referrals/resolve/${encodeURIComponent(normalized)}`,
+      { cache: 'no-store' }
+    );
+    if (!res.partner) return null;
+    return {
+      id: res.partner.id,
+      name: res.partner.name,
+      code: normalizeReferralCode(res.partner.code) || res.partner.code,
+      active: typeof res.partner.active === 'boolean' ? res.partner.active : true,
+    };
+  } catch (err) {
+    if (err instanceof ApiValidationError) return null;
+    const state = readLocalState();
+    const match = (state.referrers || []).find((r) => r.code === normalized);
+    if (!match) return null;
+    return {
+      id: match.id,
+      name: match.name,
+      code: match.code,
+      active: match.active,
+    };
+  }
+}
+
+export async function recordReferralVisit(
+  code: string,
+  visitorId: string
+): Promise<{ ok: boolean; counted: boolean; partner?: ResolvedReferralPartner | null }> {
+  const normalized = normalizeReferralCode(code);
+  if (!normalized) {
+    return { ok: false, counted: false, partner: null };
+  }
+
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      counted?: boolean;
+      partner?: Partial<ResolvedReferralPartner> | null;
+    }>('/api/referrals/visit', {
+      method: 'POST',
+      body: JSON.stringify({ code: normalized, visitorId }),
+    });
+    const partner =
+      res.partner && res.partner.id && res.partner.name && res.partner.code
+        ? {
+            id: res.partner.id,
+            name: res.partner.name,
+            code: normalizeReferralCode(res.partner.code) || res.partner.code,
+            active: typeof res.partner.active === 'boolean' ? res.partner.active : true,
+          }
+        : null;
+    return {
+      ok: Boolean(res.ok ?? true),
+      counted: Boolean(res.counted),
+      partner,
+    };
+  } catch (err) {
+    if (err instanceof ApiValidationError) {
+      return { ok: false, counted: false, partner: null };
+    }
+    const state = readLocalState();
+    const referrers = state.referrers || [];
+    const idx = referrers.findIndex((r) => r.code === normalized);
+    if (idx === -1 || !referrers[idx].active) {
+      return { ok: true, counted: false, partner: null };
+    }
+
+    const current = referrers[idx];
+    let seen = localSeenVisitorsByCode.get(normalized);
+    if (!seen) {
+      seen = new Set<string>();
+      localSeenVisitorsByCode.set(normalized, seen);
+    }
+    const cleanVisitor = visitorId.trim();
+    const isUnique = Boolean(cleanVisitor) && !seen.has(cleanVisitor);
+    if (cleanVisitor) seen.add(cleanVisitor);
+
+    const updated: ReferralPartner = {
+      ...current,
+      visitsCount: current.visitsCount + 1,
+      uniqueVisitsCount: current.uniqueVisitsCount + (isUnique ? 1 : 0),
+      lastVisitAt: new Date().toISOString(),
+    };
+
+    const nextReferrers = [...referrers];
+    nextReferrers[idx] = updated;
+    if (getDsbSessionToken()) {
+      commitMutatedState({ ...state, referrers: nextReferrers }, true);
+    }
+
+    return {
+      ok: true,
+      counted: true,
+      partner: {
+        id: updated.id,
+        name: updated.name,
+        code: updated.code,
+        active: updated.active,
+      },
+    };
+  }
+}
+
+export async function createReferralPartner(
+  payload: CreateReferralPayload
+): Promise<{ referrer: ReferralPartner; state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{ ok?: boolean; referrer: ReferralPartner; state: AppState }>(
+      '/api/referrals',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+    const normalizedState = commitMutatedState(res.state, true);
+    return { referrer: normalizeReferralPartner(res.referrer), state: normalizedState };
+  } catch (err) {
+    if (err instanceof ApiValidationError) throw err;
+
+    if (!isDsbAdminSession()) {
+      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
+    }
+
+    const cleanName = payload.name.trim();
+    if (cleanName.length < 2) {
+      throw new ApiValidationError('El nombre del embajador debe tener al menos 2 caracteres.');
+    }
+
+    const state = readLocalState();
+    const existing = state.referrers || [];
+    const existingCodes = new Set(existing.map((r) => r.code));
+
+    let code = '';
+    if (payload.code && payload.code.trim()) {
+      code = normalizeReferralCode(payload.code);
+      if (!code) {
+        throw new ApiValidationError(
+          'El código debe tener entre 2 y 32 caracteres alfanuméricos o guiones.'
+        );
+      }
+      if (existingCodes.has(code)) {
+        throw new ApiValidationError(`El código ${code} ya está en uso por otro embajador.`);
+      }
+    } else {
+      code = generateUniqueReferralCode(cleanName, existingCodes);
+    }
+
+    const referrer: ReferralPartner = normalizeReferralPartner({
+      id: generateLocalId('ref'),
+      name: cleanName.slice(0, 120),
+      code,
+      phone: payload.phone?.trim() || undefined,
+      notes: payload.notes?.trim() || undefined,
+      active: typeof payload.active === 'boolean' ? payload.active : true,
+      visitsCount: 0,
+      uniqueVisitsCount: 0,
+      lastVisitAt: null,
+      qrStyleId:
+        payload.qrStyleId && VALID_QR_STYLE_IDS.has(payload.qrStyleId)
+          ? payload.qrStyleId
+          : 'classic-gold',
+      createdAt: new Date().toISOString(),
+    });
+
+    const nextState = commitMutatedState(
+      {
+        ...state,
+        referrers: [referrer, ...existing],
+      },
+      true
+    );
+    return { referrer, state: nextState };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function batchCreateReferralPartners(
+  payload: BatchCreateReferralsPayload
+): Promise<{ created: ReferralPartner[]; skipped: string[]; state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      created: ReferralPartner[];
+      skipped: string[];
+      state: AppState;
+    }>('/api/referrals/batch', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      created: Array.isArray(res.created) ? res.created.map(normalizeReferralPartner) : [],
+      skipped: Array.isArray(res.skipped) ? res.skipped : [],
+      state: normalizedState,
+    };
+  } catch (err) {
+    if (err instanceof ApiValidationError) throw err;
+
+    if (!isDsbAdminSession()) {
+      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
+    }
+
+    const state = readLocalState();
+    const existing = state.referrers || [];
+    const existingCodes = new Set(existing.map((r) => r.code));
+    const created: ReferralPartner[] = [];
+    const skipped: string[] = [];
+    const nowIso = new Date().toISOString();
+
+    if (Array.isArray(payload.items) && payload.items.length > 0) {
+      const slice = payload.items.slice(0, 50);
+      for (const item of slice) {
+        const cleanName = String(item?.name || '').trim();
+        if (cleanName.length < 2) {
+          skipped.push(cleanName || '(sin nombre)');
+          continue;
+        }
+        let code = '';
+        if (item.code && item.code.trim()) {
+          code = normalizeReferralCode(item.code);
+          if (!code || existingCodes.has(code)) {
+            skipped.push(item.code.trim());
+            continue;
+          }
+          existingCodes.add(code);
+        } else {
+          code = generateUniqueReferralCode(cleanName, existingCodes);
+        }
+
+        created.push(
+          normalizeReferralPartner({
+            id: generateLocalId('ref'),
+            name: cleanName.slice(0, 120),
+            code,
+            phone: item.phone?.trim() || undefined,
+            notes: item.notes?.trim() || undefined,
+            active: true,
+            visitsCount: 0,
+            uniqueVisitsCount: 0,
+            lastVisitAt: null,
+            qrStyleId: 'classic-gold',
+            createdAt: nowIso,
+          })
+        );
+      }
+    } else if (typeof payload.count === 'number' && payload.count > 0) {
+      const count = Math.min(50, Math.max(1, Math.round(payload.count)));
+      const namePrefix = (payload.namePrefix?.trim() || 'Embajador').slice(0, 60);
+      const rawCodePrefix = normalizeReferralCode(payload.codePrefix || 'EMB') || 'EMB';
+      let seq = 1;
+      for (let i = 0; i < count; i += 1) {
+        let code = '';
+        while (seq < 9999) {
+          const suffix = String(seq).padStart(2, '0');
+          const candidate = `${rawCodePrefix.slice(0, 28 - suffix.length)}-${suffix}`;
+          seq += 1;
+          if (!existingCodes.has(candidate)) {
+            code = candidate;
+            existingCodes.add(candidate);
+            break;
+          }
+        }
+        if (!code) break;
+        const labelNum = String(seq - 1).padStart(2, '0');
+        created.push(
+          normalizeReferralPartner({
+            id: generateLocalId('ref'),
+            name: `${namePrefix} ${labelNum}`,
+            code,
+            active: true,
+            visitsCount: 0,
+            uniqueVisitsCount: 0,
+            lastVisitAt: null,
+            qrStyleId: 'classic-gold',
+            createdAt: nowIso,
+          })
+        );
+      }
+    } else {
+      throw new ApiValidationError('Debes proporcionar una lista de embajadores o una cantidad.');
+    }
+
+    const nextState = commitMutatedState(
+      {
+        ...state,
+        referrers: [...created, ...existing],
+      },
+      true
+    );
+    return { created, skipped, state: nextState };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function updateReferralPartner(
+  id: string,
+  updates: UpdateReferralPayload
+): Promise<{ referrer: ReferralPartner; state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{ ok?: boolean; referrer: ReferralPartner; state: AppState }>(
+      `/api/referrals/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      }
+    );
+    const normalizedState = commitMutatedState(res.state, true);
+    return { referrer: normalizeReferralPartner(res.referrer), state: normalizedState };
+  } catch (err) {
+    if (err instanceof ApiValidationError) throw err;
+
+    if (!isDsbAdminSession()) {
+      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
+    }
+
+    const state = readLocalState();
+    const existing = state.referrers || [];
+    const index = existing.findIndex((r) => r.id === id);
+    if (index === -1) {
+      throw new ApiValidationError('Embajador no encontrado.');
+    }
+
+    const current = existing[index];
+    let nextCode = current.code;
+    if (updates.code !== undefined) {
+      const normalized = normalizeReferralCode(updates.code);
+      if (!normalized) {
+        throw new ApiValidationError(
+          'El código debe tener entre 2 y 32 caracteres alfanuméricos o guiones.'
+        );
+      }
+      if (existing.some((r) => r.id !== id && r.code === normalized)) {
+        throw new ApiValidationError(`El código ${normalized} ya está en uso por otro embajador.`);
+      }
+      nextCode = normalized;
+    }
+
+    let nextName = current.name;
+    if (updates.name !== undefined) {
+      const cleanName = updates.name.trim();
+      if (cleanName.length < 2) {
+        throw new ApiValidationError('El nombre del embajador debe tener al menos 2 caracteres.');
+      }
+      nextName = cleanName.slice(0, 120);
+    }
+
+    const nextPartner: ReferralPartner = normalizeReferralPartner({
+      ...current,
+      name: nextName,
+      code: nextCode,
+      phone: updates.phone !== undefined ? updates.phone.trim() || undefined : current.phone,
+      notes: updates.notes !== undefined ? updates.notes.trim() || undefined : current.notes,
+      active: typeof updates.active === 'boolean' ? updates.active : current.active,
+      qrStyleId:
+        updates.qrStyleId && VALID_QR_STYLE_IDS.has(updates.qrStyleId)
+          ? updates.qrStyleId
+          : current.qrStyleId,
+      visitsCount: updates.resetVisits ? 0 : current.visitsCount,
+      uniqueVisitsCount: updates.resetVisits ? 0 : current.uniqueVisitsCount,
+      lastVisitAt: updates.resetVisits ? null : current.lastVisitAt,
+    });
+
+    if (updates.resetVisits) {
+      localSeenVisitorsByCode.delete(current.code);
+      localSeenVisitorsByCode.delete(nextCode);
+    }
+
+    const nextReferrers = [...existing];
+    nextReferrers[index] = nextPartner;
+    const nextState = commitMutatedState({ ...state, referrers: nextReferrers }, true);
+    return { referrer: nextPartner, state: nextState };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function deleteReferralPartner(id: string): Promise<{ state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{ ok?: boolean; state: AppState }>(
+      `/api/referrals/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    const normalizedState = commitMutatedState(res.state, true);
+    return { state: normalizedState };
+  } catch (err) {
+    if (err instanceof ApiValidationError) throw err;
+
+    if (!isDsbAdminSession()) {
+      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
+    }
+
+    const state = readLocalState();
+    const nextState = commitMutatedState(
+      {
+        ...state,
+        referrers: (state.referrers || []).filter((r) => r.id !== id),
+      },
+      true
+    );
+    return { state: nextState };
   } finally {
     endMutation();
   }
@@ -1331,7 +2011,7 @@ export function logoutDsbSession(): void {
       const parsed = JSON.parse(raw) as Partial<AppState>;
       window.localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ ...parsed, leads: [], qrHistory: [] })
+        JSON.stringify({ ...parsed, leads: [], qrHistory: [], referrers: [] })
       );
     }
   } catch {
