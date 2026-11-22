@@ -48,6 +48,7 @@ import { ProspectsManager, type LeadUpdatePayload } from '../components/dashboar
 import { CallerProspectsView } from '../components/dashboard/CallerProspectsView';
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
 import { QrStudioPanel } from '../components/dashboard/QrStudioPanel';
+import { QrMetricsAccordion } from '../components/dashboard/QrMetricsAccordion';
 import { ReferralsLeaderboardPanel } from '../components/dashboard/ReferralsLeaderboardPanel';
 import { SettingsPanel } from '../components/dashboard/SettingsPanel';
 import { MasterResetModal } from '../components/dashboard/MasterResetModal';
@@ -773,6 +774,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     onSelectFilter={setKpiFilter}
                     onOpenMasterReset={() => setMasterResetOpen(true)}
                     resetSuccessMessage={resetSuccessMessage}
+                  />
+
+                  <QrMetricsAccordion
+                    referrers={appState.referrers ?? []}
+                    qrHistory={appState.qrHistory ?? []}
+                    leads={appState.leads}
+                    settings={appState.settings}
+                    defaultOriginUrl={window.location.origin + '/'}
+                    onGoToReferrals={() => setActiveTab('referrals')}
+                    onGoToQrStudio={() => setActiveTab('qr')}
                   />
 
                   <ProspectsManager

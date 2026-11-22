@@ -1,6 +1,6 @@
 import { normalizeReferralCode } from '../services/storeClient';
 
-const REFERRAL_LOCAL_KEY = 'ciprian_referral_attribution_v1';
+export const REFERRAL_LOCAL_KEY = 'ciprian_referral_attribution_v1';
 const REFERRAL_SESSION_KEY = 'ciprian_referral_session_code_v1';
 const REFERRAL_VISITOR_ID_KEY = 'ciprian_referral_visitor_id_v1';
 const REFERRAL_PINGED_PREFIX = 'ciprian_referral_visit_pinged_v1:';
@@ -10,6 +10,11 @@ interface StoredReferralAttribution {
   code: string;
   capturedAt: number;
   expiresAt: number;
+}
+
+interface SessionReferralAttribution {
+  code: string;
+  capturedAt: number;
 }
 
 // In-memory fallbacks for restricted storage environments & React StrictMode dedup
@@ -96,8 +101,13 @@ export function persistReferralCode(rawCode: string): string | null {
     // Ignore storage quota / privacy mode errors
   }
 
+  const sessionPayload: SessionReferralAttribution = {
+    code: normalized,
+    capturedAt: now,
+  };
+
   try {
-    window.sessionStorage.setItem(REFERRAL_SESSION_KEY, normalized);
+    window.sessionStorage.setItem(REFERRAL_SESSION_KEY, JSON.stringify(sessionPayload));
   } catch {
     // Ignore storage quota / privacy mode errors
   }
@@ -105,45 +115,89 @@ export function persistReferralCode(rawCode: string): string | null {
   return normalized;
 }
 
-/**
- * Reads any active (non-expired) referral code from sessionStorage / localStorage.
- */
-export function getStoredReferralCode(): string | null {
-  if (typeof window === 'undefined') return memoryReferralCode;
-
+function readLocalReferralAttribution(): StoredReferralAttribution | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const sessionCode = window.sessionStorage.getItem(REFERRAL_SESSION_KEY);
-    if (sessionCode) {
-      const normalized = normalizeReferralCode(sessionCode);
+    const raw = window.localStorage.getItem(REFERRAL_LOCAL_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredReferralAttribution>;
+    const normalized = normalizeReferralCode(parsed.code);
+    const expiresAt = Number(parsed.expiresAt || 0);
+    const capturedAt = Number(parsed.capturedAt || 0);
+    if (normalized && Number.isFinite(expiresAt) && expiresAt > Date.now()) {
+      return {
+        code: normalized,
+        capturedAt: Number.isFinite(capturedAt) ? capturedAt : 0,
+        expiresAt,
+      };
+    }
+    // Clean up expired or malformed entry
+    window.localStorage.removeItem(REFERRAL_LOCAL_KEY);
+  } catch {
+    // Ignore localStorage read failure
+  }
+  return null;
+}
+
+function readSessionReferralAttribution(): SessionReferralAttribution | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(REFERRAL_SESSION_KEY);
+    if (!raw) return null;
+    if (raw.startsWith('{')) {
+      const parsed = JSON.parse(raw) as Partial<SessionReferralAttribution>;
+      const normalized = normalizeReferralCode(parsed.code);
+      const capturedAt = Number(parsed.capturedAt || 0);
       if (normalized) {
-        memoryReferralCode = normalized;
-        return normalized;
+        return {
+          code: normalized,
+          capturedAt: Number.isFinite(capturedAt) ? capturedAt : 0,
+        };
       }
+      return null;
+    }
+    // Backwards compatibility with plain string session entry
+    const normalized = normalizeReferralCode(raw);
+    if (normalized) {
+      return { code: normalized, capturedAt: 0 };
     }
   } catch {
     // Ignore sessionStorage read failure
   }
+  return null;
+}
 
-  try {
-    const raw = window.localStorage.getItem(REFERRAL_LOCAL_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<StoredReferralAttribution>;
-      const normalized = normalizeReferralCode(parsed.code);
-      const expiresAt = Number(parsed.expiresAt || 0);
-      if (normalized && Number.isFinite(expiresAt) && expiresAt > Date.now()) {
-        memoryReferralCode = normalized;
-        try {
-          window.sessionStorage.setItem(REFERRAL_SESSION_KEY, normalized);
-        } catch {
-          // Ignore
-        }
-        return normalized;
+/**
+ * Reads any active (non-expired) referral code from localStorage / sessionStorage.
+ * When both exist, prefers whichever was captured most recently (favoring localStorage on tie)
+ * so opening a newer QR in another tab overrides stale session attribution.
+ */
+export function getStoredReferralCode(): string | null {
+  if (typeof window === 'undefined') return memoryReferralCode;
+
+  const localAttr = readLocalReferralAttribution();
+  const sessionAttr = readSessionReferralAttribution();
+
+  let chosen: { code: string; capturedAt: number } | null = null;
+  if (localAttr && sessionAttr) {
+    chosen = localAttr.capturedAt >= sessionAttr.capturedAt ? localAttr : sessionAttr;
+  } else {
+    chosen = localAttr || sessionAttr;
+  }
+
+  if (chosen) {
+    memoryReferralCode = chosen.code;
+    if (!sessionAttr || sessionAttr.code !== chosen.code || sessionAttr.capturedAt < chosen.capturedAt) {
+      try {
+        window.sessionStorage.setItem(
+          REFERRAL_SESSION_KEY,
+          JSON.stringify({ code: chosen.code, capturedAt: chosen.capturedAt })
+        );
+      } catch {
+        // Ignore
       }
-      // Clean up expired or malformed entry
-      window.localStorage.removeItem(REFERRAL_LOCAL_KEY);
     }
-  } catch {
-    // Ignore localStorage read failure
+    return chosen.code;
   }
 
   return memoryReferralCode;

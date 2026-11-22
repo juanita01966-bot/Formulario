@@ -983,6 +983,39 @@ function isValidQrTargetUrl(rawUrl: string): boolean {
   }
 }
 
+function extractReferralCodeFromUrl(rawUrl: string): string {
+  const clean = rawUrl.trim();
+  if (!clean) return '';
+  try {
+    const parsed = new URL(clean, 'https://local.invalid');
+    const searchCandidates: string[] = [];
+    if (parsed.search) searchCandidates.push(parsed.search);
+    const hashQueryIdx = parsed.hash.indexOf('?');
+    if (hashQueryIdx !== -1) {
+      searchCandidates.push(parsed.hash.slice(hashQueryIdx));
+    }
+
+    for (const search of searchCandidates) {
+      const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+      const direct = params.get('ref') ?? params.get('r');
+      if (direct) {
+        const normalized = normalizeReferralCode(direct);
+        if (normalized) return normalized;
+      }
+      for (const [key, value] of params.entries()) {
+        const lower = key.toLowerCase();
+        if ((lower === 'ref' || lower === 'r') && value) {
+          const normalized = normalizeReferralCode(value);
+          if (normalized) return normalized;
+        }
+      }
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
 export interface CreateQrPayload {
   name: string;
   targetUrl: string;
@@ -998,18 +1031,24 @@ export interface CreateQrPayload {
 
 export async function createQrCode(
   payload: CreateQrPayload
-): Promise<{ qr: QrCodeRecord; state: AppState }> {
+): Promise<{ qr: QrCodeRecord; referrer?: ReferralPartner | null; state: AppState }> {
   beginMutation();
   try {
-    const res = await requestJson<{ qr: QrCodeRecord; qrHistory?: QrCodeRecord[]; state: AppState }>(
-      '/api/qr',
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }
-    );
+    const res = await requestJson<{
+      qr: QrCodeRecord;
+      referrer?: ReferralPartner | null;
+      qrHistory?: QrCodeRecord[];
+      state: AppState;
+    }>('/api/qr', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
     const normalizedState = commitMutatedState(res.state, true);
-    return { qr: res.qr, state: normalizedState };
+    return {
+      qr: res.qr,
+      referrer: res.referrer ? normalizeReferralPartner(res.referrer) : null,
+      state: normalizedState,
+    };
   } catch (err) {
     if (err instanceof ApiValidationError) throw err;
 
@@ -1026,17 +1065,64 @@ export async function createQrCode(
       throw new ApiValidationError('Ingresa una URL válida que comience con http://, https:// o /.');
     }
 
+    const nowIso = new Date().toISOString();
     const cleanFrameText = payload.frameText?.trim().slice(0, 120) || undefined;
-    const cleanReferralCode = payload.referralCode ? normalizeReferralCode(payload.referralCode) : '';
-    const cleanReferrerId = payload.referrerId?.trim() || '';
+    const validStyleId: QrStyleId =
+      payload.styleId && VALID_QR_STYLE_IDS.has(payload.styleId)
+        ? payload.styleId
+        : 'classic-gold';
+    const explicitReferralCode = payload.referralCode
+      ? normalizeReferralCode(payload.referralCode)
+      : '';
+    const urlReferralCode = extractReferralCodeFromUrl(cleanUrl);
+    let cleanReferralCode = explicitReferralCode || urlReferralCode;
+    let cleanReferrerId = payload.referrerId?.trim() || '';
+
+    const state = readLocalState();
+    const existingReferrers = state.referrers || [];
+    let nextReferrers = existingReferrers;
+    let linkedPartner: ReferralPartner | null = null;
+
+    if (cleanReferralCode) {
+      const existingPartner =
+        existingReferrers.find((r) => r.code === cleanReferralCode) ||
+        (cleanReferrerId ? existingReferrers.find((r) => r.id === cleanReferrerId) : undefined) ||
+        null;
+
+      if (existingPartner) {
+        linkedPartner = existingPartner;
+        cleanReferrerId = existingPartner.id;
+        cleanReferralCode = existingPartner.code;
+      } else {
+        const autoPartner: ReferralPartner = normalizeReferralPartner({
+          id: generateLocalId('ref'),
+          name: cleanName.slice(0, 120),
+          code: cleanReferralCode,
+          active: true,
+          visitsCount: 0,
+          uniqueVisitsCount: 0,
+          lastVisitAt: null,
+          qrStyleId: validStyleId,
+          createdAt: nowIso,
+        });
+        linkedPartner = autoPartner;
+        cleanReferrerId = autoPartner.id;
+        nextReferrers = [autoPartner, ...existingReferrers];
+      }
+    } else if (cleanReferrerId) {
+      const existingById = existingReferrers.find((r) => r.id === cleanReferrerId) || null;
+      if (existingById) {
+        linkedPartner = existingById;
+        cleanReferrerId = existingById.id;
+        cleanReferralCode = existingById.code;
+      }
+    }
+
     const qr: QrCodeRecord = {
       id: generateLocalId('qr'),
       name: cleanName.slice(0, 120),
       targetUrl: cleanUrl,
-      styleId:
-        payload.styleId && VALID_QR_STYLE_IDS.has(payload.styleId)
-          ? payload.styleId
-          : 'classic-gold',
+      styleId: validStyleId,
       dotShape:
         payload.dotShape && VALID_QR_DOT_SHAPES.has(payload.dotShape)
           ? payload.dotShape
@@ -1053,18 +1139,18 @@ export async function createQrCode(
       ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
       ...(cleanReferralCode ? { referralCode: cleanReferralCode } : {}),
       ...(cleanReferrerId ? { referrerId: cleanReferrerId } : {}),
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
     };
 
-    const state = readLocalState();
     const nextState = commitMutatedState(
       {
         ...state,
+        referrers: nextReferrers,
         qrHistory: [qr, ...(state.qrHistory || [])],
       },
       true
     );
-    return { qr, state: nextState };
+    return { qr, referrer: linkedPartner, state: nextState };
   } finally {
     endMutation();
   }

@@ -775,4 +775,191 @@ describe('Referral QR / Ambassador Tracking & Prize System Suite', () => {
       }
     });
   });
+
+  describe('5. Auto-Tracking QRs Created Directly via POST /api/qr (2-QR End-to-End Scenario)', () => {
+    test('Creating 2 different QRs via POST /api/qr auto-registers both in state.referrers, tracks visits & leads separately, and reuses existing partner on duplicate code', async () => {
+      // QR #1: Explicit referralCode without pre-creating a referrer
+      const qr1Res = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR María',
+          targetUrl: 'https://royal.ciprian.example/?ref=maria-auto-01',
+          referralCode: 'maria-auto-01',
+          styleId: 'emerald-heritage',
+        }),
+      });
+      assert.strictEqual(qr1Res.status, 201);
+      const qr1Data = await qr1Res.json();
+      assert.strictEqual(qr1Data.ok, true);
+      assert.ok(qr1Data.referrer, 'QR #1 should auto-create and return linked referrer');
+      assert.strictEqual(qr1Data.referrer.name, 'QR María');
+      assert.strictEqual(qr1Data.referrer.code, 'MARIA-AUTO-01');
+      assert.strictEqual(qr1Data.referrer.active, true);
+      assert.strictEqual(qr1Data.referrer.visitsCount, 0);
+      assert.strictEqual(qr1Data.referrer.uniqueVisitsCount, 0);
+      assert.strictEqual(qr1Data.referrer.qrStyleId, 'emerald-heritage');
+      assert.strictEqual(qr1Data.qr.referralCode, 'MARIA-AUTO-01');
+      assert.strictEqual(qr1Data.qr.referrerId, qr1Data.referrer.id);
+      assert.ok(
+        qr1Data.state.referrers.some(
+          (r) => r.id === qr1Data.referrer.id && r.code === 'MARIA-AUTO-01' && r.name === 'QR María'
+        )
+      );
+
+      // QR #2: No referralCode in body — extracted automatically from ?r= query param in targetUrl
+      const qr2Res = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR Carlos',
+          targetUrl: 'https://royal.ciprian.example/?r=carlos-auto-02',
+          styleId: 'ruby-atelier',
+        }),
+      });
+      assert.strictEqual(qr2Res.status, 201);
+      const qr2Data = await qr2Res.json();
+      assert.strictEqual(qr2Data.ok, true);
+      assert.ok(qr2Data.referrer, 'QR #2 should auto-create referrer from targetUrl ?r= param');
+      assert.strictEqual(qr2Data.referrer.name, 'QR Carlos');
+      assert.strictEqual(qr2Data.referrer.code, 'CARLOS-AUTO-02');
+      assert.strictEqual(qr2Data.referrer.qrStyleId, 'ruby-atelier');
+      assert.strictEqual(qr2Data.qr.referralCode, 'CARLOS-AUTO-02');
+      assert.strictEqual(qr2Data.qr.referrerId, qr2Data.referrer.id);
+      assert.ok(
+        qr2Data.state.referrers.some(
+          (r) => r.id === qr2Data.referrer.id && r.code === 'CARLOS-AUTO-02' && r.name === 'QR Carlos'
+        )
+      );
+
+      // Simulate visits to both QRs (2 total / 2 unique for María, 1 total / 1 unique for Carlos)
+      const visitM1 = await fetch(`${baseUrl}/api/referrals/visit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'MARIA-AUTO-01', visitorId: 'vis-m-1' }),
+      });
+      assert.strictEqual((await visitM1.json()).counted, true);
+
+      const visitM2 = await fetch(`${baseUrl}/api/referrals/visit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'maria-auto-01', visitorId: 'vis-m-2' }),
+      });
+      assert.strictEqual((await visitM2.json()).counted, true);
+
+      const visitC1 = await fetch(`${baseUrl}/api/referrals/visit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'CARLOS-AUTO-02', visitorId: 'vis-c-1' }),
+      });
+      assert.strictEqual((await visitC1.json()).counted, true);
+
+      // Submit a lead from each QR's code
+      const leadMRes = await fetch(`${baseUrl}/api/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Invitada de María',
+          phone: '555-801-1001',
+          address: 'Monterrey',
+          acceptedTerms: true,
+          referralCode: 'MARIA-AUTO-01',
+        }),
+      });
+      assert.strictEqual(leadMRes.status, 201);
+      const leadM = (await leadMRes.json()).lead;
+      assert.strictEqual(leadM.referralCode, 'MARIA-AUTO-01');
+      assert.strictEqual(leadM.referrerId, qr1Data.referrer.id);
+      assert.strictEqual(leadM.referrerName, 'QR María');
+
+      const leadCRes = await fetch(`${baseUrl}/api/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Invitado de Carlos',
+          phone: '555-802-2002',
+          address: 'Guadalajara',
+          acceptedTerms: true,
+          referralCode: 'carlos-auto-02',
+        }),
+      });
+      assert.strictEqual(leadCRes.status, 201);
+      const leadC = (await leadCRes.json()).lead;
+      assert.strictEqual(leadC.referralCode, 'CARLOS-AUTO-02');
+      assert.strictEqual(leadC.referrerId, qr2Data.referrer.id);
+      assert.strictEqual(leadC.referrerName, 'QR Carlos');
+
+      // Creating a second QR with already-existing MARIA-AUTO-01 reuses existing partner without duplicating
+      const beforeCount = (
+        await (
+          await fetch(`${baseUrl}/api/referrals`, {
+            headers: { Authorization: `Bearer ${adminToken}` },
+          })
+        ).json()
+      ).referrers.filter((r) => r.code === 'MARIA-AUTO-01').length;
+      assert.strictEqual(beforeCount, 1);
+
+      const qrDupCodeRes = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR María Versión Impresa',
+          targetUrl: 'https://royal.ciprian.example/?ref=MARIA-AUTO-01',
+          referralCode: 'MARIA-AUTO-01',
+        }),
+      });
+      assert.strictEqual(qrDupCodeRes.status, 201);
+      const qrDupData = await qrDupCodeRes.json();
+      assert.strictEqual(qrDupData.ok, true);
+      assert.strictEqual(qrDupData.referrer.id, qr1Data.referrer.id);
+      assert.strictEqual(qrDupData.qr.referrerId, qr1Data.referrer.id);
+      assert.strictEqual(
+        qrDupData.state.referrers.filter((r) => r.code === 'MARIA-AUTO-01').length,
+        1
+      );
+
+      // Plain QR without referralCode or ?ref= does NOT auto-create a referrer
+      const plainQrRes = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR Genérico Sin Ref',
+          targetUrl: 'https://royal.ciprian.example/evento',
+        }),
+      });
+      assert.strictEqual(plainQrRes.status, 201);
+      const plainQrData = await plainQrRes.json();
+      assert.strictEqual(plainQrData.ok, true);
+      assert.strictEqual(plainQrData.referrer, null);
+      assert.strictEqual(plainQrData.qr.referralCode, null);
+      assert.strictEqual(plainQrData.qr.referrerId, null);
+
+      // Confirm exact visit counts and attributed leads in Admin GET /api/state
+      const finalState = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json();
+      const mariaPartner = finalState.referrers.find((r) => r.id === qr1Data.referrer.id);
+      const carlosPartner = finalState.referrers.find((r) => r.id === qr2Data.referrer.id);
+      assert.strictEqual(mariaPartner.visitsCount, 2);
+      assert.strictEqual(mariaPartner.uniqueVisitsCount, 2);
+      assert.strictEqual(carlosPartner.visitsCount, 1);
+      assert.strictEqual(carlosPartner.uniqueVisitsCount, 1);
+      assert.ok(finalState.leads.some((l) => l.id === leadM.id && l.referrerId === mariaPartner.id));
+      assert.ok(finalState.leads.some((l) => l.id === leadC.id && l.referrerId === carlosPartner.id));
+    });
+  });
 });

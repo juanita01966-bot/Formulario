@@ -8,7 +8,9 @@ import {
   updateLead,
 } from '../services/storeClient';
 import {
+  REFERRAL_LOCAL_KEY,
   captureReferralCode,
+  extractReferralCodeFromLocation,
   getOrCreateVisitorId,
   getStoredReferralCode,
   hasPingedReferralVisitThisSession,
@@ -56,70 +58,86 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
   const [capturedReferralCode, setCapturedReferralCode] = useState<string | null>(null);
   const [activeReferralPartner, setActiveReferralPartner] = useState<ActiveReferralInfo | null>(null);
   const lastClaimCodeRef = useRef<string | null>(null);
+  const syncSeqRef = useRef(0);
+  const isMountedRef = useRef(true);
 
   const activeGifts = appState.gifts.filter((g) => g.active);
   const safeActiveGifts = activeGifts.length > 0 ? activeGifts : appState.gifts;
 
-  useEffect(() => {
-    let cancelled = false;
+  const syncReferralAttribution = useCallback(async (options?: { skipVisitPing?: boolean }) => {
+    const seq = ++syncSeqRef.current;
+    const code = captureReferralCode();
+    if (!isMountedRef.current || seq !== syncSeqRef.current) return;
+    setCapturedReferralCode(code);
 
-    const syncReferralAttribution = async () => {
-      const code = captureReferralCode();
-      if (cancelled) return;
-      setCapturedReferralCode(code);
+    if (!code) {
+      setActiveReferralPartner(null);
+      return;
+    }
 
-      if (!code) {
-        setActiveReferralPartner(null);
-        return;
-      }
+    // Clear stale banner immediately if the active referral code switched (e.g. QR-UNO -> QR-DOS)
+    setActiveReferralPartner((prev) => (prev && prev.code === code ? prev : null));
 
-      try {
-        if (!hasPingedReferralVisitThisSession(code)) {
-          markReferralVisitPinged(code);
-          const visitorId = getOrCreateVisitorId();
-          const visitRes = await recordReferralVisit(code, visitorId);
-          if (cancelled) return;
+    try {
+      if (!options?.skipVisitPing && !hasPingedReferralVisitThisSession(code)) {
+        markReferralVisitPinged(code);
+        const visitorId = getOrCreateVisitorId();
+        const visitRes = await recordReferralVisit(code, visitorId);
+        if (!isMountedRef.current || seq !== syncSeqRef.current) return;
 
-          if (visitRes.partner && visitRes.partner.active) {
-            setActiveReferralPartner({
-              code: visitRes.partner.code,
-              name: visitRes.partner.name,
-            });
-            return;
-          }
-        }
-
-        const resolved = await resolveReferralCode(code);
-        if (cancelled) return;
-        if (resolved && resolved.active) {
+        if (visitRes.partner && visitRes.partner.active) {
           setActiveReferralPartner({
-            code: resolved.code,
-            name: resolved.name,
+            code: visitRes.partner.code,
+            name: visitRes.partner.name,
           });
-        } else {
-          setActiveReferralPartner(null);
-        }
-      } catch {
-        if (!cancelled) {
-          setActiveReferralPartner(null);
+          return;
         }
       }
-    };
 
+      const resolved = await resolveReferralCode(code);
+      if (!isMountedRef.current || seq !== syncSeqRef.current) return;
+      if (resolved && resolved.active) {
+        setActiveReferralPartner({
+          code: resolved.code,
+          name: resolved.name,
+        });
+      } else {
+        setActiveReferralPartner(null);
+      }
+    } catch {
+      if (isMountedRef.current && seq === syncSeqRef.current) {
+        setActiveReferralPartner(null);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
     void syncReferralAttribution();
 
     const handleUrlChange = () => {
       void syncReferralAttribution();
     };
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key !== REFERRAL_LOCAL_KEY) return;
+      // Only adopt cross-tab attribution when this tab's own URL doesn't pin an explicit ?ref=
+      if (!extractReferralCodeFromLocation()) {
+        void syncReferralAttribution({ skipVisitPing: true });
+      }
+    };
+
     window.addEventListener('hashchange', handleUrlChange);
     window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('storage', handleStorageChange);
 
     return () => {
-      cancelled = true;
+      isMountedRef.current = false;
+      syncSeqRef.current += 1;
       window.removeEventListener('hashchange', handleUrlChange);
       window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('storage', handleStorageChange);
     };
-  }, []);
+  }, [syncReferralAttribution]);
 
   const generateFreshClaimCode = useCallback((): string => {
     let candidate = '';
@@ -137,8 +155,17 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
     address: string;
     acceptedTerms: boolean;
   }) => {
+    // Re-capture at submit time so any fresh ?ref= in URL/storage always wins over stale state
+    const latestCode = captureReferralCode();
+    if (latestCode !== capturedReferralCode) {
+      setCapturedReferralCode(latestCode);
+    }
     const referralCode =
-      activeReferralPartner?.code || capturedReferralCode || getStoredReferralCode() || undefined;
+      latestCode ||
+      capturedReferralCode ||
+      activeReferralPartner?.code ||
+      getStoredReferralCode() ||
+      undefined;
     const res = await createLead({
       name: formData.name,
       phone: formData.phone,
@@ -196,6 +223,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
     setRevealedGift(null);
     setPlayRound((prev) => prev + 1);
     setStep('form');
+    void syncReferralAttribution();
   };
 
   return (

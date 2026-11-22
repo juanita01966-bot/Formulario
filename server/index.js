@@ -2876,6 +2876,30 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
 });
 
 // Admin-only QR Studio & History endpoints
+function extractReferralCodeFromUrl(rawUrl) {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return null;
+  try {
+    const parsed = new URL(rawUrl.trim(), 'https://placeholder.local');
+    const fromSearch = parsed.searchParams.get('ref') || parsed.searchParams.get('r');
+    if (fromSearch) {
+      const normalized = normalizeReferralCode(fromSearch);
+      if (normalized) return normalized;
+    }
+    if (parsed.hash && parsed.hash.includes('?')) {
+      const hashQuery = parsed.hash.slice(parsed.hash.indexOf('?') + 1);
+      const hashParams = new URLSearchParams(hashQuery);
+      const fromHash = hashParams.get('ref') || hashParams.get('r');
+      if (fromHash) {
+        const normalized = normalizeReferralCode(fromHash);
+        if (normalized) return normalized;
+      }
+    }
+  } catch {
+    // Ignore malformed URLs
+  }
+  return null;
+}
+
 async function handleGetQrHistory(_req, res) {
   try {
     const store = await getActiveStore();
@@ -2911,7 +2935,9 @@ async function handleCreateQrCode(req, res) {
   }
 
   const cleanFrameText = typeof frameText === 'string' ? frameText.trim().slice(0, 120) : '';
-  let cleanReferralCode = normalizeReferralCode(referralCode);
+  const validStyleId = VALID_QR_STYLE_IDS.has(styleId) ? styleId : 'classic-gold';
+  let cleanReferralCode =
+    normalizeReferralCode(referralCode) || extractReferralCodeFromUrl(cleanTargetUrl);
   let cleanReferrerId =
     typeof referrerId === 'string' && referrerId.trim() ? referrerId.trim().slice(0, 120) : null;
 
@@ -2919,19 +2945,80 @@ async function handleCreateQrCode(req, res) {
     try {
       const store = await getActiveStore();
       const referrers = Array.isArray(store.referrers) ? store.referrers : [];
-      if (cleanReferrerId && !cleanReferralCode) {
-        const byId = referrers.find((p) => p.id === cleanReferrerId);
-        if (byId) cleanReferralCode = byId.code;
-      } else if (cleanReferralCode && !cleanReferrerId) {
-        const byCode = referrers.find((p) => p.code === cleanReferralCode);
-        if (byCode) cleanReferrerId = byCode.id;
+      const nowIso = new Date().toISOString();
+
+      let linkedPartner =
+        (cleanReferralCode && referrers.find((p) => p.code === cleanReferralCode)) ||
+        (cleanReferrerId && referrers.find((p) => p.id === cleanReferrerId)) ||
+        null;
+
+      if (linkedPartner) {
+        cleanReferrerId = linkedPartner.id;
+        cleanReferralCode = linkedPartner.code;
+      } else if (cleanReferralCode) {
+        const autoPartner = {
+          id: generateId('ref'),
+          name: cleanName.slice(0, 120),
+          code: cleanReferralCode,
+          active: true,
+          visitsCount: 0,
+          uniqueVisitsCount: 0,
+          lastVisitAt: null,
+          qrStyleId: validStyleId,
+          createdAt: nowIso,
+        };
+
+        if (USE_SUPABASE) {
+          try {
+            await supabaseRest('referrers', {
+              method: 'POST',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                id: autoPartner.id,
+                name: autoPartner.name,
+                code: autoPartner.code,
+                phone: null,
+                notes: null,
+                active: true,
+                visits_count: 0,
+                unique_visits_count: 0,
+                last_visit_at: null,
+                qr_style_id: autoPartner.qrStyleId,
+                created_at: autoPartner.createdAt,
+              }),
+            });
+            linkedPartner = autoPartner;
+          } catch (err) {
+            if (err?.code === '23505' || err?.status === 409) {
+              const existingRows = await supabaseRest(
+                `referrers?code=eq.${encodeURIComponent(cleanReferralCode)}&limit=1`
+              ).catch(() => []);
+              const existingPartner =
+                Array.isArray(existingRows) && existingRows[0]
+                  ? mapReferrerRow(existingRows[0])
+                  : null;
+              linkedPartner = existingPartner || autoPartner;
+            } else if (isMissingReferrersTableError(err)) {
+              saveFallbackReferrers([autoPartner, ...getFallbackReferrers()]);
+              linkedPartner = autoPartner;
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          store.referrers = [autoPartner, ...referrers];
+          linkedPartner = autoPartner;
+        }
+
+        cleanReferrerId = linkedPartner.id;
+        cleanReferralCode = linkedPartner.code;
       }
 
       const newQr = {
         id: generateId('qr'),
         name: cleanName.slice(0, 120),
         targetUrl: cleanTargetUrl,
-        styleId: VALID_QR_STYLE_IDS.has(styleId) ? styleId : 'classic-gold',
+        styleId: validStyleId,
         dotShape: VALID_QR_DOT_SHAPES.has(dotShape) ? dotShape : 'rounded',
         foregroundColor:
           typeof foregroundColor === 'string' && HEX_COLOR_RE.test(foregroundColor.trim())
@@ -2945,7 +3032,7 @@ async function handleCreateQrCode(req, res) {
         ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
         referralCode: cleanReferralCode || null,
         referrerId: cleanReferrerId || null,
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso,
       };
 
       if (USE_SUPABASE) {
@@ -2972,7 +3059,13 @@ async function handleCreateQrCode(req, res) {
           );
           const updatedStore = await getActiveStore();
           const sanitized = sanitizeStateForClient(updatedStore, true, 'admin');
-          return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+          return res.status(201).json({
+            ok: true,
+            qr: newQr,
+            referrer: linkedPartner || null,
+            qrHistory: sanitized.qrHistory,
+            state: sanitized,
+          });
         } catch (err) {
           if (!isMissingQrTableError(err)) throw err;
           addFallbackQrCode(newQr);
@@ -2982,7 +3075,13 @@ async function handleCreateQrCode(req, res) {
             true,
             'admin'
           );
-          return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+          return res.status(201).json({
+            ok: true,
+            qr: newQr,
+            referrer: linkedPartner || null,
+            qrHistory: sanitized.qrHistory,
+            state: sanitized,
+          });
         }
       }
 
@@ -2990,7 +3089,13 @@ async function handleCreateQrCode(req, res) {
       store.qrHistory.unshift(newQr);
       writeStore(store);
       const sanitized = sanitizeStateForClient(store, true, 'admin');
-      return res.status(201).json({ qr: newQr, qrHistory: sanitized.qrHistory, state: sanitized });
+      return res.status(201).json({
+        ok: true,
+        qr: newQr,
+        referrer: linkedPartner || null,
+        qrHistory: sanitized.qrHistory,
+        state: sanitized,
+      });
     } catch {
       return res.status(503).json({ error: 'No se pudo guardar el código QR.' });
     }

@@ -1607,7 +1607,22 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         : 'border-[#E6D5BF] bg-white hover:border-[#C88A2B]/65'
                   }`}
                 >
-                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isExpanded}
+                    onClick={() =>
+                      setExpandedPartnerId((cur) => (cur === partner.id ? null : partner.id))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setExpandedPartnerId((cur) => (cur === partner.id ? null : partner.id));
+                      }
+                    }}
+                    className="group/row flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 cursor-pointer rounded-xl -m-1.5 p-1.5 hover:bg-[#FAF1E4]/45 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C88A2B]/60"
+                    title={isExpanded ? 'Clic para ocultar prospectos' : 'Clic para desplegar métricas y prospectos de este QR'}
+                  >
                     {/* Left: Rank + Identity + Prize Progress */}
                     <div className="flex items-start gap-3 min-w-0 flex-1">
                       <div
@@ -1626,9 +1641,14 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
 
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                          <h4 className="text-[15px] font-bold text-[#22150E] break-words">
+                          <h4 className="text-[15px] font-bold text-[#22150E] group-hover/row:text-[#8C3318] transition-colors break-words">
                             {partner.name}
                           </h4>
+                          <ChevronDown
+                            className={`h-4 w-4 shrink-0 text-[#9B816E] transition-transform duration-200 ${
+                              isExpanded ? 'rotate-180 text-[#22150E]' : 'group-hover/row:text-[#22150E]'
+                            }`}
+                          />
                           <span className="inline-flex items-center gap-1 rounded-md border border-[#E6C99E] bg-[#FAF0E0] px-2 py-0.5 font-mono text-[11px] font-bold text-[#8C4A19]">
                             {partner.code}
                           </span>

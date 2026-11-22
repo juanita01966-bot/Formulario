@@ -26,7 +26,10 @@ import {
   buildReferralUrl,
   normalizeReferralCodeInput,
   sanitizeReferralCodeDraft,
+  suggestReferralCodeFromName,
 } from './referralQrExport';
+
+type QrTrackingMode = 'auto_new' | 'existing' | 'off';
 
 interface QrStudioPanelProps {
   qrHistory: QrCodeRecord[];
@@ -724,20 +727,40 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
   onDeleteQr,
 }) => {
   const studioTopRef = useRef<HTMLDivElement | null>(null);
+  const lastSavedSignatureRef = useRef<string | null>(null);
 
-  const [name, setName] = useState('Show Otoño · Mesa VIP');
-  const [targetUrl, setTargetUrl] = useState(defaultUrl);
+  const initialName = 'Show Otoño · Mesa VIP';
+  const [trackingMode, setTrackingMode] = useState<QrTrackingMode>('auto_new');
+  const [name, setName] = useState(initialName);
+  const [autoCode, setAutoCode] = useState<string>(() => {
+    const used = new Set<string>();
+    for (const r of referrers) used.add(r.code.trim().toUpperCase());
+    for (const q of qrHistory) {
+      if (q.referralCode) used.add(q.referralCode.trim().toUpperCase());
+    }
+    return suggestReferralCodeFromName(initialName, used);
+  });
+  const [autoCodeTouched, setAutoCodeTouched] = useState(false);
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string>('');
+  const [targetUrl, setTargetUrl] = useState<string>(() => {
+    const used = new Set<string>();
+    for (const r of referrers) used.add(r.code.trim().toUpperCase());
+    for (const q of qrHistory) {
+      if (q.referralCode) used.add(q.referralCode.trim().toUpperCase());
+    }
+    const initialCode = suggestReferralCodeFromName(initialName, used);
+    return buildReferralUrl(defaultUrl, initialCode);
+  });
   const [frameText, setFrameText] = useState('Escanea y reclama tu obsequio');
   const [styleId, setStyleId] = useState<QrStyleId>('classic-gold');
   const [dotShape, setDotShape] = useState<QrDotShape>('rounded');
   const [foregroundColor, setForegroundColor] = useState('#22150E');
   const [backgroundColor, setBackgroundColor] = useState('#FFF9ED');
   const [includeLogo, setIncludeLogo] = useState(true);
-  const [referralSelection, setReferralSelection] = useState<string>('');
-  const [manualReferralCode, setManualReferralCode] = useState<string>('');
 
   const [saving, setSaving] = useState(false);
   const [exportingPng, setExportingPng] = useState(false);
+  const [exportingSvg, setExportingSvg] = useState(false);
   const [copiedPreviewLink, setCopiedPreviewLink] = useState(false);
   const [copiedRecordId, setCopiedRecordId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -814,43 +837,88 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
 
   const darkCardStage = isDarkHex(backgroundColor);
 
+  const existingTrackedCodes = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of referrers) {
+      const c = normalizeReferralCodeInput(r.code);
+      if (c) set.add(c);
+    }
+    for (const q of qrHistory) {
+      if (q.referralCode) {
+        const c = normalizeReferralCodeInput(q.referralCode);
+        if (c) set.add(c);
+      }
+    }
+    return set;
+  }, [referrers, qrHistory]);
+
   const selectedPartner = useMemo(() => {
-    if (!referralSelection || referralSelection === '__manual__') return null;
-    return referrers.find((r) => r.id === referralSelection) || null;
-  }, [referralSelection, referrers]);
+    if (trackingMode !== 'existing' || !selectedPartnerId) return null;
+    return referrers.find((r) => r.id === selectedPartnerId) || null;
+  }, [trackingMode, selectedPartnerId, referrers]);
 
   const activeReferralCode = useMemo(() => {
-    if (selectedPartner) return selectedPartner.code;
-    if (referralSelection === '__manual__') {
-      const normalized = normalizeReferralCodeInput(manualReferralCode);
-      return normalized.length >= 2 ? normalized : null;
+    if (trackingMode === 'off') return null;
+    if (trackingMode === 'existing') {
+      return selectedPartner ? selectedPartner.code : null;
     }
-    return null;
-  }, [selectedPartner, referralSelection, manualReferralCode]);
+    const normalized = normalizeReferralCodeInput(autoCode);
+    return normalized.length >= 2 ? normalized : null;
+  }, [trackingMode, selectedPartner, autoCode]);
 
-  const handleReferralSelectionChange = (nextValue: string) => {
-    setReferralSelection(nextValue);
+  const matchedExistingReferrer = useMemo(() => {
+    if (!activeReferralCode) return null;
+    if (selectedPartner) return selectedPartner;
+    return referrers.find((r) => r.code.trim().toUpperCase() === activeReferralCode) || null;
+  }, [activeReferralCode, selectedPartner, referrers]);
+
+  const isTrackingActive = trackingMode !== 'off' && Boolean(activeReferralCode);
+
+  const handleNameChange = (nextName: string) => {
+    setName(nextName);
+    setStatusBanner(null);
+    if (trackingMode === 'auto_new' && !autoCodeTouched) {
+      const suggested =
+        nextName.trim().length >= 2
+          ? suggestReferralCodeFromName(nextName, existingTrackedCodes)
+          : '';
+      setAutoCode(suggested);
+      setTargetUrl(suggested.length >= 2 ? buildReferralUrl(defaultUrl, suggested) : defaultUrl);
+    }
+  };
+
+  const handleTrackingModeChange = (nextMode: QrTrackingMode) => {
+    setTrackingMode(nextMode);
     setStatusBanner(null);
 
-    if (!nextValue) {
-      setManualReferralCode('');
+    if (nextMode === 'off') {
       setTargetUrl(defaultUrl);
       return;
     }
 
-    if (nextValue === '__manual__') {
-      const normalized = normalizeReferralCodeInput(manualReferralCode);
-      if (normalized.length >= 2) {
-        setTargetUrl(buildReferralUrl(defaultUrl, normalized));
-      }
+    if (nextMode === 'auto_new') {
+      const currentClean = normalizeReferralCodeInput(autoCode);
+      const nextCode =
+        autoCodeTouched && currentClean.length >= 2
+          ? currentClean
+          : suggestReferralCodeFromName(name.trim() || 'QR Ciprian', existingTrackedCodes);
+      setAutoCode(nextCode);
+      setTargetUrl(buildReferralUrl(defaultUrl, nextCode));
       return;
     }
 
-    const partner = referrers.find((r) => r.id === nextValue);
-    if (!partner) return;
+    // nextMode === 'existing'
+    const fallbackPartner =
+      referrers.find((r) => r.id === selectedPartnerId) || referrers[0] || null;
+    if (fallbackPartner) {
+      applyExistingPartner(fallbackPartner);
+    }
+  };
 
+  const applyExistingPartner = (partner: ReferralPartner) => {
+    setSelectedPartnerId(partner.id);
     setTargetUrl(buildReferralUrl(defaultUrl, partner.code));
-    setName(`QR Embajador · ${partner.name}`.slice(0, 70));
+    setName(partner.name.slice(0, 70));
     setFrameText(`Invitación de ${partner.name} · ${partner.code}`.slice(0, 54));
     if (partner.qrStyleId) {
       const matchedPreset = QR_PRESETS.find((p) => p.id === partner.qrStyleId);
@@ -863,18 +931,25 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
     }
   };
 
-  const handleManualReferralCodeChange = (raw: string) => {
+  const handleAutoCodeChange = (raw: string) => {
     const draft = sanitizeReferralCodeDraft(raw);
     const normalized = normalizeReferralCodeInput(draft);
-    setManualReferralCode(draft);
+    setAutoCodeTouched(true);
+    setAutoCode(draft);
     setStatusBanner(null);
     if (normalized.length >= 2) {
       setTargetUrl(buildReferralUrl(defaultUrl, normalized));
-      setName(`QR Referido · ${normalized}`.slice(0, 70));
-      setFrameText(`Código de invitado · ${normalized}`.slice(0, 54));
     } else {
       setTargetUrl(defaultUrl);
     }
+  };
+
+  const handleResyncAutoCodeFromName = () => {
+    setAutoCodeTouched(false);
+    const suggested = suggestReferralCodeFromName(name.trim() || 'QR Ciprian', existingTrackedCodes);
+    setAutoCode(suggested);
+    setTargetUrl(buildReferralUrl(defaultUrl, suggested));
+    setStatusBanner(null);
   };
 
   const handleSelectPreset = (preset: QrPresetConfig) => {
@@ -883,6 +958,74 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
     setBackgroundColor(preset.backgroundColor);
     setDotShape(preset.dotShape);
     setStatusBanner(null);
+  };
+
+  const buildCurrentQrSignature = (code: string | null, qrName: string): string => {
+    return `${(code || '').trim().toUpperCase()}::${qrName.trim().toLowerCase()}`;
+  };
+
+  const isCurrentTrackedQrAlreadySaved = (): boolean => {
+    if (!activeReferralCode) return true;
+    const trimmedName = name.trim();
+    const signature = buildCurrentQrSignature(activeReferralCode, trimmedName);
+    if (lastSavedSignatureRef.current === signature) return true;
+
+    const hasPartner = referrers.some(
+      (r) => r.code.trim().toUpperCase() === activeReferralCode
+    );
+    const hasHistoryMatch = qrHistory.some(
+      (q) =>
+        (q.referralCode || '').trim().toUpperCase() === activeReferralCode &&
+        q.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (hasHistoryMatch && hasPartner) return true;
+    if (trackingMode === 'existing' && hasHistoryMatch) return true;
+    return false;
+  };
+
+  const saveCurrentQr = async (): Promise<boolean> => {
+    const trimmedName = name.trim();
+    const normalizedCode = activeReferralCode;
+    await onCreateQr({
+      name: trimmedName,
+      targetUrl: targetUrl.trim(),
+      styleId,
+      dotShape,
+      foregroundColor: normalizeHex(foregroundColor, activePreset.foregroundColor),
+      backgroundColor: normalizeHex(backgroundColor, activePreset.backgroundColor),
+      includeLogo,
+      frameText: frameText.trim(),
+      referralCode: normalizedCode,
+      referrerId: selectedPartner?.id ?? matchedExistingReferrer?.id ?? null,
+    });
+    lastSavedSignatureRef.current = buildCurrentQrSignature(normalizedCode, trimmedName);
+    return true;
+  };
+
+  const ensureTrackedQrSavedBeforeExport = async (): Promise<boolean> => {
+    if (trackingMode === 'off' || !activeReferralCode || !nameValid || !urlValid) {
+      return false;
+    }
+    if (isCurrentTrackedQrAlreadySaved()) {
+      return false;
+    }
+    try {
+      await saveCurrentQr();
+      setStatusBanner({
+        type: 'success',
+        text: `QR "${name.trim()}" activado automáticamente en Métricas (?ref=${activeReferralCode}) y listo para usar.`,
+      });
+      return true;
+    } catch (err) {
+      setStatusBanner({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? `Descargado, pero no se pudo activar en Métricas: ${err.message}`
+            : 'Descargado, pero no se pudo registrar automáticamente en Métricas.',
+      });
+      return false;
+    }
   };
 
   const handleSaveToHistory = async (e?: React.FormEvent) => {
@@ -906,21 +1049,12 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
 
     setSaving(true);
     try {
-      await onCreateQr({
-        name: name.trim(),
-        targetUrl: targetUrl.trim(),
-        styleId,
-        dotShape,
-        foregroundColor: normalizeHex(foregroundColor, activePreset.foregroundColor),
-        backgroundColor: normalizeHex(backgroundColor, activePreset.backgroundColor),
-        includeLogo,
-        frameText: frameText.trim(),
-        referralCode: activeReferralCode,
-        referrerId: selectedPartner?.id ?? null,
-      });
+      await saveCurrentQr();
       setStatusBanner({
         type: 'success',
-        text: `"${name.trim()}" guardado en el historial QR.`,
+        text: isTrackingActive
+          ? `"${name.trim()}" guardado y activado en Métricas (?ref=${activeReferralCode}).`
+          : `"${name.trim()}" guardado en el historial QR.`,
       });
     } catch (err) {
       setStatusBanner({
@@ -951,6 +1085,9 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
     }
     setExportingPng(true);
     try {
+      if (!item) {
+        await ensureTrackedQrSavedBeforeExport();
+      }
       await exportQrPngHd(params, logoImg);
     } catch (err) {
       setStatusBanner({
@@ -962,7 +1099,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
     }
   };
 
-  const handleDownloadSvg = () => {
+  const handleDownloadSvg = async () => {
     if (!urlValid) {
       setStatusBanner({
         type: 'error',
@@ -970,22 +1107,31 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
       });
       return;
     }
-    exportQrSvgFile(
-      {
-        name,
-        targetUrl,
-        dotShape,
-        foregroundColor,
-        backgroundColor,
-        includeLogo,
-        frameText,
-      },
-      logoDataUri
-    );
+    setExportingSvg(true);
+    try {
+      await ensureTrackedQrSavedBeforeExport();
+      exportQrSvgFile(
+        {
+          name,
+          targetUrl,
+          dotShape,
+          foregroundColor,
+          backgroundColor,
+          includeLogo,
+          frameText,
+        },
+        logoDataUri
+      );
+    } finally {
+      setExportingSvg(false);
+    }
   };
 
   const handleCopyUrl = async (urlToCopy: string, recordId?: string) => {
     if (!urlToCopy.trim()) return;
+    if (!recordId) {
+      await ensureTrackedQrSavedBeforeExport();
+    }
     try {
       await navigator.clipboard.writeText(urlToCopy.trim());
       if (recordId) {
@@ -1010,23 +1156,35 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
     setIncludeLogo(record.includeLogo);
     setFrameText(record.frameText || '');
     if (record.referrerId && referrers.some((r) => r.id === record.referrerId)) {
-      setReferralSelection(record.referrerId);
-      setManualReferralCode('');
+      setTrackingMode('existing');
+      setSelectedPartnerId(record.referrerId);
+      setAutoCode(record.referralCode || '');
+      setAutoCodeTouched(true);
     } else if (record.referralCode) {
       const matched = referrers.find(
         (r) => r.code.toUpperCase() === record.referralCode?.toUpperCase()
       );
       if (matched) {
-        setReferralSelection(matched.id);
-        setManualReferralCode('');
+        setTrackingMode('existing');
+        setSelectedPartnerId(matched.id);
+        setAutoCode(matched.code);
+        setAutoCodeTouched(true);
       } else {
-        setReferralSelection('__manual__');
-        setManualReferralCode(record.referralCode);
+        setTrackingMode('auto_new');
+        setSelectedPartnerId('');
+        setAutoCode(record.referralCode);
+        setAutoCodeTouched(true);
       }
     } else {
-      setReferralSelection('');
-      setManualReferralCode('');
+      setTrackingMode('off');
+      setSelectedPartnerId('');
+      setAutoCode('');
+      setAutoCodeTouched(false);
     }
+    lastSavedSignatureRef.current = buildCurrentQrSignature(
+      record.referralCode || null,
+      record.name
+    );
     setStatusBanner({
       type: 'success',
       text: `Cargado "${record.name}" en el editor en vivo.`,
@@ -1104,12 +1262,9 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                 <input
                   type="text"
                   value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    setStatusBanner(null);
-                  }}
+                  onChange={(e) => handleNameChange(e.target.value)}
                   maxLength={70}
-                  placeholder="Ej. Show Otoño · Mesa VIP"
+                  placeholder="Ej. María · Mesa VIP"
                   className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm text-[#22150E] placeholder:text-[#A8917D] focus:bg-white focus:border-[#C88A2B] focus:outline-none transition-colors"
                 />
               </div>
@@ -1157,60 +1312,155 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
               )}
             </div>
 
-            {/* Optional: Link QR to Ambassador / Referral Code */}
-            <div className="rounded-2xl border border-[#E6D5BF] bg-gradient-to-r from-[#FAF3E8]/85 via-[#FFFDF9] to-[#FAF3E8]/70 p-3.5 space-y-2.5">
+            {/* Auto-tracking in Métricas (ON by default) */}
+            <div className="rounded-2xl border border-[#C88A2B]/45 bg-gradient-to-r from-[#FFF9EC] via-[#FFFDF9] to-[#FAF1E4]/85 p-3.5 sm:p-4 space-y-3 shadow-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <label
-                  htmlFor="qr-studio-referrer-select"
-                  className="text-xs font-bold text-[#594133] flex items-center gap-1.5"
-                >
-                  <Trophy className="h-3.5 w-3.5 text-[#C88A2B]" />
-                  Vincular a Embajador / Código de Referencia (opcional)
-                </label>
-                {activeReferralCode && (
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#22150E] text-[#F4CA73]">
+                    <Trophy className="h-3.5 w-3.5" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold text-[#22150E]">
+                      Rastrear este QR en Métricas
+                    </p>
+                    <p className="text-[10.5px] text-[#7B5D4A]">
+                      Mide automáticamente visitas y prospectos de este QR.
+                    </p>
+                  </div>
+                </div>
+                {activeReferralCode ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 font-mono text-[10.5px] font-bold text-emerald-800">
                     <UserCheck className="h-3 w-3" />
                     ?ref={activeReferralCode}
                   </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <select
-                  id="qr-studio-referrer-select"
-                  value={referralSelection}
-                  onChange={(e) => handleReferralSelectionChange(e.target.value)}
-                  className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-2 text-xs sm:text-sm font-medium text-[#22150E] focus:border-[#C88A2B] focus:outline-none"
-                >
-                  <option value="">Sin embajador (URL libre / general)</option>
-                  {referrers.map((partner) => (
-                    <option key={partner.id} value={partner.id}>
-                      {partner.name} ({partner.code}){!partner.active ? ' · Inactivo' : ''}
-                    </option>
-                  ))}
-                  <option value="__manual__">Escribir código de referencia manual...</option>
-                </select>
-
-                {referralSelection === '__manual__' ? (
-                  <input
-                    type="text"
-                    value={manualReferralCode}
-                    onChange={(e) => handleManualReferralCodeChange(e.target.value)}
-                    onBlur={() =>
-                      setManualReferralCode((prev) => normalizeReferralCodeInput(prev))
-                    }
-                    maxLength={32}
-                    placeholder="Ej. MARIA-01"
-                    className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-2 font-mono text-sm font-bold uppercase text-[#8C4A19] placeholder:text-[#A8917D] focus:border-[#C88A2B] focus:outline-none"
-                  />
                 ) : (
-                  <p className="flex items-center text-[11px] text-[#7B5D4A] leading-snug px-1">
-                    {selectedPartner
-                      ? `Enlace armado automáticamente con ?ref=${selectedPartner.code} para medir visitas y registros de ${selectedPartner.name}.`
-                      : 'Elige un embajador para generar su QR personalizado o deja libre para cualquier enlace.'}
-                  </p>
+                  <span className="rounded-full bg-stone-100 border border-stone-200 px-2.5 py-0.5 text-[10.5px] font-semibold text-stone-600">
+                    URL libre
+                  </span>
                 )}
               </div>
+
+              {/* 3 Mode Pills */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 rounded-xl bg-[#F3E8D9] p-1 border border-[#E3D0B8]">
+                <button
+                  type="button"
+                  onClick={() => handleTrackingModeChange('auto_new')}
+                  className={`min-h-[36px] rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-all cursor-pointer ${
+                    trackingMode === 'auto_new'
+                      ? 'bg-[#FFFDF9] text-[#22150E] shadow-xs'
+                      : 'text-[#6E5341] hover:text-[#22150E]'
+                  }`}
+                >
+                  Nuevo QR rastreado
+                </button>
+                <button
+                  type="button"
+                  disabled={referrers.length === 0}
+                  onClick={() => handleTrackingModeChange('existing')}
+                  className={`min-h-[36px] rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-all cursor-pointer disabled:opacity-45 ${
+                    trackingMode === 'existing'
+                      ? 'bg-[#FFFDF9] text-[#22150E] shadow-xs'
+                      : 'text-[#6E5341] hover:text-[#22150E]'
+                  }`}
+                >
+                  Embajador existente ({referrers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTrackingModeChange('off')}
+                  className={`min-h-[36px] rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-all cursor-pointer ${
+                    trackingMode === 'off'
+                      ? 'bg-[#FFFDF9] text-[#22150E] shadow-xs'
+                      : 'text-[#6E5341] hover:text-[#22150E]'
+                  }`}
+                >
+                  Sin rastreo (URL libre)
+                </button>
+              </div>
+
+              {trackingMode === 'auto_new' && (
+                <div className="space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <label
+                        htmlFor="qr-studio-auto-code"
+                        className="block text-[11px] font-semibold text-[#594133] mb-1"
+                      >
+                        Código único del QR (?ref=...)
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          id="qr-studio-auto-code"
+                          type="text"
+                          value={autoCode}
+                          onChange={(e) => handleAutoCodeChange(e.target.value)}
+                          onBlur={() =>
+                            setAutoCode((prev) => normalizeReferralCodeInput(prev))
+                          }
+                          maxLength={32}
+                          placeholder="Ej. MARIA-01"
+                          className="w-full min-h-[40px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 font-mono text-sm font-bold uppercase text-[#8C4A19] placeholder:text-[#A8917D] focus:border-[#C88A2B] focus:outline-none"
+                        />
+                        {autoCodeTouched && (
+                          <button
+                            type="button"
+                            onClick={handleResyncAutoCodeFromName}
+                            title="Regenerar código automáticamente desde el nombre"
+                            className="shrink-0 min-h-[40px] rounded-xl border border-[#DFCBB3] bg-[#FAF1E4] px-2.5 py-1.5 text-[11px] font-bold text-[#6E5341] hover:bg-[#F3E4CE] cursor-pointer"
+                          >
+                            Auto
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {activeReferralCode && (
+                    <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50/85 px-3 py-2 text-[11.5px] font-semibold text-emerald-900">
+                      <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 mt-0.5" />
+                      <span>
+                        {matchedExistingReferrer
+                          ? `Este QR sumará visitas y prospectos a "${matchedExistingReferrer.name}" (?ref=${activeReferralCode}) en Métricas.`
+                          : `Este QR se registrará automáticamente en Métricas como "${name.trim() || 'Nuevo QR'}" (?ref=${activeReferralCode}).`}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {trackingMode === 'existing' && (
+                <div className="space-y-2">
+                  <select
+                    id="qr-studio-referrer-select"
+                    value={selectedPartnerId}
+                    onChange={(e) => {
+                      const found = referrers.find((r) => r.id === e.target.value);
+                      if (found) applyExistingPartner(found);
+                    }}
+                    className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-2 text-xs sm:text-sm font-medium text-[#22150E] focus:border-[#C88A2B] focus:outline-none"
+                  >
+                    {referrers.map((partner) => (
+                      <option key={partner.id} value={partner.id}>
+                        {partner.name} ({partner.code}){!partner.active ? ' · Inactivo' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedPartner && (
+                    <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50/85 px-3 py-2 text-[11.5px] font-semibold text-emerald-900">
+                      <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 mt-0.5" />
+                      <span>
+                        Vinculado a &ldquo;{selectedPartner.name}&rdquo; (?ref={selectedPartner.code}) — todos los escaneos y registros sumarán en Métricas.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {trackingMode === 'off' && (
+                <p className="text-[11px] text-[#7B5D4A]">
+                  Modo enlace libre: el QR apuntará exactamente a la URL que escribas abajo sin vincularse a un embajador en Métricas.
+                </p>
+              )}
             </div>
 
             {/* Destination URL + One-click Default Form Chip */}
@@ -1509,7 +1759,13 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
               className="inline-flex min-h-[46px] w-full sm:w-auto items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#22150E] via-[#3B2316] to-[#22150E] px-6 py-3 text-xs sm:text-sm font-bold text-[#F4CA73] border border-[#C88A2B]/50 shadow-[0_12px_26px_-10px_rgba(34,21,14,0.5)] hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
             >
               <BookmarkCheck className="h-4 w-4" />
-              {saving ? 'Guardando en historial...' : 'Guardar QR en historial'}
+              {saving
+                ? isTrackingActive
+                  ? 'Guardando y activando...'
+                  : 'Guardando en historial...'
+                : isTrackingActive
+                  ? 'Guardar y activar QR en Métricas'
+                  : 'Guardar QR en historial'}
             </button>
           </div>
         </form>
@@ -1611,7 +1867,13 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                 className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] py-3 text-xs sm:text-sm font-bold text-[#1A0E08] shadow-[0_12px_26px_-8px_rgba(229,174,78,0.45)] hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-50"
               >
                 <BookmarkCheck className="h-4 w-4" />
-                {saving ? 'Guardando...' : 'Guardar QR en historial'}
+                {saving
+                  ? isTrackingActive
+                    ? 'Activando en Métricas...'
+                    : 'Guardando...'
+                  : isTrackingActive
+                    ? 'Guardar y activar QR en Métricas'
+                    : 'Guardar QR en historial'}
               </button>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1628,11 +1890,11 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                 <button
                   type="button"
                   onClick={handleDownloadSvg}
-                  disabled={!urlValid}
+                  disabled={exportingSvg || !urlValid}
                   className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/10 hover:bg-white/15 px-3 py-2.5 text-xs font-semibold text-white transition-colors cursor-pointer disabled:opacity-45"
                 >
                   <FileCode2 className="h-3.5 w-3.5 text-[#F4CA73]" />
-                  SVG Vector
+                  {exportingSvg ? 'Generando...' : 'SVG Vector'}
                 </button>
 
                 <button
