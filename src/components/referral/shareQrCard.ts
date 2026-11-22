@@ -1,4 +1,9 @@
 import { create as createQrMatrix } from 'qrcode';
+import { normalizeReferralCode } from '../../services/storeClient';
+import {
+  extractReferralCodeFromLocation,
+  getStoredReferralCode,
+} from '../../utils/referralTracking';
 
 export interface ShareQrAssets {
   file: File;
@@ -7,19 +12,65 @@ export interface ShareQrAssets {
   targetUrl: string;
 }
 
+export interface GenerateShareQrOptions {
+  referralCode?: string | null;
+  referrerName?: string | null;
+}
+
 const CARD_W = 900;
 const CARD_H = 1120;
 const LOGO_PATH = '/images/logo%20ciprian.png';
+const DEFAULT_QR_FILENAME = 'QR-The-Ciprian-Company.png';
 
-export function getPublicLandingUrl(): string {
-  if (typeof window === 'undefined') return 'https://thecipriancompany.com/';
+function extractRefCodeFromTargetUrl(rawUrl: string): string {
   try {
-    const url = new URL(window.location.href);
+    const parsed = new URL(rawUrl, 'https://thecipriancompany.com/');
+    const direct = parsed.searchParams.get('ref') ?? parsed.searchParams.get('r');
+    if (direct) {
+      const normalized = normalizeReferralCode(direct);
+      if (normalized) return normalized;
+    }
+    for (const [key, value] of parsed.searchParams.entries()) {
+      const lower = key.toLowerCase();
+      if ((lower === 'ref' || lower === 'r') && value) {
+        const normalized = normalizeReferralCode(value);
+        if (normalized) return normalized;
+      }
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function resolveEffectiveReferralCode(explicitCode?: string | null): string {
+  const fromProp = normalizeReferralCode(explicitCode);
+  if (fromProp) return fromProp;
+  const fromLocation = extractReferralCodeFromLocation();
+  if (fromLocation) return fromLocation;
+  return getStoredReferralCode() || '';
+}
+
+export function getPublicLandingUrl(referralCode?: string | null): string {
+  const effectiveCode = resolveEffectiveReferralCode(referralCode);
+  const baseHref =
+    typeof window === 'undefined' ? 'https://thecipriancompany.com/' : window.location.href;
+  try {
+    const url = new URL(baseHref);
     url.hash = '';
     url.search = '';
+    if (effectiveCode) {
+      url.searchParams.set('ref', effectiveCode);
+    }
     return url.toString();
   } catch {
-    return `${window.location.origin}/`;
+    const fallbackBase =
+      typeof window === 'undefined'
+        ? 'https://thecipriancompany.com/'
+        : `${window.location.origin}/`;
+    return effectiveCode
+      ? `${fallbackBase}?ref=${encodeURIComponent(effectiveCode)}`
+      : fallbackBase;
   }
 }
 
@@ -71,8 +122,16 @@ function loadImageSafe(src: string, timeoutMs = 2500): Promise<HTMLImageElement 
   });
 }
 
-export async function generateShareQrAssets(targetUrl = getPublicLandingUrl()): Promise<ShareQrAssets> {
-  const qr = createQrMatrix(targetUrl, { errorCorrectionLevel: 'H' });
+export async function generateShareQrAssets(
+  targetUrl?: string,
+  options?: GenerateShareQrOptions
+): Promise<ShareQrAssets> {
+  const effectiveTargetUrl = targetUrl || getPublicLandingUrl(options?.referralCode);
+  const effectiveCode =
+    normalizeReferralCode(options?.referralCode) ||
+    extractRefCodeFromTargetUrl(effectiveTargetUrl);
+
+  const qr = createQrMatrix(effectiveTargetUrl, { errorCorrectionLevel: 'H' });
   const modulesCount = qr.modules.size;
   const moduleData = qr.modules.data;
 
@@ -182,7 +241,9 @@ export async function generateShareQrAssets(targetUrl = getPublicLandingUrl()): 
   ctx.restore();
 
   // Bottom probability incentive banner
-  drawRoundedRect(ctx, 84, 882, CARD_W - 168, 114, 24);
+  const bannerY = effectiveCode ? 864 : 882;
+  const bannerH = effectiveCode ? 106 : 114;
+  drawRoundedRect(ctx, 84, bannerY, CARD_W - 168, bannerH, 24);
   ctx.fillStyle = 'rgba(229, 174, 78, 0.14)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(244, 202, 115, 0.45)';
@@ -193,17 +254,30 @@ export async function generateShareQrAssets(targetUrl = getPublicLandingUrl()): 
   ctx.textAlign = 'center';
   ctx.fillStyle = '#F4CA73';
   ctx.font = '700 24px system-ui, -apple-system, Segoe UI, sans-serif';
-  ctx.fillText('★ COMPARTE Y AUMENTA TUS PROBABILIDADES', CARD_W / 2, 926);
+  ctx.fillText('★ COMPARTE Y AUMENTA TUS PROBABILIDADES', CARD_W / 2, bannerY + 42);
 
   ctx.fillStyle = '#FAF3E8';
   ctx.font = '500 21px system-ui, -apple-system, Segoe UI, sans-serif';
-  ctx.fillText('Más amigos participando = mejores oportunidades de premio', CARD_W / 2, 964);
+  ctx.fillText(
+    'Más amigos participando = mejores oportunidades de premio',
+    CARD_W / 2,
+    bannerY + 80
+  );
 
   // Page URL footer
   ctx.fillStyle = '#B89B7A';
-  ctx.font = '600 19px ui-monospace, SFMono-Regular, Menlo, monospace';
-  const cleanUrlText = targetUrl.length > 56 ? `${targetUrl.slice(0, 53)}...` : targetUrl;
-  ctx.fillText(cleanUrlText, CARD_W / 2, 1044);
+  ctx.font = effectiveCode
+    ? '600 18px ui-monospace, SFMono-Regular, Menlo, monospace'
+    : '600 19px ui-monospace, SFMono-Regular, Menlo, monospace';
+  const cleanUrlText =
+    effectiveTargetUrl.length > 58 ? `${effectiveTargetUrl.slice(0, 55)}...` : effectiveTargetUrl;
+  ctx.fillText(cleanUrlText, CARD_W / 2, effectiveCode ? 1006 : 1044);
+
+  if (effectiveCode) {
+    ctx.fillStyle = '#F4CA73';
+    ctx.font = '700 19px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.fillText(`Código de invitación: ${effectiveCode}`, CARD_W / 2, 1044);
+  }
 
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((b) => {
@@ -212,17 +286,18 @@ export async function generateShareQrAssets(targetUrl = getPublicLandingUrl()): 
     }, 'image/png');
   });
 
-  const file = new File([blob], 'QR-The-Ciprian-Company.png', { type: 'image/png' });
+  const fileName = effectiveCode ? `invitacion-qr-${effectiveCode}.png` : DEFAULT_QR_FILENAME;
+  const file = new File([blob], fileName, { type: 'image/png' });
   const previewDataUrl = canvas.toDataURL('image/png');
 
-  return { file, blob, previewDataUrl, targetUrl };
+  return { file, blob, previewDataUrl, targetUrl: effectiveTargetUrl };
 }
 
 export function triggerQrDownload(assets: ShareQrAssets): void {
   const objectUrl = URL.createObjectURL(assets.blob);
   const link = document.createElement('a');
   link.href = objectUrl;
-  link.download = 'QR-The-Ciprian-Company.png';
+  link.download = assets.file?.name || DEFAULT_QR_FILENAME;
   link.rel = 'noopener';
   document.body.appendChild(link);
   link.click();

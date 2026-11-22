@@ -5,13 +5,12 @@ import {
   Gift,
   LayoutDashboard,
   LogOut,
-  QrCode,
   Settings,
   Trophy,
 } from 'lucide-react';
 import type { Lead } from '../../types/app';
 
-export type DashboardTab = 'overview' | 'referrals' | 'gifts' | 'qr' | 'settings';
+export type DashboardTab = 'overview' | 'referrals' | 'gifts' | 'settings';
 
 interface DashboardHeaderProps {
   leads: Lead[];
@@ -27,7 +26,6 @@ const TABS: Array<{ id: DashboardTab; label: string; icon: React.ComponentType<{
   { id: 'overview', label: 'Inicio', icon: LayoutDashboard },
   { id: 'referrals', label: 'Referidos', icon: Trophy },
   { id: 'gifts', label: 'Regalos', icon: Gift },
-  { id: 'qr', label: 'QR', icon: QrCode },
   { id: 'settings', label: 'Ajustes', icon: Settings },
 ];
 
@@ -215,7 +213,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           {!isCaller && (
             <nav
               aria-label="Navegación del dashboard"
-              className="grid grid-cols-5 w-full lg:hidden rounded-2xl bg-[#F3E8D9] p-1 border border-[#E3D0B8]"
+              className="grid grid-cols-4 w-full lg:hidden rounded-2xl bg-[#F3E8D9] p-1 border border-[#E3D0B8]"
             >
               {TABS.map((tab) => {
                 const Icon = tab.icon;

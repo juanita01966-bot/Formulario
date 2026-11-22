@@ -20,6 +20,8 @@ import {
   User,
 } from 'lucide-react';
 import type { GiftItem, GiftThemeId, ShowcaseStyleId } from '../../types/app';
+import { normalizeReferralCode } from '../../services/storeClient';
+import { getStoredReferralCode } from '../../utils/referralTracking';
 import { resolveBoxPalette } from '../../shared/giftThemes';
 import {
   GiftIllustration,
@@ -44,6 +46,8 @@ interface GiftRevealStageProps {
   giftTheme?: GiftThemeId;
   customBoxColor?: string;
   showcaseStyle?: ShowcaseStyleId;
+  referralCode?: string | null;
+  referrerName?: string | null;
   onStartAnother: () => void;
 }
 
@@ -513,9 +517,15 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   giftTheme,
   customBoxColor,
   showcaseStyle = 'luminous-gold',
+  referralCode = null,
+  referrerName = null,
   onStartAnother,
 }) => {
   const prefersReduced = Boolean(useReducedMotion());
+  const effectiveReferralCode =
+    normalizeReferralCode(referralCode) || getStoredReferralCode() || null;
+  const cleanReferrerName = referrerName?.trim() || null;
+  const expectedLandingUrl = getPublicLandingUrl(effectiveReferralCode);
   const [phase, setPhase] = useState<RevealPhase>(() => (prefersReduced ? 'revealed' : 'floating'));
   const [climaxFlash, setClimaxFlash] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
@@ -531,7 +541,10 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
 
   useEffect(() => {
     let active = true;
-    generateShareQrAssets()
+    generateShareQrAssets(expectedLandingUrl, {
+      referralCode: effectiveReferralCode,
+      referrerName: cleanReferrerName,
+    })
       .then((assets) => {
         if (active) setQrAssets(assets);
       })
@@ -541,6 +554,11 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
 
     return () => {
       active = false;
+    };
+  }, [expectedLandingUrl, effectiveReferralCode, cleanReferrerName]);
+
+  useEffect(() => {
+    return () => {
       if (invoiceTimerRef.current !== null) {
         window.clearTimeout(invoiceTimerRef.current);
       }
@@ -793,7 +811,10 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   const cleanPhone = leadPhone?.trim() || '';
   const cleanAddress = leadAddress?.trim() || '';
   const usageTip = resolveGiftUsageTip(gift);
-  const publicLandingUrl = qrAssets?.targetUrl || getPublicLandingUrl();
+  const publicLandingUrl =
+    qrAssets && qrAssets.targetUrl === expectedLandingUrl
+      ? qrAssets.targetUrl
+      : expectedLandingUrl;
   const whatsappQrMessage = `¡Hola! Participa en la experiencia exclusiva de The Ciprian Company y descubre tu cajita sorpresa de cocina aquí: ${publicLandingUrl}`;
   const whatsappQrHref = `https://wa.me/?text=${encodeURIComponent(whatsappQrMessage)}`;
 
@@ -811,8 +832,16 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
     if (sharingQr) return;
     setSharingQr(true);
     try {
-      const assets = qrAssets ?? (await generateShareQrAssets(publicLandingUrl));
-      if (!qrAssets) setQrAssets(assets);
+      const assets =
+        qrAssets && qrAssets.targetUrl === expectedLandingUrl
+          ? qrAssets
+          : await generateShareQrAssets(expectedLandingUrl, {
+              referralCode: effectiveReferralCode,
+              referrerName: cleanReferrerName,
+            });
+      if (!qrAssets || qrAssets.targetUrl !== expectedLandingUrl) setQrAssets(assets);
+      const shareMessage = `¡Hola! Participa en la experiencia exclusiva de The Ciprian Company y descubre tu cajita sorpresa de cocina aquí: ${assets.targetUrl}`;
+      const shareWhatsappHref = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
 
       const nav = navigator as Navigator & {
         canShare?: (data?: ShareData) => boolean;
@@ -822,7 +851,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
           if (nav.canShare({ files: [assets.file] })) {
             await nav.share({
               title: 'The Ciprian Company · Código QR de Premio',
-              text: whatsappQrMessage,
+              text: shareMessage,
               files: [assets.file],
             });
             showQrFeedback('QR compartido · ¡Tus probabilidades han subido!');
@@ -837,7 +866,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
 
       // Desktop / fallback: save the QR card PNG and open WhatsApp with the direct link
       triggerQrDownload(assets);
-      window.open(whatsappQrHref, '_blank', 'noopener,noreferrer');
+      window.open(shareWhatsappHref, '_blank', 'noopener,noreferrer');
       showQrFeedback('QR descargado · Adjúntalo en tu chat de WhatsApp');
     } catch {
       window.open(whatsappQrHref, '_blank', 'noopener,noreferrer');
@@ -1121,6 +1150,21 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                       Al <strong className="text-[#FFFDF9]">compartir este QR por WhatsApp</strong> aumentas tus probabilidades de ganar{' '}
                       <strong className="text-[#F4CA73]">mejores premios</strong>.
                     </p>
+                    {effectiveReferralCode && (
+                      <p className="mt-1.5 inline-flex flex-wrap items-center gap-1 rounded-full border border-[#E5AE4E]/40 bg-[#E5AE4E]/12 px-2.5 py-0.5 text-[10.5px] font-medium text-[#F4CA73]">
+                        <span>
+                          QR vinculado{' '}
+                          {cleanReferrerName ? (
+                            <>
+                              a <strong className="text-[#FFFDF9]">{cleanReferrerName}</strong> ·{' '}
+                            </>
+                          ) : null}
+                          <span className="font-mono font-bold tracking-wider text-[#FDE68A]">
+                            {effectiveReferralCode}
+                          </span>
+                        </span>
+                      </p>
+                    )}
                   </div>
                 </div>
                 {qrSharedFeedback && (

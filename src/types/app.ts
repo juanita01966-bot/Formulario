@@ -14,6 +14,8 @@ export interface LeadQualification {
   healthyEatingInterest?: string;
   desiredProduct?: string;
   cedeGoldenTicket?: boolean;
+  usCreditEstablished?: 'yes' | 'building' | 'no' | null;
+  usCreditLabel?: string;
 }
 
 export type GiftVisualKey =

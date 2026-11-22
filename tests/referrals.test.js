@@ -19,6 +19,7 @@ process.env.TEST_STORE_PATH = TEST_STORE_FILE;
 const {
   default: app,
   DEFAULT_REFERRAL_PRIZE_RULE,
+  normalizeLeadRecord,
   normalizeReferralCode,
   sanitizeReferralPrizeRule,
   normalizeReferrerRecord,
@@ -960,6 +961,100 @@ describe('Referral QR / Ambassador Tracking & Prize System Suite', () => {
       assert.strictEqual(carlosPartner.uniqueVisitsCount, 1);
       assert.ok(finalState.leads.some((l) => l.id === leadM.id && l.referrerId === mariaPartner.id));
       assert.ok(finalState.leads.some((l) => l.id === leadC.id && l.referrerId === carlosPartner.id));
+    });
+  });
+
+  describe('6. Qualification US Credit Persistence & Caller RBAC Sanitization', () => {
+    test('PATCH /api/leads/:id persists qualification.usCreditEstablished & usCreditLabel for Admin while stripping qualification for Caller', async () => {
+      // Create a lead first
+      const createRes = await fetch(`${baseUrl}/api/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Prospecto Crédito EEUU',
+          phone: '555-610-9090',
+          address: 'Houston, TX',
+          acceptedTerms: true,
+        }),
+      });
+      assert.strictEqual(createRes.status, 201);
+      const { lead: createdLead } = await createRes.json();
+
+      const qualificationPayload = {
+        creditProfile: 'excelente',
+        housingStatus: 'propia',
+        investmentPriority: 'salud',
+        score: 92,
+        tier: 'alto',
+        knowsBrand: true,
+        isClient: false,
+        usCreditEstablished: 'yes',
+        usCreditLabel: 'Crédito establecido en EE. UU.',
+        cedeGoldenTicket: false,
+      };
+
+      // Public quiz completion updates qualification via PATCH /api/leads/:id
+      const patchRes = await fetch(`${baseUrl}/api/leads/${createdLead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qualification: qualificationPayload }),
+      });
+      assert.strictEqual(patchRes.status, 200);
+      const patchData = await patchRes.json();
+      assert.strictEqual(patchData.lead.qualification.usCreditEstablished, 'yes');
+      assert.strictEqual(
+        patchData.lead.qualification.usCreditLabel,
+        'Crédito establecido en EE. UU.'
+      );
+
+      // Admin GET /api/state receives the full qualification fields intact
+      const adminStateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.strictEqual(adminStateRes.status, 200);
+      const adminState = await adminStateRes.json();
+      const adminLead = adminState.leads.find((l) => l.id === createdLead.id);
+      assert.ok(adminLead, 'Admin state must include updated lead');
+      assert.strictEqual(adminLead.qualification.usCreditEstablished, 'yes');
+      assert.strictEqual(
+        adminLead.qualification.usCreditLabel,
+        'Crédito establecido en EE. UU.'
+      );
+      assert.strictEqual(adminLead.qualification.tier, 'alto');
+      assert.strictEqual(adminLead.qualification.score, 92);
+
+      // Caller GET /api/state strictly strips qualification (RBAC)
+      const callerStateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${callerToken}` },
+      });
+      assert.strictEqual(callerStateRes.status, 200);
+      const callerState = await callerStateRes.json();
+      const callerLead = callerState.leads.find((l) => l.id === createdLead.id);
+      assert.ok(callerLead, 'Caller state must include lead basic contact');
+      assert.strictEqual(callerLead.qualification, undefined);
+      assert.deepStrictEqual(Object.keys(callerLead).sort(), ['address', 'id', 'name', 'phone']);
+
+      // Verify normalizeLeadRecord and mapLeadRow (Supabase JSONB) preserve both fields untouched
+      const normalized = normalizeLeadRecord(adminLead);
+      assert.strictEqual(normalized.qualification.usCreditEstablished, 'yes');
+      assert.strictEqual(
+        normalized.qualification.usCreditLabel,
+        'Crédito establecido en EE. UU.'
+      );
+
+      const mappedFromDb = mapLeadRow({
+        id: createdLead.id,
+        name: createdLead.name,
+        phone: createdLead.phone,
+        claim_code: createdLead.claimCode,
+        qualification: qualificationPayload,
+        created_at: createdLead.createdAt,
+      });
+      assert.strictEqual(mappedFromDb.qualification.usCreditEstablished, 'yes');
+      assert.strictEqual(
+        mappedFromDb.qualification.usCreditLabel,
+        'Crédito establecido en EE. UU.'
+      );
     });
   });
 });

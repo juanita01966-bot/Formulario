@@ -7,7 +7,10 @@ import {
   Loader2,
   RotateCcw,
   Share2,
+  Sparkles,
 } from 'lucide-react';
+import { normalizeReferralCode } from '../../services/storeClient';
+import { getStoredReferralCode } from '../../utils/referralTracking';
 import {
   generateShareQrAssets,
   getPublicLandingUrl,
@@ -17,6 +20,8 @@ import {
 
 interface GoldenTicketBookletProps {
   leadName: string;
+  referralCode?: string | null;
+  referrerName?: string | null;
   onStartAnother: () => void;
 }
 
@@ -25,10 +30,16 @@ const INSTRUCTIVO_PAGE2_SRC = '/referencias/instructivo-p2.jpg';
 
 export const GoldenTicketBooklet: React.FC<GoldenTicketBookletProps> = ({
   leadName,
+  referralCode = null,
+  referrerName = null,
   onStartAnother,
 }) => {
   const prefersReduced = Boolean(useReducedMotion());
   const firstName = leadName.trim().split(/\s+/)[0] || 'Invitado';
+  const effectiveReferralCode =
+    normalizeReferralCode(referralCode) || getStoredReferralCode() || null;
+  const cleanReferrerName = referrerName?.trim() || null;
+  const expectedTargetUrl = getPublicLandingUrl(effectiveReferralCode);
 
   const [activePage, setActivePage] = useState<0 | 1>(0);
   const [flipCount, setFlipCount] = useState(0);
@@ -44,7 +55,10 @@ export const GoldenTicketBooklet: React.FC<GoldenTicketBookletProps> = ({
 
   useEffect(() => {
     let mounted = true;
-    generateShareQrAssets(getPublicLandingUrl())
+    generateShareQrAssets(expectedTargetUrl, {
+      referralCode: effectiveReferralCode,
+      referrerName: cleanReferrerName,
+    })
       .then((assets) => {
         if (mounted) setQrAssets(assets);
       })
@@ -54,6 +68,11 @@ export const GoldenTicketBooklet: React.FC<GoldenTicketBookletProps> = ({
 
     return () => {
       mounted = false;
+    };
+  }, [expectedTargetUrl, effectiveReferralCode, cleanReferrerName]);
+
+  useEffect(() => {
+    return () => {
       if (feedbackTimerRef.current !== null) {
         window.clearTimeout(feedbackTimerRef.current);
       }
@@ -126,8 +145,14 @@ export const GoldenTicketBooklet: React.FC<GoldenTicketBookletProps> = ({
     setSharingQr(true);
     setShareFeedback(null);
     try {
-      const assets = qrAssets ?? (await generateShareQrAssets(getPublicLandingUrl()));
-      if (!qrAssets) setQrAssets(assets);
+      const assets =
+        qrAssets && qrAssets.targetUrl === expectedTargetUrl
+          ? qrAssets
+          : await generateShareQrAssets(expectedTargetUrl, {
+              referralCode: effectiveReferralCode,
+              referrerName: cleanReferrerName,
+            });
+      if (!qrAssets || qrAssets.targetUrl !== expectedTargetUrl) setQrAssets(assets);
 
       const inviteMessage =
         '¡Participa en la experiencia Royal Prestige con The Ciprian Company! Escanea este código QR o entra al enlace oficial para descubrir tu regalo directo y participar por premios de alto nivel:';
@@ -177,8 +202,14 @@ export const GoldenTicketBooklet: React.FC<GoldenTicketBookletProps> = ({
     if (sharingQr) return;
     setSharingQr(true);
     try {
-      const assets = qrAssets ?? (await generateShareQrAssets(getPublicLandingUrl()));
-      if (!qrAssets) setQrAssets(assets);
+      const assets =
+        qrAssets && qrAssets.targetUrl === expectedTargetUrl
+          ? qrAssets
+          : await generateShareQrAssets(expectedTargetUrl, {
+              referralCode: effectiveReferralCode,
+              referrerName: cleanReferrerName,
+            });
+      if (!qrAssets || qrAssets.targetUrl !== expectedTargetUrl) setQrAssets(assets);
       triggerQrDownload(assets);
       showTemporaryFeedback('Imagen QR guardada en tu dispositivo');
     } catch {
@@ -414,6 +445,23 @@ export const GoldenTicketBooklet: React.FC<GoldenTicketBookletProps> = ({
                 Entre con más personas compartas este código QR, mayores serán tus probabilidades de
                 ganar uno de los grandes premios.
               </p>
+              {effectiveReferralCode && (
+                <div className="mt-2.5 inline-flex flex-wrap items-center justify-center min-[380px]:justify-start gap-1.5 rounded-full border border-[#E5AE4E]/45 bg-[#E5AE4E]/12 px-3 py-1 text-[11px] font-medium text-[#F4CA73]">
+                  <Sparkles className="h-3 w-3 shrink-0 text-[#FDE68A]" aria-hidden="true" />
+                  <span>
+                    QR vinculado a la invitación{' '}
+                    {cleanReferrerName ? (
+                      <>
+                        de <strong className="font-semibold text-[#FFFDF9]">{cleanReferrerName}</strong>{' '}
+                        ·{' '}
+                      </>
+                    ) : null}
+                    <span className="font-mono font-bold tracking-wider text-[#FDE68A]">
+                      {effectiveReferralCode}
+                    </span>
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

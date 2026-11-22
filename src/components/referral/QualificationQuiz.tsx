@@ -19,7 +19,10 @@ type QuizStage =
   | 'yes_future_product'
   | 'no_healthy_eating'
   | 'no_golden_ticket'
-  | 'no_future_product';
+  | 'no_future_product'
+  | 'us_credit';
+
+type UsCreditValue = 'yes' | 'building' | 'no';
 
 interface OptionItem {
   id: string;
@@ -27,6 +30,50 @@ interface OptionItem {
   sublabel?: string;
   points: number;
 }
+
+interface UsCreditOption extends OptionItem {
+  value: UsCreditValue;
+  shortLabel: string;
+  tier: CreditTier;
+  minScore: number;
+  maxScore: number;
+}
+
+const US_CREDIT_OPTIONS: UsCreditOption[] = [
+  {
+    id: 'us-credit-yes',
+    value: 'yes',
+    shortLabel: 'Crédito establecido en EE. UU.',
+    label: 'Sí, ya tengo crédito establecido en EE. UU.',
+    sublabel: 'Cuento con tarjetas de crédito, financiamiento o historial crediticio activo.',
+    points: 90,
+    tier: 'alto',
+    minScore: 82,
+    maxScore: 100,
+  },
+  {
+    id: 'us-credit-building',
+    value: 'building',
+    shortLabel: 'Construyendo crédito en EE. UU.',
+    label: 'Estoy empezando a construir mi crédito en EE. UU.',
+    sublabel: 'Tengo historial reciente o estoy fortaleciendo mi perfil crediticio.',
+    points: 60,
+    tier: 'medio',
+    minScore: 52,
+    maxScore: 72,
+  },
+  {
+    id: 'us-credit-no',
+    value: 'no',
+    shortLabel: 'Sin crédito establecido en EE. UU.',
+    label: 'Aún no he establecido crédito en EE. UU.',
+    sublabel: 'Todavía no cuento con historial crediticio en Estados Unidos.',
+    points: 30,
+    tier: 'basico',
+    minScore: 20,
+    maxScore: 42,
+  },
+];
 
 const KNOWS_OPTIONS: Array<OptionItem & { value: boolean }> = [
   {
@@ -162,16 +209,19 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
   const [isClient, setIsClient] = useState<boolean | null>(null);
   const [rating, setRating] = useState<number | null>(null);
   const [healthyInterest, setHealthyInterest] = useState<OptionItem | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<OptionItem | null>(null);
 
   const firstName = leadName.trim().split(/\s+/)[0] || 'Invitado';
 
   const progressRatio = (() => {
-    if (stage === 'knows_brand') return 0.2;
-    if (stage === 'yes_is_client') return 0.45;
-    if (stage === 'yes_rating') return 0.7;
-    if (stage === 'no_golden_ticket') return 0.55;
-    if (stage === 'no_healthy_eating') return knowsBrand ? 0.68 : 0.55;
-    return 0.92;
+    if (stage === 'knows_brand') return 0.16;
+    if (stage === 'yes_is_client') return 0.34;
+    if (stage === 'yes_rating') return 0.54;
+    if (stage === 'no_golden_ticket') return 0.38;
+    if (stage === 'no_healthy_eating') return knowsBrand ? 0.54 : 0.38;
+    if (stage === 'yes_future_product' || stage === 'no_future_product') return 0.76;
+    if (stage === 'us_credit') return 0.95;
+    return 0.95;
   })();
 
   const advanceWithDelay = (choiceId: string, callback: () => void) => {
@@ -189,6 +239,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
       setIsClient(opt.value ? null : false);
       setRating(null);
       setHealthyInterest(null);
+      setSelectedProduct(null);
       setStage(opt.value ? 'yes_is_client' : 'no_golden_ticket');
     });
   };
@@ -198,6 +249,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
       setIsClient(opt.value);
       setRating(null);
       setHealthyInterest(null);
+      setSelectedProduct(null);
       // Only actual Royal Prestige clients rate current products; non-clients branch to the healthy-eating filter
       setStage(opt.value ? 'yes_rating' : 'no_healthy_eating');
     });
@@ -206,39 +258,22 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
   const handleSelectRating = (scoreVal: number) => {
     advanceWithDelay(`rate-${scoreVal}`, () => {
       setRating(scoreVal);
+      setSelectedProduct(null);
       setStage('yes_future_product');
     });
   };
 
-  const handleFinishYesBranch = (productOpt: OptionItem) => {
+  const handleSelectYesFutureProduct = (productOpt: OptionItem) => {
     advanceWithDelay(productOpt.id, () => {
-      const baseKnownPoints = 20;
-      const clientPoints = isClient ? 35 : 25;
-      const rated = rating ?? 8;
-      const ratingPoints = rated >= 8 ? 35 : rated >= 5 ? 20 : 10;
-      const rawTotal = baseKnownPoints + clientPoints + ratingPoints + productOpt.points;
-      const score = Math.min(100, Math.round((rawTotal / 120) * 100));
-      const tier: CreditTier = score >= 75 ? 'alto' : score >= 45 ? 'medio' : 'basico';
-
-      onComplete({
-        creditProfile: isClient
-          ? 'Conoce Royal Prestige · Es cliente'
-          : 'Conoce Royal Prestige · No es cliente',
-        housingStatus: `Calificación productos: ${rated}/10`,
-        investmentPriority: productOpt.label,
-        score,
-        tier,
-        knowsBrand: true,
-        isClient: Boolean(isClient),
-        productRating: rated,
-        desiredProduct: productOpt.label,
-      });
+      setSelectedProduct(productOpt);
+      setStage('us_credit');
     });
   };
 
   const handleSelectHealthyEating = (opt: OptionItem) => {
     advanceWithDelay(opt.id, () => {
       setHealthyInterest(opt);
+      setSelectedProduct(null);
       setStage('no_future_product');
     });
   };
@@ -246,6 +281,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
   const handleSelectGoldenTicket = (opt: OptionItem & { action: 'use' | 'cede' }) => {
     advanceWithDelay(opt.id, () => {
       if (opt.action === 'use') {
+        setSelectedProduct(null);
         setStage('no_future_product');
         return;
       }
@@ -267,13 +303,61 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
     });
   };
 
-  const handleFinishNoBranch = (productOpt: OptionItem) => {
+  const handleSelectNoFutureProduct = (productOpt: OptionItem) => {
     advanceWithDelay(productOpt.id, () => {
+      setSelectedProduct(productOpt);
+      setStage('us_credit');
+    });
+  };
+
+  const handleSelectUsCredit = (opt: UsCreditOption) => {
+    advanceWithDelay(opt.id, () => {
       const knows = Boolean(knowsBrand);
-      const basePoints = knows ? 25 : 15;
-      const secondaryPts = knows ? (healthyInterest?.points ?? 25) : 35;
-      const score = Math.min(100, basePoints + secondaryPts + productOpt.points);
-      const tier: CreditTier = score >= 75 ? 'alto' : score >= 45 ? 'medio' : 'basico';
+      const client = Boolean(knows && isClient);
+      const productLabel = selectedProduct?.label || 'Productos Royal Prestige';
+      const productPoints = selectedProduct?.points ?? 25;
+
+      let engagementRatio = 0.5;
+      if (client) {
+        const rated = rating ?? 8;
+        const ratingPoints = rated >= 8 ? 35 : rated >= 5 ? 20 : 10;
+        const rawEngagement = 20 + 35 + ratingPoints + productPoints;
+        engagementRatio = Math.min(1, Math.max(0, (rawEngagement - 80) / 40));
+      } else {
+        const basePoints = knows ? 25 : 15;
+        const secondaryPts = knows ? (healthyInterest?.points ?? 25) : 35;
+        const rawEngagement = basePoints + secondaryPts + productPoints;
+        engagementRatio = Math.min(1, Math.max(0, (rawEngagement - 65) / 40));
+      }
+
+      const score = Math.min(
+        opt.maxScore,
+        Math.max(
+          opt.minScore,
+          Math.round(opt.minScore + engagementRatio * (opt.maxScore - opt.minScore))
+        )
+      );
+      const tier: CreditTier = opt.tier;
+
+      if (client) {
+        const rated = rating ?? 8;
+        const payload: ExtendedLeadQualification = {
+          creditProfile: 'Conoce Royal Prestige · Es cliente',
+          housingStatus: `Calificación productos: ${rated}/10`,
+          investmentPriority: productLabel,
+          score,
+          tier,
+          knowsBrand: true,
+          isClient: true,
+          productRating: rated,
+          desiredProduct: productLabel,
+          usCreditEstablished: opt.value,
+          usCreditLabel: opt.shortLabel,
+          cedeGoldenTicket: false,
+        };
+        onComplete(payload);
+        return;
+      }
 
       const payload: ExtendedLeadQualification = {
         creditProfile: knows
@@ -282,14 +366,16 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
         housingStatus: knows
           ? healthyInterest?.label || 'Interés en alimentación saludable'
           : 'Interés en catálogo con Boleto Dorado',
-        investmentPriority: productOpt.label,
+        investmentPriority: productLabel,
         score,
         tier,
         knowsBrand: knows,
         isClient: false,
         productRating: null,
         ...(knows && healthyInterest?.label ? { healthyEatingInterest: healthyInterest.label } : {}),
-        desiredProduct: productOpt.label,
+        desiredProduct: productLabel,
+        usCreditEstablished: opt.value,
+        usCreditLabel: opt.shortLabel,
         cedeGoldenTicket: false,
       };
       onComplete(payload);
@@ -308,6 +394,8 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
       setStage('yes_rating');
     } else if (stage === 'no_future_product') {
       setStage(knowsBrand ? 'no_healthy_eating' : 'no_golden_ticket');
+    } else if (stage === 'us_credit') {
+      setStage(knowsBrand && isClient ? 'yes_future_product' : 'no_future_product');
     }
   };
 
@@ -496,14 +584,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
               <div className="mt-4 sm:mt-5 space-y-2.5">
                 {FUTURE_PRODUCTS_YES.map((opt) => {
-                  const selected = pickedId === opt.id;
+                  const selected = pickedId === opt.id || selectedProduct?.id === opt.id;
                   return (
                     <motion.button
                       key={opt.id}
                       type="button"
                       whileHover={{ y: -1.5 }}
                       whileTap={{ scale: 0.985 }}
-                      onClick={() => handleFinishYesBranch(opt)}
+                      onClick={() => handleSelectYesFutureProduct(opt)}
                       className={`min-h-[48px] w-full rounded-2xl border px-3.5 sm:px-4 py-3 sm:py-3.5 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
                           ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
@@ -640,14 +728,14 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
               <div className="mt-4 sm:mt-5 space-y-2.5">
                 {FUTURE_PRODUCTS_NO.map((opt) => {
-                  const selected = pickedId === opt.id;
+                  const selected = pickedId === opt.id || selectedProduct?.id === opt.id;
                   return (
                     <motion.button
                       key={opt.id}
                       type="button"
                       whileHover={{ y: -1.5 }}
                       whileTap={{ scale: 0.985 }}
-                      onClick={() => handleFinishNoBranch(opt)}
+                      onClick={() => handleSelectNoFutureProduct(opt)}
                       className={`min-h-[48px] w-full rounded-2xl border px-3.5 sm:px-4 py-3 sm:py-3.5 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
                           ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
@@ -661,6 +749,59 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
                         }`}
                       >
                         {selected && <Check className="h-3 w-3" />}
+                      </span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+
+          {stage === 'us_credit' && (
+            <motion.div
+              key="stage-us-credit"
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -24 }}
+              transition={{ duration: 0.28 }}
+              className="relative z-10"
+            >
+              <span className="inline-flex items-center rounded-full border border-[#E5C17B] bg-[#FFF4DC] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#8C4A19] mb-2">
+                Último paso · Para reclamar tu obsequio
+              </span>
+              <h2 className="font-serif text-[21px] sm:text-[26px] font-semibold text-[#22150E] leading-snug">
+                ¿Has establecido historial de crédito en Estados Unidos?
+              </h2>
+              <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
+                Esta información es confidencial y nos ayuda a personalizar los beneficios disponibles para ti.
+              </p>
+
+              <div className="mt-4 sm:mt-5 space-y-2.5 sm:space-y-3">
+                {US_CREDIT_OPTIONS.map((opt) => {
+                  const selected = pickedId === opt.id;
+                  return (
+                    <motion.button
+                      key={opt.id}
+                      type="button"
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.985 }}
+                      onClick={() => handleSelectUsCredit(opt)}
+                      className={`min-h-[56px] w-full rounded-2xl border p-3.5 sm:p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        selected
+                          ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
+                          : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
+                      }`}
+                    >
+                      <div>
+                        <p className="text-sm sm:text-[15px] font-semibold text-[#22150E]">{opt.label}</p>
+                        {opt.sublabel && <p className="mt-1 text-xs text-[#6E5341]">{opt.sublabel}</p>}
+                      </div>
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                          selected ? 'border-[#8C3318] bg-[#8C3318] text-white' : 'border-[#C6A787] bg-white'
+                        }`}
+                      >
+                        {selected && <Check className="h-3.5 w-3.5" />}
                       </span>
                     </motion.button>
                   );

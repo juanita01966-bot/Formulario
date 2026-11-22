@@ -16,11 +16,9 @@ import {
   batchCreateReferralPartners,
   createGift,
   createLead,
-  createQrCode,
   createReferralPartner,
   deleteGift,
   deleteLead,
-  deleteQrCode,
   deleteReferralPartner,
   DsbAuthError,
   fetchAppState,
@@ -36,7 +34,6 @@ import {
   verifyDsbSession,
   verifyPinStep2,
   type BatchCreateReferralsPayload,
-  type CreateQrPayload,
   type CreateReferralPayload,
   type UpdateReferralPayload,
   type UpsertGiftPayload,
@@ -47,7 +44,6 @@ import { KpiGrid, type KpiFilterKey } from '../components/dashboard/KpiGrid';
 import { ProspectsManager, type LeadUpdatePayload } from '../components/dashboard/ProspectsManager';
 import { CallerProspectsView } from '../components/dashboard/CallerProspectsView';
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
-import { QrStudioPanel } from '../components/dashboard/QrStudioPanel';
 import { QrMetricsAccordion } from '../components/dashboard/QrMetricsAccordion';
 import { ReferralsLeaderboardPanel } from '../components/dashboard/ReferralsLeaderboardPanel';
 import { SettingsPanel } from '../components/dashboard/SettingsPanel';
@@ -313,16 +309,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       giftTheme,
       customBoxColor: customBoxColor || appState.settings.customBoxColor || '#B84A27',
     });
-    onStateChange(next);
-  };
-
-  const handleCreateQr = async (payload: CreateQrPayload) => {
-    const res = await createQrCode(payload);
-    onStateChange(res.state);
-  };
-
-  const handleDeleteQr = async (id: string) => {
-    const next = await deleteQrCode(id);
     onStateChange(next);
   };
 
@@ -783,7 +769,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     settings={appState.settings}
                     defaultOriginUrl={window.location.origin + '/'}
                     onGoToReferrals={() => setActiveTab('referrals')}
-                    onGoToQrStudio={() => setActiveTab('qr')}
+                    onGoToQrStudio={() => setActiveTab('referrals')}
                   />
 
                   <ProspectsManager
@@ -831,16 +817,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   onDeleteGift={handleDeleteGift}
                   onResetGifts={handleResetGifts}
                   onBusyChange={setGiftsBusy}
-                />
-              )}
-
-              {activeTab === 'qr' && (
-                <QrStudioPanel
-                  qrHistory={appState.qrHistory || []}
-                  referrers={appState.referrers ?? []}
-                  defaultUrl={window.location.origin + '/'}
-                  onCreateQr={handleCreateQr}
-                  onDeleteQr={handleDeleteQr}
                 />
               )}
 

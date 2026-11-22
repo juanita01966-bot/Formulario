@@ -226,6 +226,11 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
     void syncReferralAttribution();
   };
 
+  const effectiveShareReferralCode =
+    activeReferralPartner?.code || capturedReferralCode || currentLead?.referralCode || null;
+  const effectiveShareReferrerName =
+    activeReferralPartner?.name || currentLead?.referrerName || null;
+
   return (
     <div className="relative min-h-[100dvh] w-full overflow-x-clip flex flex-col items-center justify-center px-3 py-5 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10 sm:pb-12">
       <AutumnAtmosphere variant="public" />
@@ -280,6 +285,8 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
               giftTheme={appState.settings.giftTheme}
               customBoxColor={appState.settings.customBoxColor}
               showcaseStyle={appState.settings.showcaseStyle}
+              referralCode={effectiveShareReferralCode}
+              referrerName={effectiveShareReferrerName}
               onStartAnother={handleResetFlow}
             />
           )}
@@ -288,6 +295,8 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
             <GoldenTicketBooklet
               key={`step-booklet-${playRound}`}
               leadName={currentLead.name}
+              referralCode={effectiveShareReferralCode}
+              referrerName={effectiveShareReferrerName}
               onStartAnother={handleResetFlow}
             />
           )}

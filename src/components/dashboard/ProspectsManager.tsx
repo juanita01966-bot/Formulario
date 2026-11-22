@@ -62,13 +62,6 @@ interface ProspectsManagerProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
-const CATEGORY_RANK: Record<LeadCategory, number> = {
-  none: 0,
-  cita: 1,
-  demo: 2,
-  orden: 3,
-};
-
 const CATEGORY_LABELS: Record<LeadCategory, string> = {
   none: 'Sin clasificar',
   cita: 'Cita',
@@ -92,6 +85,44 @@ function isClientLead(lead: Lead): boolean | null {
   const profile = (lead.qualification.creditProfile || '').toLowerCase();
   if (profile.includes('no es cliente') || profile.includes('no conoc')) return false;
   if (profile.includes('es cliente')) return true;
+  return null;
+}
+
+function getUsCreditDisplay(lead: Lead): {
+  badgeLabel: string;
+  csvLabel: string;
+  className: string;
+} | null {
+  const status = lead.qualification?.usCreditEstablished;
+  const rawLabel = lead.qualification?.usCreditLabel?.trim() || '';
+  if (status === 'yes') {
+    return {
+      badgeLabel: 'Crédito EE. UU.: Establecido',
+      csvLabel: rawLabel || 'Crédito establecido en EE. UU.',
+      className: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+    };
+  }
+  if (status === 'building') {
+    return {
+      badgeLabel: 'Crédito EE. UU.: En construcción',
+      csvLabel: rawLabel || 'Construyendo crédito en EE. UU.',
+      className: 'bg-amber-50 border-amber-200 text-amber-900',
+    };
+  }
+  if (status === 'no') {
+    return {
+      badgeLabel: 'Crédito EE. UU.: Sin establecer',
+      csvLabel: rawLabel || 'Sin crédito establecido en EE. UU.',
+      className: 'bg-stone-100 border-stone-300 text-stone-700',
+    };
+  }
+  if (rawLabel) {
+    return {
+      badgeLabel: rawLabel,
+      csvLabel: rawLabel,
+      className: 'bg-[#FAF3E8] border-[#EAD9C2] text-[#4E382B]',
+    };
+  }
   return null;
 }
 
@@ -173,13 +204,15 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   const [manualAddress, setManualAddress] = useState('');
   const [manualGiftId, setManualGiftId] = useState(gifts[0]?.id || '');
 
-  // Security Confirmation Modal (assigning / progressing category -> invalidates promo code)
+  // Security Confirmation Modal (assigning / progressing category -> invalidates promo code & locks card)
   const [confirmCategoryModal, setConfirmCategoryModal] = useState<{
     lead: Lead;
     targetCategory: Exclude<LeadCategory, 'none'>;
   } | null>(null);
+  const [confirmOrderAmount, setConfirmOrderAmount] = useState('');
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [savingOrderAmountId, setSavingOrderAmountId] = useState<string | null>(null);
 
   // Admin Password Modal (reverting category / reactivating promo code / downgrading)
   const [adminRevertModal, setAdminRevertModal] = useState<{
@@ -198,6 +231,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       Boolean(confirmCategoryModal) ||
       Boolean(adminRevertModal) ||
       Boolean(togglingLeadId) ||
+      Boolean(savingOrderAmountId) ||
       expandedNotesId !== null;
     onBusyChange?.(busy);
     return () => onBusyChange?.(false);
@@ -206,6 +240,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     confirmCategoryModal,
     adminRevertModal,
     togglingLeadId,
+    savingOrderAmountId,
     expandedNotesId,
     onBusyChange,
   ]);
@@ -326,6 +361,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       const claimLower = (lead.claimCode || '').toLowerCase();
       const claimDigits = claimLower.replace(/^otn-/, '');
       const refInfo = resolveLeadReferral(lead);
+      const usCreditInfo = getUsCreditDisplay(lead);
       return (
         lead.name.toLowerCase().includes(q) ||
         lead.phone.toLowerCase().includes(q) ||
@@ -334,7 +370,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
         claimDigits.includes(rawCodeQuery) ||
         (lead.giftName || '').toLowerCase().includes(q) ||
         (refInfo?.code || '').toLowerCase().includes(q) ||
-        (refInfo?.name || '').toLowerCase().includes(q)
+        (refInfo?.name || '').toLowerCase().includes(q) ||
+        (lead.qualification?.usCreditLabel || '').toLowerCase().includes(q) ||
+        (usCreditInfo?.badgeLabel || '').toLowerCase().includes(q)
       );
     });
   }, [leads, activeFilter, originFilter, search, referrerById, referrerByCode]);
@@ -344,15 +382,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     setActionError(null);
 
     const promoLocked = lead.category !== 'none' || isPromoCodeInvalidated(lead);
-    if (lead.called && promoLocked) {
-      setAdminPassword('');
-      setShowAdminPassword(false);
-      setAdminError(null);
-      setAdminRevertModal({
-        lead,
-        targetCategory: 'none',
-        mode: 'unmark_called',
-      });
+    if (promoLocked) {
       return;
     }
 
@@ -368,6 +398,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   };
 
   const handleCategoryClick = (lead: Lead, cat: Exclude<LeadCategory, 'none'>) => {
+    const promoLocked = lead.category !== 'none' || isPromoCodeInvalidated(lead);
+    if (promoLocked) {
+      return;
+    }
+
     if (!lead.called) {
       setLockedHintId(lead.id);
       window.setTimeout(() => setLockedHintId((cur) => (cur === lead.id ? null : cur)), 2200);
@@ -375,25 +410,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     }
 
     setActionError(null);
-    const nextCategory: LeadCategory = lead.category === cat ? 'none' : cat;
-    const currentRank = CATEGORY_RANK[lead.category];
-    const nextRank = CATEGORY_RANK[nextCategory];
-    const promoLocked = lead.category !== 'none' || isPromoCodeInvalidated(lead);
-
-    if (nextCategory !== 'none' && (!promoLocked || nextRank > currentRank)) {
-      setConfirmError(null);
-      setConfirmCategoryModal({ lead, targetCategory: nextCategory });
-      return;
+    setConfirmError(null);
+    if (cat === 'orden') {
+      setConfirmOrderAmount(String(lead.orderAmount ?? defaultTicketAmount));
     }
-
-    setAdminPassword('');
-    setShowAdminPassword(false);
-    setAdminError(null);
-    setAdminRevertModal({
-      lead,
-      targetCategory: nextCategory,
-      mode: nextCategory === 'none' ? 'revert' : 'downgrade',
-    });
+    setConfirmCategoryModal({ lead, targetCategory: cat });
   };
 
   const handleOpenReactivateModal = (lead: Lead) => {
@@ -411,14 +432,32 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   const handleConfirmCategoryAssign = async () => {
     if (!confirmCategoryModal || confirmLoading) return;
     const { lead, targetCategory } = confirmCategoryModal;
+    let resolvedOrderAmount: number | null = null;
+    if (targetCategory === 'orden') {
+      const trimmedAmount = confirmOrderAmount.trim();
+      const parsed = trimmedAmount === '' ? defaultTicketAmount : Number(trimmedAmount);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setConfirmError('Ingresa un monto de orden válido (mayor o igual a 0).');
+        return;
+      }
+      resolvedOrderAmount = parsed;
+    }
     setConfirmError(null);
     setConfirmLoading(true);
     try {
       await onUpdateLead(lead.id, {
         category: targetCategory,
-        orderAmount: targetCategory === 'orden' ? lead.orderAmount ?? defaultTicketAmount : null,
+        orderAmount: resolvedOrderAmount,
         promoCodeInvalidated: true,
       });
+      setAmountDraft((prev) => {
+        if (!(lead.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[lead.id];
+        return next;
+      });
+      setExpandedNotesId((cur) => (cur === lead.id ? null : cur));
+      setConfirmDeleteId((cur) => (cur === lead.id ? null : cur));
       setConfirmCategoryModal(null);
     } catch (err) {
       setConfirmError(
@@ -475,18 +514,34 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   };
 
   const handleSaveOrderAmount = async (lead: Lead) => {
-    const raw = amountDraft[lead.id];
+    if (savingOrderAmountId) return;
+    if (lead.orderAmount !== null && lead.orderAmount !== undefined) return;
+    const raw = amountDraft[lead.id] ?? String(defaultTicketAmount);
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed < 0) return;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setActionError('Ingresa un monto de orden válido (mayor o igual a 0).');
+      return;
+    }
     setActionError(null);
+    setSavingOrderAmountId(lead.id);
     try {
       await onUpdateLead(lead.id, { orderAmount: parsed });
+      setAmountDraft((prev) => {
+        if (!(lead.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[lead.id];
+        return next;
+      });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'No se pudo guardar el monto de la orden.');
+    } finally {
+      setSavingOrderAmountId(null);
     }
   };
 
   const handleSaveNotes = async (lead: Lead) => {
+    const isLocked = lead.category !== 'none' || isPromoCodeInvalidated(lead);
+    if (isLocked) return;
     const nextNotes = notesDraft[lead.id] ?? lead.notes;
     setActionError(null);
     try {
@@ -506,6 +561,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       'Codigo',
       'Calificacion',
       'Puntaje',
+      'CreditoEEUU',
       'EstadoMarca',
       'ValoracionSalud',
       'ProductoInteres',
@@ -519,6 +575,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     ];
     const rows = filteredLeads.map((l) => {
       const refInfo = resolveLeadReferral(l);
+      const usCreditInfo = getUsCreditDisplay(l);
       return [
         `"${l.name.replace(/"/g, '""')}"`,
         `"${l.phone}"`,
@@ -527,6 +584,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
         `"${l.claimCode}"`,
         `"${l.qualification?.tier || ''}"`,
         l.qualification?.score ?? '',
+        `"${(usCreditInfo?.csvLabel || '').replace(/"/g, '""')}"`,
         `"${(l.qualification?.creditProfile || '').replace(/"/g, '""')}"`,
         `"${(l.qualification?.housingStatus || '').replace(/"/g, '""')}"`,
         `"${(l.qualification?.investmentPriority || '').replace(/"/g, '""')}"`,
@@ -694,7 +752,13 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
             const showLockHint = lockedHintId === lead.id;
             const notesOpen = expandedNotesId === lead.id;
             const promoInvalidated = isPromoCodeInvalidated(lead);
+            const isCardLocked = lead.category !== 'none' || promoInvalidated;
+            const isOrderAmountLocked =
+              lead.category === 'orden' &&
+              lead.orderAmount !== null &&
+              lead.orderAmount !== undefined;
             const isTogglingThis = togglingLeadId === lead.id;
+            const isSavingAmountThis = savingOrderAmountId === lead.id;
             const cleanTel = lead.phone.replace(/[^\d+]/g, '');
             const whatsappUrl = `https://wa.me/${cleanTel.replace(/^\+/, '')}?text=${encodeURIComponent(
               `Hola ${lead.name}, te saludo de Royal Prestige / Show de Cocina respecto a tu obsequio "${lead.giftName || 'regalo de otoño'}" (Número de orden ${lead.claimCode}).`
@@ -704,15 +768,23 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
               <div
                 key={lead.id}
                 className={`rounded-2xl border p-3.5 sm:p-4 transition-colors ${
-                  lead.called
-                    ? 'border-[#DFCBB3] bg-white'
-                    : 'border-amber-300/90 bg-gradient-to-r from-[#FFFDF7] to-[#FEF7E8]'
+                  isCardLocked
+                    ? 'border-stone-300/90 bg-stone-50/90'
+                    : lead.called
+                      ? 'border-[#DFCBB3] bg-white'
+                      : 'border-amber-300/90 bg-gradient-to-r from-[#FFFDF7] to-[#FEF7E8]'
                 }`}
               >
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
                   {/* Left: Person & Revealed Gift */}
                   <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
-                    <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl bg-[#FAF3E8] border border-[#E6D5BF]">
+                    <div
+                      className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border ${
+                        isCardLocked
+                          ? 'bg-stone-100 border-stone-200 opacity-75'
+                          : 'bg-[#FAF3E8] border-[#E6D5BF]'
+                      }`}
+                    >
                       <GiftIllustration
                         visualKey={matchedGift?.visualKey || lead.giftVisualKey || 'cutlery'}
                         customImageUrl={matchedGift?.customImageUrl}
@@ -758,6 +830,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                             </>
                           )}
                         </span>
+                        {isCardLocked && lead.category !== 'none' && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-stone-300 bg-stone-200/80 px-2.5 py-0.5 text-[10px] font-bold text-stone-700">
+                            <Lock className="h-2.5 w-2.5 shrink-0" />
+                            Bloqueada · {CATEGORY_LABELS[lead.category]}
+                          </span>
+                        )}
                         {!lead.called && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
                             Nuevo
@@ -813,6 +891,17 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
 
                       {lead.qualification && (
                         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          {(() => {
+                            const usCredit = getUsCreditDisplay(lead);
+                            return usCredit ? (
+                              <span
+                                className={`rounded-lg border px-2 py-0.5 font-semibold ${usCredit.className}`}
+                                title={usCredit.csvLabel}
+                              >
+                                {usCredit.badgeLabel}
+                              </span>
+                            ) : null;
+                          })()}
                           {isClientLead(lead) !== null && (
                             <span
                               className={`rounded-lg border px-2 py-0.5 font-semibold ${
@@ -856,17 +945,32 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                         </a>
                         <button
                           type="button"
+                          disabled={isCardLocked && !lead.notes}
                           onClick={() => {
+                            if (isCardLocked && !lead.notes) return;
                             setExpandedNotesId(notesOpen ? null : lead.id);
                             setNotesDraft((prev) => ({ ...prev, [lead.id]: lead.notes }));
                           }}
-                          className="inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-white px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-[#6E5341] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
+                          title={
+                            isCardLocked && !lead.notes
+                              ? 'Tarjeta bloqueada. Revierte el estado para agregar notas.'
+                              : isCardLocked
+                                ? 'Ver nota guardada (solo lectura)'
+                                : lead.notes
+                                  ? 'Ver o editar nota'
+                                  : 'Agregar nota'
+                          }
+                          className={`inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold transition-colors ${
+                            isCardLocked && !lead.notes
+                              ? 'border-stone-200 bg-stone-100 text-stone-400 cursor-not-allowed'
+                              : 'border-[#E6D5BF] bg-white text-[#6E5341] hover:bg-[#FAF3E8] cursor-pointer'
+                          }`}
                         >
                           <StickyNote className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                           {lead.notes ? 'Ver nota' : 'Nota'}
                         </button>
 
-                        {(lead.category !== 'none' || promoInvalidated) && (
+                        {isCardLocked && (
                           <button
                             type="button"
                             onClick={() => handleOpenReactivateModal(lead)}
@@ -877,7 +981,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                           </button>
                         )}
 
-                        {confirmDeleteId === lead.id ? (
+                        {!isCardLocked && confirmDeleteId === lead.id ? (
                           <span className="inline-flex min-h-[44px] sm:min-h-[32px] items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 py-1 text-xs sm:text-[11px]">
                             <button
                               type="button"
@@ -897,9 +1001,21 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                         ) : (
                           <button
                             type="button"
-                            onClick={() => setConfirmDeleteId(lead.id)}
-                            className="inline-flex min-h-[44px] min-w-[44px] sm:min-h-[32px] sm:min-w-[32px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
-                            title="Eliminar prospecto"
+                            disabled={isCardLocked}
+                            onClick={() => {
+                              if (isCardLocked) return;
+                              setConfirmDeleteId(lead.id);
+                            }}
+                            className={`inline-flex min-h-[44px] min-w-[44px] sm:min-h-[32px] sm:min-w-[32px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1 transition-colors ${
+                              isCardLocked
+                                ? 'text-stone-300 cursor-not-allowed'
+                                : 'text-[#A48A77] hover:bg-red-50 hover:text-red-600 cursor-pointer'
+                            }`}
+                            title={
+                              isCardLocked
+                                ? 'Tarjeta bloqueada. Revierte el estado con clave de administrador para eliminar.'
+                                : 'Eliminar prospecto'
+                            }
                             aria-label={`Eliminar a ${lead.name}`}
                           >
                             <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
@@ -914,25 +1030,38 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                     {/* Check "Ya se llamó" */}
                     <button
                       type="button"
-                      disabled={isTogglingThis}
+                      disabled={isTogglingThis || isCardLocked}
                       onClick={() => handleToggleCalled(lead)}
-                      className={`inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold border transition-all cursor-pointer disabled:opacity-65 ${
+                      title={
+                        isCardLocked
+                          ? 'Tarjeta bloqueada. Usa Revertir / Reactivar código con clave de administrador para modificar.'
+                          : lead.called
+                            ? 'Desmarcar llamada'
+                            : 'Marcar como llamado'
+                      }
+                      className={`inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold border transition-all ${
                         showLockHint ? 'ring-4 ring-[#B84A27]/30' : ''
                       } ${
-                        lead.called
-                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
-                          : 'bg-[#FAF3E8] border-[#D8B994] text-[#594133] hover:bg-amber-100/70'
+                        isCardLocked
+                          ? 'bg-stone-200/85 border-stone-300 text-stone-500 cursor-not-allowed'
+                          : lead.called
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm cursor-pointer disabled:opacity-65'
+                            : 'bg-[#FAF3E8] border-[#D8B994] text-[#594133] hover:bg-amber-100/70 cursor-pointer disabled:opacity-65'
                       }`}
                     >
-                      <span
-                        className={`flex h-4 w-4 items-center justify-center rounded border ${
-                          lead.called
-                            ? 'border-white bg-white/20 text-white'
-                            : 'border-[#B89D86] bg-white'
-                        }`}
-                      >
-                        {lead.called && <Check className="h-3 w-3 stroke-[3]" />}
-                      </span>
+                      {isCardLocked ? (
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                      ) : (
+                        <span
+                          className={`flex h-4 w-4 items-center justify-center rounded border ${
+                            lead.called
+                              ? 'border-white bg-white/20 text-white'
+                              : 'border-[#B89D86] bg-white'
+                          }`}
+                        >
+                          {lead.called && <Check className="h-3 w-3 stroke-[3]" />}
+                        </span>
+                      )}
                       <PhoneCall className="h-3.5 w-3.5" />
                       <span>
                         {isTogglingThis
@@ -947,9 +1076,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                     <div className="relative w-full sm:w-auto">
                       <div
                         className={`grid grid-cols-3 w-full sm:w-auto sm:inline-flex items-center rounded-xl p-1 border transition-opacity ${
-                          lead.called
-                            ? 'bg-[#FAF3E8] border-[#E3D0B8]'
-                            : 'bg-stone-100 border-stone-200 opacity-60'
+                          isCardLocked
+                            ? 'bg-stone-100 border-stone-300/80'
+                            : lead.called
+                              ? 'bg-[#FAF3E8] border-[#E3D0B8]'
+                              : 'bg-stone-100 border-stone-200 opacity-60'
                         }`}
                       >
                         {CATEGORIES.map((cat) => {
@@ -959,19 +1090,32 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                             <button
                               key={cat.id}
                               type="button"
+                              disabled={isCardLocked}
                               onClick={() => handleCategoryClick(lead, cat.id)}
                               title={
-                                lead.called
-                                  ? `Asignar a ${cat.label}`
-                                  : 'Marca primero el check de llamada para clasificar'
+                                isCardLocked
+                                  ? 'Estado confirmado y bloqueado. Usa Revertir / Reactivar código con clave de administrador.'
+                                  : lead.called
+                                    ? `Asignar a ${cat.label}`
+                                    : 'Marca primero el check de llamada para clasificar'
                               }
-                              className={`relative inline-flex min-h-[44px] sm:min-h-[34px] items-center justify-center gap-1 rounded-lg px-2 sm:px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                                isSelected
-                                  ? cat.activeClass
-                                  : 'text-[#594133] hover:bg-white/70'
+                              className={`relative inline-flex min-h-[44px] sm:min-h-[34px] items-center justify-center gap-1 rounded-lg px-2 sm:px-2.5 py-1.5 text-xs font-semibold transition-all ${
+                                isCardLocked
+                                  ? isSelected
+                                    ? 'bg-stone-700 text-stone-100 shadow-xs cursor-not-allowed'
+                                    : 'text-stone-400 opacity-50 cursor-not-allowed'
+                                  : isSelected
+                                    ? `${cat.activeClass} cursor-pointer`
+                                    : 'text-[#594133] hover:bg-white/70 cursor-pointer'
                               }`}
                             >
-                              {!lead.called ? (
+                              {isCardLocked ? (
+                                isSelected ? (
+                                  <Lock className="h-3 w-3 shrink-0" />
+                                ) : (
+                                  <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                                )
+                              ) : !lead.called ? (
                                 <Lock className="h-3 w-3 opacity-70 shrink-0" />
                               ) : (
                                 <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -998,33 +1142,53 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   </div>
                 </div>
 
-                {/* Order amount editor when category === 'orden' */}
-                {lead.category === 'orden' && (
-                  <div className="mt-3 pt-3 border-t border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-emerald-50/50 rounded-xl px-3 py-2.5">
-                    <span className="text-xs font-semibold text-emerald-900">
-                      Monto de la orden (actualiza Ticket Promedio):
-                    </span>
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <span className="text-sm sm:text-xs font-bold text-emerald-800">$</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={amountDraft[lead.id] ?? String(lead.orderAmount ?? defaultTicketAmount)}
-                        onChange={(e) =>
-                          setAmountDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
-                        }
-                        className="flex-1 sm:flex-none sm:w-28 min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-base sm:text-xs font-mono font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleSaveOrderAmount(lead)}
-                        className="min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg bg-emerald-700 px-4 sm:px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 transition-colors cursor-pointer shrink-0"
-                      >
-                        Guardar
-                      </button>
+                {/* Order amount bar when category === 'orden' */}
+                {lead.category === 'orden' &&
+                  (isOrderAmountLocked ? (
+                    <div className="mt-3 pt-3 border-t border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-stone-100/90 rounded-xl px-3.5 py-2.5">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-stone-600">
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        <span>Monto de la orden confirmado y bloqueado:</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-lg border border-stone-300 bg-white/80 px-3 py-1 font-mono text-xs font-bold text-stone-700 tabular-nums">
+                          ${Number(lead.orderAmount).toLocaleString('en-US')} USD
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-stone-300 bg-stone-200/80 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-stone-600">
+                          <Lock className="h-2.5 w-2.5 shrink-0" />
+                          Guardado
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="mt-3 pt-3 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-amber-50/70 rounded-xl px-3 py-2.5">
+                      <span className="text-xs font-semibold text-[#594133]">
+                        Monto de la orden (al guardar quedará bloqueado):
+                      </span>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <span className="text-sm sm:text-xs font-bold text-[#6E5341]">$</span>
+                        <input
+                          type="number"
+                          min={0}
+                          disabled={isSavingAmountThis}
+                          value={amountDraft[lead.id] ?? String(defaultTicketAmount)}
+                          onChange={(e) =>
+                            setAmountDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
+                          }
+                          className="flex-1 sm:flex-none sm:w-28 min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-[#DFCBB3] bg-white px-3 py-1.5 text-base sm:text-xs font-mono font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#C88A2B]/40 disabled:opacity-60"
+                        />
+                        <button
+                          type="button"
+                          disabled={isSavingAmountThis}
+                          onClick={() => handleSaveOrderAmount(lead)}
+                          className="min-h-[44px] sm:min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-xl sm:rounded-lg bg-[#22150E] px-4 sm:px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#3A2418] transition-colors cursor-pointer shrink-0 disabled:opacity-60"
+                        >
+                          <Lock className="h-3 w-3 shrink-0" />
+                          {isSavingAmountThis ? 'Guardando...' : 'Guardar y bloquear'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
 
                 {/* Expandable Notes */}
                 <AnimatePresence>
@@ -1035,24 +1199,33 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
                     >
-                      <div className="mt-3 pt-3 border-t border-[#EFE3D2] flex flex-col sm:flex-row gap-2">
-                        <input
-                          type="text"
-                          value={notesDraft[lead.id] ?? ''}
-                          onChange={(e) =>
-                            setNotesDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
-                          }
-                          placeholder="Escribe notas de la llamada, dirección o fecha de cita..."
-                          className="flex-1 min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-xs text-[#22150E] focus:bg-white focus:border-[#B84A27] focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSaveNotes(lead)}
-                          className="min-h-[44px] rounded-xl bg-[#22150E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#3A2418] cursor-pointer shrink-0"
-                        >
-                          Guardar nota
-                        </button>
-                      </div>
+                      {isCardLocked ? (
+                        <div className="mt-3 pt-3 border-t border-stone-200 flex items-start gap-2 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-600">
+                          <Lock className="h-3.5 w-3.5 shrink-0 text-stone-400 mt-0.5" />
+                          <p className="break-words leading-relaxed">
+                            {lead.notes || 'Sin nota registrada.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mt-3 pt-3 border-t border-[#EFE3D2] flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={notesDraft[lead.id] ?? ''}
+                            onChange={(e) =>
+                              setNotesDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
+                            }
+                            placeholder="Escribe notas de la llamada, dirección o fecha de cita..."
+                            className="flex-1 min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-xs text-[#22150E] focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveNotes(lead)}
+                            className="min-h-[44px] rounded-xl bg-[#22150E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#3A2418] cursor-pointer shrink-0"
+                          >
+                            Guardar nota
+                          </button>
+                        </div>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1126,18 +1299,49 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 </div>
               </div>
 
+              {confirmCategoryModal.targetCategory === 'orden' && (
+                <div className="rounded-2xl border border-[#DFCBB3] bg-[#FFF8EC] p-3.5 space-y-2">
+                  <label
+                    htmlFor="confirm-order-amount-input"
+                    className="block text-xs font-bold text-[#22150E]"
+                  >
+                    Monto final de la orden ($ USD)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-[#6E5341]">$</span>
+                    <input
+                      id="confirm-order-amount-input"
+                      type="number"
+                      min={0}
+                      step="any"
+                      disabled={confirmLoading}
+                      value={confirmOrderAmount}
+                      onChange={(e) => {
+                        setConfirmOrderAmount(e.target.value);
+                        setConfirmError(null);
+                      }}
+                      className="flex-1 min-h-[44px] rounded-xl border border-[#DFCBB3] bg-white px-3.5 py-2 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums focus:border-[#B84A27] focus:outline-none"
+                    />
+                    <span className="text-xs font-semibold text-[#7B5D4A]">USD</span>
+                  </div>
+                  <p className="text-[11px] text-[#7B5D4A] leading-relaxed">
+                    Actualiza el Ticket Promedio y las ventas del QR embajador. Al confirmar quedará guardado y bloqueado.
+                  </p>
+                </div>
+              )}
+
               <div className="rounded-2xl border border-rose-200 bg-rose-50/90 p-3.5 text-xs text-rose-900 space-y-1.5">
                 <p className="font-bold flex items-center gap-1.5 text-rose-800">
                   <Lock className="h-3.5 w-3.5 shrink-0" />
-                  Advertencia de invalidación de código
+                  Bloqueo de tarjeta e invalidación de código
                 </p>
                 <p className="leading-relaxed">
-                  Al confirmar, el código de promoción{' '}
+                  Al confirmar, el código{' '}
                   <strong className="font-mono">{confirmCategoryModal.lead.claimCode}</strong> quedará{' '}
-                  <strong>invalidado permanentemente</strong> para evitar duplicados o re-canjes.
+                  <strong>invalidado</strong> y <strong>toda la tarjeta quedará bloqueada</strong> para evitar manipulaciones o cambios accidentales.
                 </p>
                 <p className="leading-relaxed">
-                  Revertir esta clasificación o reactivar el código{' '}
+                  Desbloquear esta tarjeta, revertir el estado o reactivar el código{' '}
                   <strong>solo será posible con la contraseña de Administrador</strong>.
                 </p>
               </div>
@@ -1164,10 +1368,10 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   onClick={handleConfirmCategoryAssign}
                   className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#22150E] to-[#8C3318] px-5 py-2 text-xs font-bold text-[#FFFDF9] shadow hover:brightness-110 transition-all cursor-pointer disabled:opacity-60"
                 >
-                  <Check className="h-3.5 w-3.5" />
+                  <Lock className="h-3.5 w-3.5" />
                   {confirmLoading
-                    ? 'Confirmando...'
-                    : `Confirmar ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]} e invalidar`}
+                    ? 'Bloqueando...'
+                    : `Confirmar ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]} y bloquear`}
                 </button>
               </div>
             </motion.div>
