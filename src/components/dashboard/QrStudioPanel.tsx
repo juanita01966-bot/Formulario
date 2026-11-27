@@ -6,20 +6,32 @@ import {
   Check,
   Copy,
   Download,
+  Eye,
   FileCode2,
   History,
+  Layers,
   Link2,
   Palette,
   QrCode,
   ShieldCheck,
   Sparkles,
   Trash2,
+  TrendingUp,
   Trophy,
   Upload,
   UserCheck,
+  Users,
 } from 'lucide-react';
 import { create as createQrMatrix, type QRCode as QrCodeMatrix } from 'qrcode';
-import type { QrCodeRecord, QrDotShape, QrStyleId, ReferralPartner, UserAccount } from '../../types/app';
+import type {
+  Lead,
+  QrCodeRecord,
+  QrDotShape,
+  QrStyleId,
+  ReferralPartner,
+  ReferralVisitEvent,
+  UserAccount,
+} from '../../types/app';
 import type { CreateQrPayload } from '../../services/storeClient';
 import {
   buildReferralUrl,
@@ -28,11 +40,22 @@ import {
 } from './referralQrExport';
 import { AmbassadorAvatar } from '../shared/AmbassadorAvatar';
 import { getRoleTheme } from './roleTheme';
+import {
+  computeEmbajadorMetrics,
+  computeVendedorRollupMetrics,
+  normalizePartnerCode,
+  resolveEmbajadorOwner,
+  type EmbajadorRollupMetrics,
+  type VendedorRollupMetrics,
+} from '../../utils/partnerMetrics';
 
 interface QrStudioPanelProps {
   qrHistory: QrCodeRecord[];
   referrers?: ReferralPartner[];
   accounts?: UserAccount[];
+  leads?: Lead[];
+  visitLog?: ReferralVisitEvent[];
+  defaultTicketAmount?: number;
   defaultUrl: string;
   onCreateQr: (payload: CreateQrPayload) => Promise<void>;
   onDeleteQr: (id: string) => Promise<void>;
@@ -723,6 +746,9 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
   qrHistory,
   referrers = [],
   accounts = [],
+  leads = [],
+  visitLog = [],
+  defaultTicketAmount = 0,
   defaultUrl,
   onCreateQr,
   onDeleteQr,
@@ -908,6 +934,74 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
 
   const hasSelectedRecipient = Boolean(selectedEmbajador || selectedAccount);
   const isTrackingActive = Boolean(hasSelectedRecipient && activeReferralCode);
+
+  const allVendedorRollups = useMemo(() => {
+    const map = new Map<string, VendedorRollupMetrics>();
+    for (const acc of accounts) {
+      if (acc.role !== 'vendedor') continue;
+      const rollup = computeVendedorRollupMetrics(
+        {
+          accountId: acc.id,
+          partnerId: acc.referrerId ?? null,
+          name: acc.displayName,
+          tag: acc.tag,
+          avatarUrl: acc.avatarUrl ?? null,
+          active: acc.active,
+        },
+        referrers,
+        leads,
+        qrHistory,
+        visitLog,
+        false,
+        accounts,
+        defaultTicketAmount
+      );
+      map.set(acc.id, rollup);
+    }
+    return map;
+  }, [accounts, referrers, leads, qrHistory, visitLog, defaultTicketAmount]);
+
+  const activeVendedorRollupList = useMemo(
+    () =>
+      activeVendedores
+        .map((acc) => ({
+          account: acc,
+          metrics: allVendedorRollups.get(acc.id)!,
+        }))
+        .filter((item) => Boolean(item.metrics)),
+    [activeVendedores, allVendedorRollups]
+  );
+
+  const embajadorMetricsMap = useMemo(() => {
+    const map = new Map<string, EmbajadorRollupMetrics>();
+    for (const r of referrers) {
+      if (r.partnerType !== 'embajador') continue;
+      map.set(
+        r.id,
+        computeEmbajadorMetrics(
+          r,
+          leads,
+          qrHistory,
+          visitLog,
+          false,
+          accounts,
+          referrers,
+          defaultTicketAmount
+        )
+      );
+    }
+    return map;
+  }, [referrers, leads, qrHistory, visitLog, accounts, defaultTicketAmount]);
+
+  const selectedVendedorMetrics = useMemo(() => {
+    if (!selectedAccount) return null;
+    return allVendedorRollups.get(selectedAccount.id) || null;
+  }, [selectedAccount, allVendedorRollups]);
+
+  const selectedEmbajadorMetrics = useMemo(() => {
+    if (!selectedEmbajador) return null;
+    return embajadorMetricsMap.get(selectedEmbajador.id) || null;
+  }, [selectedEmbajador, embajadorMetricsMap]);
 
   const handleNameChange = (nextName: string) => {
     setName(nextName);
@@ -1474,34 +1568,161 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   )}
                 </select>
                 {selectedEmbajador && activeReferralCode ? (
-                  <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/85 px-3 py-2 text-[11.5px] font-semibold text-emerald-900">
-                    <AmbassadorAvatar
-                      name={selectedEmbajador.name}
-                      avatarUrl={selectedEmbajador.avatarUrl ?? null}
-                      emoji={selectedEmbajador.emoji ?? null}
-                      size="sm"
-                      ring="gold"
-                    />
-                    <span className="min-w-0 break-words">
-                      Embajador &ldquo;{selectedEmbajador.name}&rdquo; (?ref={activeReferralCode})
-                      {selectedEmbajador.ownerVendedorName || selectedEmbajador.ownerVendedorTag
-                        ? ` · Vendedor: ${selectedEmbajador.ownerVendedorName || selectedEmbajador.ownerVendedorTag}`
-                        : ' · Ciprian Directo'}{' '}
-                      — cada escaneo y registro se atribuirá automáticamente a este Embajador.
-                    </span>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/85 px-3 py-2 text-[11.5px] font-semibold text-emerald-900">
+                      <AmbassadorAvatar
+                        name={selectedEmbajador.name}
+                        avatarUrl={selectedEmbajador.avatarUrl ?? null}
+                        emoji={selectedEmbajador.emoji ?? null}
+                        size="sm"
+                        ring="gold"
+                      />
+                      <span className="min-w-0 break-words">
+                        Embajador &ldquo;{selectedEmbajador.name}&rdquo; (?ref={activeReferralCode}) — cada escaneo y registro se atribuirá automáticamente a este Embajador.
+                      </span>
+                    </div>
+
+                    {selectedEmbajadorMetrics && (
+                      <div className="dsb-glass-subtle rounded-2xl p-3 sm:p-3.5 space-y-2.5 min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#7B5D4A]">
+                            Métricas en vivo del Embajador
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold max-w-full ${
+                              selectedEmbajadorMetrics.owner.isDirect
+                                ? 'border-[#DFCBB3] bg-amber-50/80 text-[#594133]'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            }`}
+                          >
+                            <UserCheck className="h-3 w-3 shrink-0 text-[#3F5432]" />
+                            <span className="truncate">
+                              Vinculado a: {selectedEmbajadorMetrics.owner.name}
+                              {selectedEmbajadorMetrics.owner.tag
+                                ? ` (${selectedEmbajadorMetrics.owner.tag})`
+                                : ''}
+                            </span>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="dsb-glass-subtle rounded-xl px-3 py-2 min-w-0">
+                            <p className="text-[10px] font-semibold text-[#7B5D4A] truncate">
+                              QRs de este embajador
+                            </p>
+                            <p className="font-serif text-lg font-bold text-[#22150E] tabular-nums leading-tight mt-0.5">
+                              {selectedEmbajadorMetrics.qrCount}
+                            </p>
+                          </div>
+                          <div className="dsb-glass-subtle rounded-xl px-3 py-2 min-w-0">
+                            <p className="text-[10px] font-semibold text-[#7B5D4A] truncate">
+                              Prospectos
+                            </p>
+                            <p className="font-serif text-lg font-bold text-[#22150E] tabular-nums leading-tight mt-0.5">
+                              {selectedEmbajadorMetrics.leadsCount}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold tabular-nums">
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-800">
+                            Visitas: <strong>{selectedEmbajadorMetrics.visitsCount}</strong>
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-800">
+                            Citas: <strong>{selectedEmbajadorMetrics.citasCount}</strong>
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
+                            Demos: <strong>{selectedEmbajadorMetrics.demosCount}</strong>
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">
+                            Órdenes: <strong>{selectedEmbajadorMetrics.ordenesCount}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : selectedAccount && activeReferralCode ? (
-                  <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/85 px-3 py-2 text-[11.5px] font-semibold text-emerald-900">
-                    <AmbassadorAvatar
-                      name={selectedAccount.displayName}
-                      avatarUrl={selectedAccount.avatarUrl ?? matchedExistingReferrer?.avatarUrl ?? null}
-                      emoji={matchedExistingReferrer?.emoji ?? null}
-                      size="sm"
-                      ring="gold"
-                    />
-                    <span className="min-w-0 break-words">
-                      Vinculado a &ldquo;{selectedAccount.displayName}&rdquo; (?ref={activeReferralCode}) — cada escaneo y registro se atribuirá automáticamente a esta cuenta.
-                    </span>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/85 px-3 py-2 text-[11.5px] font-semibold text-emerald-900">
+                      <AmbassadorAvatar
+                        name={selectedAccount.displayName}
+                        avatarUrl={selectedAccount.avatarUrl ?? matchedExistingReferrer?.avatarUrl ?? null}
+                        emoji={matchedExistingReferrer?.emoji ?? null}
+                        size="sm"
+                        ring="gold"
+                      />
+                      <span className="min-w-0 break-words">
+                        Vinculado a &ldquo;{selectedAccount.displayName}&rdquo; (?ref={activeReferralCode}) — cada escaneo y registro se atribuirá automáticamente a esta cuenta.
+                      </span>
+                    </div>
+
+                    {selectedVendedorMetrics && (
+                      <div className="dsb-glass-subtle rounded-2xl p-3 sm:p-3.5 space-y-2.5 min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50/90 px-2.5 py-0.5 text-[10.5px] font-bold text-emerald-800">
+                            <Layers className="h-3 w-3 shrink-0" />
+                            <span>
+                              Métrica consolidada del vendedor (canal directo + todos sus embajadores)
+                            </span>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div className="dsb-glass-subtle rounded-xl px-3 py-2 min-w-0">
+                            <p className="text-[10px] font-semibold text-[#7B5D4A] truncate">
+                              QRs Totales
+                            </p>
+                            <p className="font-serif text-lg font-bold text-[#22150E] tabular-nums leading-tight mt-0.5">
+                              {selectedVendedorMetrics.totalQrCount}
+                            </p>
+                            <p className="text-[10px] font-medium text-[#7B5D4A] tabular-nums mt-0.5 truncate">
+                              Directos: {selectedVendedorMetrics.directQrCount} · Embajadores:{' '}
+                              {selectedVendedorMetrics.embajadoresQrCount}
+                            </p>
+                          </div>
+
+                          <div className="dsb-glass-subtle rounded-xl px-3 py-2 min-w-0">
+                            <p className="text-[10px] font-semibold text-[#7B5D4A] truncate">
+                              Prospectos Totales
+                            </p>
+                            <p className="font-serif text-lg font-bold text-[#22150E] tabular-nums leading-tight mt-0.5">
+                              {selectedVendedorMetrics.totalLeadsCount}
+                            </p>
+                            <p className="text-[10px] font-medium text-[#7B5D4A] tabular-nums mt-0.5 truncate">
+                              Directos: {selectedVendedorMetrics.directLeadsCount} · Embajadores:{' '}
+                              {selectedVendedorMetrics.embajadoresLeadsCount}
+                            </p>
+                          </div>
+
+                          <div className="dsb-glass-subtle rounded-xl px-3 py-2 min-w-0">
+                            <p className="text-[10px] font-semibold text-[#7B5D4A] truncate">
+                              Embajadores Vinculados
+                            </p>
+                            <p className="font-serif text-lg font-bold text-[#22150E] tabular-nums leading-tight mt-0.5">
+                              {selectedVendedorMetrics.embajadoresCount}
+                            </p>
+                            <p className="text-[10px] font-medium text-[#7B5D4A] tabular-nums mt-0.5 truncate">
+                              {selectedVendedorMetrics.activeEmbajadoresCount} activos
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold tabular-nums">
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-800">
+                            Visitas: <strong>{selectedVendedorMetrics.visitsCount}</strong>
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-800">
+                            Citas: <strong>{selectedVendedorMetrics.citasCount}</strong>
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
+                            Demos: <strong>{selectedVendedorMetrics.demosCount}</strong>
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">
+                            Órdenes: <strong>{selectedVendedorMetrics.ordenesCount}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -1954,6 +2175,133 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
       </div>
       )}
 
+      {/* Vendedores Rollup Overview Strip */}
+      {activeVendedorRollupList.length > 0 && (
+        <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-7 space-y-4 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <div
+                data-dsb-icon-tile="emerald"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-100 text-emerald-800"
+              >
+                <Users className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-serif text-base sm:text-xl font-bold text-[#22150E] leading-snug">
+                  Métricas por Vendedor (QRs y Prospectos del Equipo)
+                </h3>
+                <p className="text-xs sm:text-sm text-[#594133]">
+                  Consolidado en vivo de cada vendedor (canal directo + embajadores vinculados). Toca una tarjeta para seleccionarlo en el creador QR.
+                </p>
+              </div>
+            </div>
+            <span className="dsb-glass-subtle rounded-full px-3 py-1 text-xs font-bold text-[#594133] tabular-nums shrink-0">
+              {activeVendedorRollupList.length}{' '}
+              {activeVendedorRollupList.length === 1 ? 'vendedor activo' : 'vendedores activos'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {activeVendedorRollupList.map(({ account, metrics }) => {
+              const isSelectedCard = selectedAccount?.id === account.id;
+              return (
+                <button
+                  key={account.id}
+                  type="button"
+                  onClick={() => {
+                    applyAccountSelection(account);
+                    studioTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  className={`dsb-glass-subtle text-left rounded-2xl p-3.5 sm:p-4 space-y-3 transition-all cursor-pointer min-w-0 hover:-translate-y-0.5 hover:shadow-md ${
+                    isSelectedCard
+                      ? 'ring-2 ring-[#C88A2B]/65 border-[#C88A2B]/70'
+                      : 'hover:border-[#C88A2B]/45'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <AmbassadorAvatar
+                        name={account.displayName}
+                        avatarUrl={metrics.avatarUrl}
+                        size="md"
+                        ring={isSelectedCard ? 'gold' : 'subtle'}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-serif text-sm sm:text-base font-bold text-[#22150E] truncate">
+                          {account.displayName}
+                        </p>
+                        <span className="inline-flex items-center rounded-md border border-[#E5C17B] bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#8A5610]">
+                          {account.tag}
+                        </span>
+                      </div>
+                    </div>
+                    {isSelectedCard && (
+                      <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                        <Check className="h-3 w-3" />
+                        Activo
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5 text-center">
+                    <div className="dsb-glass-subtle rounded-xl px-2 py-1.5 min-w-0">
+                      <p className="text-[9.5px] font-semibold text-[#7B5D4A] truncate">
+                        QRs totales
+                      </p>
+                      <p className="font-serif text-base font-bold text-[#22150E] tabular-nums leading-tight">
+                        {metrics.totalQrCount}
+                      </p>
+                      <p className="text-[9px] text-[#7B5D4A] tabular-nums truncate">
+                        {metrics.directQrCount}D + {metrics.embajadoresQrCount}E
+                      </p>
+                    </div>
+
+                    <div className="dsb-glass-subtle rounded-xl px-2 py-1.5 min-w-0">
+                      <p className="text-[9.5px] font-semibold text-[#7B5D4A] truncate">
+                        Embajadores
+                      </p>
+                      <p className="font-serif text-base font-bold text-[#22150E] tabular-nums leading-tight">
+                        {metrics.embajadoresCount}
+                      </p>
+                      <p className="text-[9px] text-[#7B5D4A] tabular-nums truncate">
+                        {metrics.activeEmbajadoresCount} activos
+                      </p>
+                    </div>
+
+                    <div className="dsb-glass-subtle rounded-xl px-2 py-1.5 min-w-0">
+                      <p className="text-[9.5px] font-semibold text-[#7B5D4A] truncate">
+                        Prospectos
+                      </p>
+                      <p className="font-serif text-base font-bold text-[#22150E] tabular-nums leading-tight">
+                        {metrics.totalLeadsCount}
+                      </p>
+                      <p className="text-[9px] text-[#7B5D4A] tabular-nums truncate">
+                        {metrics.directLeadsCount}D + {metrics.embajadoresLeadsCount}E
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] font-semibold tabular-nums">
+                    <span className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-800">
+                      Visitas: <strong>{metrics.visitsCount}</strong>
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-800">
+                      Citas: <strong>{metrics.citasCount}</strong>
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
+                      Demos: <strong>{metrics.demosCount}</strong>
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">
+                      Órdenes: <strong>{metrics.ordenesCount}</strong>
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Saved QR Codes History Gallery */}
       <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-7 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2015,6 +2363,83 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   ? linkedReferrer?.name || item.name
                   : linkedAccount?.displayName || linkedReferrer?.name || item.name;
 
+                const embMetrics =
+                  isEmbajadorQr && linkedReferrer
+                    ? embajadorMetricsMap.get(linkedReferrer.id) ||
+                      computeEmbajadorMetrics(
+                        linkedReferrer,
+                        leads,
+                        qrHistory,
+                        visitLog,
+                        false,
+                        accounts,
+                        referrers,
+                        defaultTicketAmount
+                      )
+                    : null;
+
+                const embOwnerInfo =
+                  embMetrics?.owner ||
+                  (isEmbajadorQr && linkedReferrer
+                    ? resolveEmbajadorOwner(linkedReferrer, accounts, referrers)
+                    : null);
+
+                const vendedorMetrics = !isEmbajadorQr
+                  ? (linkedAccount ? allVendedorRollups.get(linkedAccount.id) : null) ||
+                    (linkedReferrer || item.referralCode
+                      ? computeVendedorRollupMetrics(
+                          {
+                            accountId: linkedAccount?.id ?? item.accountId ?? null,
+                            partnerId: linkedReferrer?.id ?? item.referrerId ?? null,
+                            name: itemOwnerName,
+                            tag:
+                              linkedAccount?.tag ||
+                              linkedReferrer?.code ||
+                              item.referralCode ||
+                              '',
+                            avatarUrl: itemAvatarUrl,
+                            partner: linkedReferrer ?? null,
+                          },
+                          referrers,
+                          leads,
+                          qrHistory,
+                          visitLog,
+                          false,
+                          accounts,
+                          defaultTicketAmount
+                        )
+                      : null)
+                  : null;
+
+                const itemCodeNorm = normalizePartnerCode(
+                  item.referralCode || linkedReferrer?.code || linkedAccount?.tag
+                );
+                const qrDirectLeadsCount = embMetrics
+                  ? embMetrics.leadsCount
+                  : vendedorMetrics
+                  ? vendedorMetrics.directLeadsCount
+                  : leads.filter(
+                      (l) =>
+                        (item.referrerId && l.referrerId === item.referrerId) ||
+                        (Boolean(itemCodeNorm) &&
+                          normalizePartnerCode(l.referralCode) === itemCodeNorm)
+                    ).length;
+
+                const qrDirectVisitsCount = embMetrics
+                  ? embMetrics.visitsCount
+                  : (() => {
+                      const matchedLogVisits = visitLog.filter(
+                        (v) =>
+                          (item.referrerId && v.referrerId === item.referrerId) ||
+                          (Boolean(itemCodeNorm) &&
+                            normalizePartnerCode(v.referralCode) === itemCodeNorm)
+                      ).length;
+                      return Math.max(
+                        Math.max(0, Number(linkedReferrer?.visitsCount) || 0),
+                        matchedLogVisits
+                      );
+                    })();
+
                 return (
                   <motion.article
                     key={item.id}
@@ -2022,69 +2447,104 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.96 }}
-                    className="group dsb-glass-subtle flex flex-col justify-between rounded-2xl bg-white/70 p-3.5 sm:p-4 hover:shadow-md hover:bg-white/85 hover:-translate-y-0.5 transition-all"
+                    className="group dsb-glass-subtle flex flex-col justify-between rounded-2xl p-3.5 sm:p-4 hover:shadow-md hover:-translate-y-0.5 transition-all min-w-0"
                   >
-                    <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
-                      {/* Mini Live SVG Thumbnail */}
-                      <div
-                        className="h-16 w-16 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-xl border border-[#DFCBB3] p-1 shadow-xs"
-                        style={{ backgroundColor: item.backgroundColor }}
-                      >
-                        <QrSvgArtwork
-                          targetUrl={item.targetUrl}
-                          dotShape={item.dotShape}
-                          foregroundColor={item.foregroundColor}
-                          backgroundColor={item.backgroundColor}
-                          includeLogo={item.includeLogo}
-                          decorativeRingColor={presetMeta.ringColor}
-                        />
-                      </div>
-
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${presetMeta.badgeBg} ${presetMeta.badgeText}`}
-                          >
-                            <span
-                              className="h-2 w-2 rounded-full border border-black/15"
-                              style={{ backgroundColor: item.foregroundColor }}
-                            />
-                            {presetMeta.name}
-                          </span>
-                          {item.referralCode && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-[#E5C17B] bg-[#FFF4DC] pl-1 pr-2 py-0.5 font-mono text-[10px] font-bold text-[#8A5610]">
-                              {itemAvatarUrl || itemEmoji ? (
-                                <AmbassadorAvatar
-                                  name={itemOwnerName}
-                                  avatarUrl={itemAvatarUrl}
-                                  emoji={itemEmoji}
-                                  size="xs"
-                                  ring="none"
-                                />
-                              ) : (
-                                <Trophy className="h-2.5 w-2.5 text-[#C88A2B] ml-1" />
-                              )}
-                              {item.referralCode}
-                            </span>
-                          )}
-                          <span className="text-[10px] font-medium text-[#8A6D5B]">
-                            {formatShortDate(item.createdAt)}
-                          </span>
+                    <div className="space-y-2.5 min-w-0">
+                      <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+                        {/* Mini Live SVG Thumbnail */}
+                        <div
+                          className="h-16 w-16 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-xl border border-[#DFCBB3] p-1 shadow-xs"
+                          style={{ backgroundColor: item.backgroundColor }}
+                        >
+                          <QrSvgArtwork
+                            targetUrl={item.targetUrl}
+                            dotShape={item.dotShape}
+                            foregroundColor={item.foregroundColor}
+                            backgroundColor={item.backgroundColor}
+                            includeLogo={item.includeLogo}
+                            decorativeRingColor={presetMeta.ringColor}
+                          />
                         </div>
 
-                        <h4 className="font-serif text-base font-bold text-[#22150E] truncate">
-                          {item.name}
-                        </h4>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${presetMeta.badgeBg} ${presetMeta.badgeText}`}
+                            >
+                              <span
+                                className="h-2 w-2 rounded-full border border-black/15"
+                                style={{ backgroundColor: item.foregroundColor }}
+                              />
+                              {presetMeta.name}
+                            </span>
+                            {item.referralCode && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-[#E5C17B] bg-amber-50 pl-1 pr-2 py-0.5 font-mono text-[10px] font-bold text-[#8A5610]">
+                                {itemAvatarUrl || itemEmoji ? (
+                                  <AmbassadorAvatar
+                                    name={itemOwnerName}
+                                    avatarUrl={itemAvatarUrl}
+                                    emoji={itemEmoji}
+                                    size="xs"
+                                    ring="none"
+                                  />
+                                ) : (
+                                  <Trophy className="h-2.5 w-2.5 text-[#C88A2B] ml-1" />
+                                )}
+                                {item.referralCode}
+                              </span>
+                            )}
+                            <span className="text-[10px] font-medium text-[#8A6D5B]">
+                              {formatShortDate(item.createdAt)}
+                            </span>
+                          </div>
 
-                        <p className="truncate font-mono text-[11px] text-[#6E5341]" title={item.targetUrl}>
-                          {item.targetUrl}
-                        </p>
+                          <h4 className="font-serif text-base font-bold text-[#22150E] truncate">
+                            {item.name}
+                          </h4>
 
-                        {item.frameText && (
-                          <p className="truncate text-[11px] italic text-[#8C4A19]">
-                            “{item.frameText}”
+                          <p className="truncate font-mono text-[11px] text-[#6E5341]" title={item.targetUrl}>
+                            {item.targetUrl}
                           </p>
-                        )}
+
+                          {item.frameText && (
+                            <p className="truncate text-[11px] italic text-[#8C4A19]">
+                              “{item.frameText}”
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Live Metrics & Linkage Pills */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] font-semibold tabular-nums">
+                        <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">
+                          <TrendingUp className="h-3 w-3 shrink-0" />
+                          Prospectos: <strong>{qrDirectLeadsCount}</strong>
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-800">
+                          <Eye className="h-3 w-3 shrink-0" />
+                          Visitas: <strong>{qrDirectVisitsCount}</strong>
+                        </span>
+                        {isEmbajadorQr && embOwnerInfo ? (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 max-w-full ${
+                              embOwnerInfo.isDirect
+                                ? 'border-[#DFCBB3] bg-amber-50/80 text-[#594133]'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-900 font-bold'
+                            }`}
+                          >
+                            <UserCheck className="h-3 w-3 shrink-0 text-[#3F5432]" />
+                            <span className="truncate max-w-[180px]">
+                              Vinculado a: {embOwnerInfo.name}
+                              {embOwnerInfo.tag ? ` (${embOwnerInfo.tag})` : ''}
+                            </span>
+                          </span>
+                        ) : vendedorMetrics ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-bold text-amber-900">
+                            <Users className="h-3 w-3 shrink-0 text-[#8A5610]" />
+                            Equipo: {vendedorMetrics.totalLeadsCount} prospectos ·{' '}
+                            {vendedorMetrics.totalQrCount} QRs
+                          </span>
+                        ) : null}
                       </div>
                     </div>
 

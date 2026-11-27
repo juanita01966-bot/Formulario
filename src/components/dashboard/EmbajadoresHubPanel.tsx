@@ -55,6 +55,12 @@ import { AvatarPickerField } from './AvatarPickerField';
 import { validateAvatarUrlInput } from '../../utils/avatarImageUtils';
 import { getRoleTheme } from './roleTheme';
 import type { DashboardSurfaceTheme } from './surfaceTheme';
+import {
+  computeEmbajadorMetrics,
+  resolveEmbajadorOwner,
+  type EmbajadorRollupMetrics,
+  type ResolvedOwnerInfo,
+} from '../../utils/partnerMetrics';
 
 export interface EmbajadoresHubPanelProps {
   mode: 'vendedor' | 'admin';
@@ -371,6 +377,9 @@ const LiveEmbajadorQrSvg: React.FC<{
 interface RankedEmbajadorRow {
   partner: ReferralPartner;
   rank: number;
+  metrics: EmbajadorRollupMetrics;
+  owner: ResolvedOwnerInfo;
+  qrCount: number;
   prospectsCount: number;
   citasCount: number;
   demosCount: number;
@@ -432,6 +441,7 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
   referrers,
   accounts = [],
   leads,
+  qrHistory = [],
   visitLog = [],
   defaultOriginUrl,
   onStateUpdated,
@@ -679,31 +689,52 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
     }
   };
 
-  // Compute live metrics for every embajador
+  const effectiveAccounts = useMemo<UserAccount[]>(() => {
+    if (accounts.length > 0) return accounts;
+    if (mode === 'vendedor' && currentUser?.userId) {
+      return [
+        {
+          id: currentUser.userId,
+          username: currentUser.username || '',
+          displayName: currentUser.displayName || 'Tu equipo',
+          role: 'vendedor',
+          tag: currentUser.tag || '',
+          avatarUrl: null,
+          active: true,
+          hasPin: false,
+          tokenVersion: 0,
+          createdAt: '',
+          updatedAt: '',
+        },
+      ];
+    }
+    return accounts;
+  }, [accounts, mode, currentUser]);
+
+  // Compute live metrics for every embajador via shared partnerMetrics utility
   const allRankedRows = useMemo<RankedEmbajadorRow[]>(() => {
     const base = embajadores.map((partner) => {
-      const codeNorm = normalizeReferralCodeInput(partner.code);
-      const matchedLeads = leads.filter(
-        (lead) =>
-          lead.referrerId === partner.id ||
-          (Boolean(codeNorm) &&
-            normalizeReferralCodeInput(lead.referralCode || '') === codeNorm)
+      const metrics = computeEmbajadorMetrics(
+        partner,
+        leads,
+        qrHistory,
+        visitLog,
+        false,
+        effectiveAccounts,
+        referrers
       );
-      const visitsFromLog = visitLog.filter(
-        (v) =>
-          v.referrerId === partner.id ||
-          (Boolean(codeNorm) &&
-            normalizeReferralCodeInput(v.referralCode) === codeNorm)
-      ).length;
 
       return {
         partner,
         rank: 0,
-        prospectsCount: matchedLeads.length,
-        citasCount: matchedLeads.filter((l) => l.category === 'cita').length,
-        demosCount: matchedLeads.filter((l) => l.category === 'demo').length,
-        ordenesCount: matchedLeads.filter((l) => l.category === 'orden').length,
-        visitsCount: Math.max(partner.visitsCount || 0, visitsFromLog),
+        metrics,
+        owner: metrics.owner,
+        qrCount: metrics.qrCount,
+        prospectsCount: metrics.leadsCount,
+        citasCount: metrics.citasCount,
+        demosCount: metrics.demosCount,
+        ordenesCount: metrics.ordenesCount,
+        visitsCount: metrics.visitsCount,
       };
     });
 
@@ -720,7 +751,7 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
     });
 
     return base.map((row, idx) => ({ ...row, rank: idx + 1 }));
-  }, [embajadores, leads, visitLog, sortBy]);
+  }, [embajadores, leads, qrHistory, visitLog, effectiveAccounts, referrers, sortBy]);
 
   // Distinct vendedores for Admin filter dropdown
   const vendedorFilterOptions = useMemo(() => {
@@ -752,8 +783,11 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
     return allRankedRows.filter((row) => {
       if (mode === 'admin' && vendedorFilter !== 'all') {
         if (vendedorFilter === '__direct__') {
-          if (row.partner.ownerVendedorAccountId) return false;
-        } else if (row.partner.ownerVendedorAccountId !== vendedorFilter) {
+          if (!row.owner.isDirect) return false;
+        } else if (
+          row.owner.accountId !== vendedorFilter &&
+          row.partner.ownerVendedorAccountId !== vendedorFilter
+        ) {
           return false;
         }
       }
@@ -761,6 +795,8 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
       return (
         row.partner.name.toLowerCase().includes(q) ||
         row.partner.code.toLowerCase().includes(q) ||
+        row.owner.name.toLowerCase().includes(q) ||
+        (row.owner.tag || '').toLowerCase().includes(q) ||
         (row.partner.ownerVendedorName || '').toLowerCase().includes(q) ||
         (row.partner.ownerVendedorTag || '').toLowerCase().includes(q)
       );
@@ -809,6 +845,25 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
 
   const previewSubject = useMemo(() => {
     if (selectedPreviewPartner && !editingId) {
+      const resolvedOwner = resolveEmbajadorOwner(
+        selectedPreviewPartner,
+        effectiveAccounts,
+        referrers
+      );
+      const matchedRow = allRankedRows.find(
+        (r) => r.partner.id === selectedPreviewPartner.id
+      );
+      const effectiveOwner: ResolvedOwnerInfo =
+        resolvedOwner.isDirect && mode === 'vendedor' && currentUser?.displayName
+          ? {
+              accountId: currentUser.userId || null,
+              name: currentUser.displayName,
+              tag: currentUser.tag || null,
+              avatarUrl: null,
+              isDirect: false,
+            }
+          : resolvedOwner;
+
       return {
         id: selectedPreviewPartner.id,
         name: selectedPreviewPartner.name,
@@ -820,21 +875,55 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
           previewStyleOverride ||
           selectedPreviewPartner.qrStyleId ||
           'classic-gold',
-        ownerLabel:
-          selectedPreviewPartner.ownerVendedorName ||
-          (selectedPreviewPartner.ownerVendedorTag
-            ? `Tag ${selectedPreviewPartner.ownerVendedorTag}`
-            : mode === 'vendedor'
-            ? currentUser?.displayName || 'Tu equipo'
-            : 'Ciprian Directo'),
+        owner: effectiveOwner,
+        metrics: matchedRow?.metrics || null,
         isDraft: false,
       };
     }
 
     const ownerAccount =
       mode === 'admin'
-        ? accounts.find((a) => a.id === formOwnerVendedorId)
+        ? effectiveAccounts.find((a) => a.id === formOwnerVendedorId) || null
         : null;
+
+    const draftOwner: ResolvedOwnerInfo =
+      mode === 'admin'
+        ? ownerAccount
+          ? {
+              accountId: ownerAccount.id,
+              name: ownerAccount.displayName,
+              tag: ownerAccount.tag || null,
+              avatarUrl: ownerAccount.avatarUrl ?? null,
+              isDirect: false,
+            }
+          : editingPartner && formOwnerVendedorId
+          ? resolveEmbajadorOwner(editingPartner, effectiveAccounts, referrers)
+          : {
+              accountId: null,
+              name: 'Ciprian Directo',
+              tag: null,
+              avatarUrl: null,
+              isDirect: true,
+            }
+        : currentUser?.displayName
+        ? {
+            accountId: currentUser.userId || null,
+            name: currentUser.displayName,
+            tag: currentUser.tag || null,
+            avatarUrl: null,
+            isDirect: false,
+          }
+        : {
+            accountId: null,
+            name: 'Tu equipo',
+            tag: currentUser?.tag || null,
+            avatarUrl: null,
+            isDirect: false,
+          };
+
+    const editingRow = editingPartner
+      ? allRankedRows.find((r) => r.partner.id === editingPartner.id)
+      : null;
 
     return {
       id: editingPartner?.id || 'draft',
@@ -844,10 +933,8 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
       emoji: identityTab === 'emoji' ? formEmoji.trim() || null : null,
       phone: formPhone.trim() || undefined,
       styleId: formQrStyleId,
-      ownerLabel:
-        mode === 'admin'
-          ? ownerAccount?.displayName || 'Ciprian Directo'
-          : currentUser?.displayName || 'Tu equipo',
+      owner: draftOwner,
+      metrics: editingRow?.metrics || null,
       isDraft: !editingPartner,
     };
   }, [
@@ -856,7 +943,9 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
     previewStyleOverride,
     mode,
     currentUser,
-    accounts,
+    effectiveAccounts,
+    referrers,
+    allRankedRows,
     formOwnerVendedorId,
     editingPartner,
     formName,
@@ -1447,17 +1536,48 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
                   <h4 className="font-serif text-base font-bold text-white truncate">
                     {previewSubject.name}
                   </h4>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
                     <span className="rounded-full bg-white/10 border border-[#F4CA73]/30 px-2 py-0.5 font-mono text-[10px] font-bold text-[#F4CA73]">
                       {previewSubject.code}
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-[#E8D5BE] truncate max-w-[160px]">
-                      <UserCheck className="h-2.5 w-2.5 text-[#F4CA73] shrink-0" />
-                      <span className="truncate">
-                        {previewSubject.ownerLabel}
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold max-w-full ${
+                        previewSubject.owner.isDirect
+                          ? 'bg-white/10 border-white/20 text-[#E8D5BE]'
+                          : 'bg-emerald-500/20 border-emerald-400/45 text-emerald-100'
+                      }`}
+                    >
+                      <UserCheck
+                        className={`h-3 w-3 shrink-0 ${
+                          previewSubject.owner.isDirect
+                            ? 'text-[#F4CA73]'
+                            : 'text-emerald-300'
+                        }`}
+                      />
+                      <span className="truncate max-w-[200px]">
+                        Vinculado a: {previewSubject.owner.name}
+                        {previewSubject.owner.tag
+                          ? ` (${previewSubject.owner.tag})`
+                          : ''}
                       </span>
                     </span>
                   </div>
+                  {previewSubject.metrics && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[10px] font-semibold text-[#E8D5BE] tabular-nums">
+                      <span className="rounded-md bg-white/10 border border-white/15 px-1.5 py-0.5">
+                        QRs: <strong className="text-[#F4CA73]">{previewSubject.metrics.qrCount}</strong>
+                      </span>
+                      <span className="rounded-md bg-white/10 border border-white/15 px-1.5 py-0.5">
+                        Prosp.: <strong className="text-white">{previewSubject.metrics.leadsCount}</strong>
+                      </span>
+                      <span className="rounded-md bg-white/10 border border-white/15 px-1.5 py-0.5">
+                        Visitas: <strong className="text-sky-200">{previewSubject.metrics.visitsCount}</strong>
+                      </span>
+                      <span className="rounded-md bg-white/10 border border-white/15 px-1.5 py-0.5">
+                        Órdenes: <strong className="text-emerald-300">{previewSubject.metrics.ordenesCount}</strong>
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1872,20 +1992,48 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
                               </div>
 
                               <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                                <span className="inline-flex items-center rounded-md border border-[#E5C17B] bg-[#FFF4DC] px-2 py-0.5 font-mono text-[10.5px] font-bold text-[#8A5610]">
+                                <span className="inline-flex items-center rounded-md border border-[#E5C17B] bg-amber-50 px-2 py-0.5 font-mono text-[10.5px] font-bold text-[#8A5610]">
                                   {r.code}
                                 </span>
 
-                                {mode === 'admin' && (
-                                  <span className="inline-flex items-center gap-1 rounded-full border border-[#DFCBB3] bg-white/75 px-2 py-0.5 text-[10.5px] font-semibold text-[#594133]">
-                                    <UserCheck className="h-3 w-3 text-[#C88A2B] shrink-0" />
-                                    <span className="truncate max-w-[150px]">
-                                      {r.ownerVendedorName ||
-                                        r.ownerVendedorTag ||
-                                        'Ciprian Directo'}
+                                {(() => {
+                                  const effectiveRowOwner: ResolvedOwnerInfo =
+                                    row.owner.isDirect &&
+                                    mode === 'vendedor' &&
+                                    currentUser?.displayName
+                                      ? {
+                                          accountId: currentUser.userId || null,
+                                          name: currentUser.displayName,
+                                          tag: currentUser.tag || null,
+                                          avatarUrl: null,
+                                          isDirect: false,
+                                        }
+                                      : row.owner;
+
+                                  return (
+                                    <span
+                                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10.5px] max-w-full ${
+                                        effectiveRowOwner.isDirect
+                                          ? 'border-[#DFCBB3] bg-amber-50/70 font-semibold text-[#594133]'
+                                          : 'border-emerald-200 bg-emerald-50 font-bold text-emerald-900'
+                                      }`}
+                                    >
+                                      <UserCheck
+                                        className={`h-3 w-3 shrink-0 ${
+                                          effectiveRowOwner.isDirect
+                                            ? 'text-[#C88A2B]'
+                                            : 'text-[#3F5432]'
+                                        }`}
+                                      />
+                                      <span className="truncate max-w-[210px]">
+                                        Vinculado a: {effectiveRowOwner.name}
+                                        {effectiveRowOwner.tag
+                                          ? ` (${effectiveRowOwner.tag})`
+                                          : ''}
+                                      </span>
                                     </span>
-                                  </span>
-                                )}
+                                  );
+                                })()}
                               </div>
                             </div>
                           </div>
@@ -1926,6 +2074,10 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
 
                           {/* Compact Metric Chips */}
                           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold tabular-nums">
+                            <span className="dsb-glass-subtle inline-flex items-center gap-1 rounded-lg border border-[#DFCBB3] px-2 py-0.5 text-[#22150E]">
+                              <QrCode className="h-3 w-3 text-[#C88A2B] shrink-0" />
+                              QRs: <strong>{row.qrCount}</strong>
+                            </span>
                             <span className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-800">
                               Visitas: <strong>{row.visitsCount}</strong>
                             </span>

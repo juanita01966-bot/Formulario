@@ -88,7 +88,6 @@ import { ReposoProspectsSection } from '../components/dashboard/ReposoProspectsS
 import { ProspectsManager, type LeadUpdatePayload } from '../components/dashboard/ProspectsManager';
 import { TelemarketingProspectsView } from '../components/dashboard/TelemarketingProspectsView';
 import { GiftsEditor } from '../components/dashboard/GiftsEditor';
-import { QrMetricsAccordion } from '../components/dashboard/QrMetricsAccordion';
 import { QrStudioPanel } from '../components/dashboard/QrStudioPanel';
 import { EmbajadoresHubPanel } from '../components/dashboard/EmbajadoresHubPanel';
 import { ReferralsLeaderboardPanel } from '../components/dashboard/ReferralsLeaderboardPanel';
@@ -102,6 +101,7 @@ import {
   downloadReferralQrPng,
 } from '../components/dashboard/referralQrExport';
 import { AmbassadorAvatar } from '../components/shared/AmbassadorAvatar';
+import { computeVendedorRollupMetrics } from '../utils/partnerMetrics';
 
 interface DashboardPageProps {
   appState: AppState;
@@ -453,12 +453,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     setSecurityStage('filter1_credentials');
   };
 
-  // Filtered Leads & VisitLog for Overview (Admin) and Vendedor View
+  // Filtered Leads for Overview (Admin) and Vendedor View
   const dateBounds = useMemo(
     () => resolveDateBounds(datePreset, dateFrom, dateTo),
     [datePreset, dateFrom, dateTo]
   );
-  const isDateFiltered = datePreset !== 'all';
 
   const referrerById = useMemo(() => {
     const map = new Map<string, (NonNullable<AppState['referrers']>)[number]>();
@@ -599,14 +598,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       return matchesChannelFilter(lead.referrerId, lead.referralCode, false);
     });
   }, [appState.leads, dateBounds, matchesChannelFilter]);
-
-  const filteredVisitLog = useMemo(() => {
-    const rawLog = appState.visitLog ?? [];
-    return rawLog.filter((ev) => {
-      if (!isTimestampInRange(ev.visitedAt, dateBounds)) return false;
-      return matchesChannelFilter(ev.referrerId, ev.referralCode, true);
-    });
-  }, [appState.visitLog, dateBounds, matchesChannelFilter]);
 
   const handleClearGlobalFilters = () => {
     setDatePreset('all');
@@ -822,6 +813,42 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   const vendedorUrl = vendedorTag ? buildReferralUrl(defaultOriginUrl, vendedorTag) : defaultOriginUrl;
   const effectiveVendedorAvatarUrl = currentUser?.avatarUrl ?? vendedorPartner?.avatarUrl ?? null;
+
+  const vendedorRollup = useMemo(() => {
+    if (userRole !== 'vendedor') return null;
+    return computeVendedorRollupMetrics(
+      {
+        accountId: currentUser?.userId ?? null,
+        partnerId: vendedorPartner?.id ?? null,
+        name: currentUser?.displayName || currentUser?.username || vendedorTag || 'Vendedor',
+        tag: vendedorTag,
+        avatarUrl: effectiveVendedorAvatarUrl,
+        active: vendedorPartner?.active ?? true,
+        partner: vendedorPartner,
+      },
+      appState.referrers ?? [],
+      appState.leads,
+      appState.qrHistory ?? [],
+      appState.visitLog ?? [],
+      false,
+      accounts,
+      appState.settings.defaultTicketAmount
+    );
+  }, [
+    userRole,
+    currentUser?.userId,
+    currentUser?.displayName,
+    currentUser?.username,
+    vendedorTag,
+    effectiveVendedorAvatarUrl,
+    vendedorPartner,
+    appState.referrers,
+    appState.leads,
+    appState.qrHistory,
+    appState.visitLog,
+    accounts,
+    appState.settings.defaultTicketAmount,
+  ]);
 
   const headerUser = useMemo<DashboardSessionUser | null>(() => {
     if (!currentUser) return null;
@@ -1439,6 +1466,57 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         )}
                       </div>
                     </div>
+
+                    {/* Vendedor Consolidated Team Rollup Stat Chips */}
+                    {vendedorRollup && (
+                      <div
+                        data-preserve-surface="true"
+                        className="relative z-10 mt-3.5 pt-3 border-t border-[#C8A85B]/25 grid grid-cols-1 sm:grid-cols-3 gap-2"
+                      >
+                        <div className="rounded-xl border border-[#C8A85B]/30 bg-black/25 px-3 py-2 flex items-center justify-between gap-2 min-w-0">
+                          <div className="min-w-0">
+                            <span className="block text-[10px] font-bold uppercase tracking-[0.12em] text-[#E5CF92]">
+                              Embajadores
+                            </span>
+                            <span className="block text-[11px] text-[#C8D8BC] truncate">
+                              {vendedorRollup.activeEmbajadoresCount}{' '}
+                              {vendedorRollup.activeEmbajadoresCount === 1 ? 'activo' : 'activos'} en tu equipo
+                            </span>
+                          </div>
+                          <span className="font-serif text-lg sm:text-xl font-bold text-white tabular-nums shrink-0">
+                            {vendedorRollup.embajadoresCount}
+                          </span>
+                        </div>
+
+                        <div className="rounded-xl border border-[#C8A85B]/30 bg-black/25 px-3 py-2 flex items-center justify-between gap-2 min-w-0">
+                          <div className="min-w-0">
+                            <span className="block text-[10px] font-bold uppercase tracking-[0.12em] text-[#E5CF92]">
+                              QRs totales
+                            </span>
+                            <span className="block text-[11px] text-[#C8D8BC] tabular-nums truncate">
+                              Directo: {vendedorRollup.directQrCount} · Emb: {vendedorRollup.embajadoresQrCount}
+                            </span>
+                          </div>
+                          <span className="font-serif text-lg sm:text-xl font-bold text-[#F3E2B3] tabular-nums shrink-0">
+                            {vendedorRollup.totalQrCount}
+                          </span>
+                        </div>
+
+                        <div className="rounded-xl border border-[#C8A85B]/35 bg-[#C8A85B]/12 px-3 py-2 flex items-center justify-between gap-2 min-w-0">
+                          <div className="min-w-0">
+                            <span className="block text-[10px] font-bold uppercase tracking-[0.12em] text-[#F3E2B3]">
+                              Prospectos
+                            </span>
+                            <span className="block text-[11px] text-[#E4ECD8] tabular-nums truncate">
+                              Directo: {vendedorRollup.directLeadsCount} + Embajadores: {vendedorRollup.embajadoresLeadsCount}
+                            </span>
+                          </div>
+                          <span className="font-serif text-lg sm:text-xl font-bold text-white tabular-nums shrink-0">
+                            {vendedorRollup.totalLeadsCount}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </motion.section>
 
                   <MetricsFilterBar
@@ -1539,25 +1617,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     onBusyChange={setReposoBusy}
                   />
 
-                  <QrMetricsAccordion
-                    referrers={appState.referrers ?? []}
-                    qrHistory={appState.qrHistory ?? []}
-                    leads={filteredLeads}
-                    visitLog={filteredVisitLog}
-                    isDateFiltered={isDateFiltered}
-                    ambassadorFilter={ambassadorFilter}
-                    settings={appState.settings}
-                    defaultOriginUrl={defaultOriginUrl}
-                    onGoToReferrals={() => {
-                      setReferralsSubTab('ranking');
-                      setActiveTab('referrals');
-                    }}
-                    onGoToQrStudio={() => {
-                      setReferralsSubTab('studio');
-                      setActiveTab('referrals');
-                    }}
-                  />
-
                   <ProspectsManager
                     leads={filteredLeads}
                     gifts={appState.gifts}
@@ -1633,6 +1692,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       qrHistory={appState.qrHistory ?? []}
                       referrers={appState.referrers ?? []}
                       accounts={accounts}
+                      leads={appState.leads}
+                      visitLog={appState.visitLog ?? []}
+                      defaultTicketAmount={appState.settings.defaultTicketAmount}
                       defaultUrl={defaultOriginUrl}
                       onCreateQr={handleCreateQr}
                       onDeleteQr={handleDeleteQr}
@@ -1656,6 +1718,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       referrers={appState.referrers ?? []}
                       leads={appState.leads}
                       visitLog={appState.visitLog}
+                      accounts={accounts}
+                      qrHistory={appState.qrHistory ?? []}
                       settings={appState.settings}
                       defaultOriginUrl={defaultOriginUrl}
                       onUpdatePartner={handleUpdateReferralPartner}

@@ -32,11 +32,13 @@ import {
 import type {
   AppSettings,
   Lead,
+  QrCodeRecord,
   QrStyleId,
   ReferralMetricKey,
   ReferralPartner,
   ReferralPrizeRule,
   ReferralVisitEvent,
+  UserAccount,
 } from '../../types/app';
 import type {
   UpdateReferralPayload,
@@ -55,6 +57,14 @@ import { AmbassadorAvatar } from '../shared/AmbassadorAvatar';
 import { AvatarPickerField } from './AvatarPickerField';
 import { validateAvatarUrlInput } from '../../utils/avatarImageUtils';
 import { getRoleTheme } from './roleTheme';
+import {
+  computeEmbajadorMetrics,
+  computeVendedorRollupMetrics,
+  normalizePartnerCode,
+  type EmbajadorRollupMetrics,
+  type ResolvedOwnerInfo,
+  type VendedorRollupMetrics,
+} from '../../utils/partnerMetrics';
 
 export const DEFAULT_PRIZE_RULE: ReferralPrizeRule = {
   prizeName: 'Premio Embajador Royal Prestige',
@@ -71,6 +81,8 @@ interface ReferralsLeaderboardPanelProps {
   referrers: ReferralPartner[];
   leads: Lead[];
   visitLog?: ReferralVisitEvent[];
+  accounts?: UserAccount[];
+  qrHistory?: QrCodeRecord[];
   isDateFiltered?: boolean;
   settings: AppSettings;
   defaultOriginUrl: string;
@@ -81,6 +93,7 @@ interface ReferralsLeaderboardPanelProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
+type PartnerScopeFilter = 'all' | 'vendedores' | 'embajadores';
 type FilterMode = 'all' | 'winning' | 'active_activity' | 'no_leads' | 'inactive';
 type SortMode =
   | 'prize_rank'
@@ -94,6 +107,16 @@ type SortMode =
 interface PartnerMetricsRow {
   partner: ReferralPartner;
   rank: number;
+  isEmbajador: boolean;
+  owner: ResolvedOwnerInfo | null;
+  qrCount: number;
+  directQrCount: number;
+  embajadoresQrCount: number;
+  embajadoresCount: number;
+  directLeadsCount: number;
+  embajadoresLeadsCount: number;
+  vendedorRollup: VendedorRollupMetrics | null;
+  embajadorRollup: EmbajadorRollupMetrics | null;
   leads: Lead[];
   leadsCount: number;
   visits: number;
@@ -109,6 +132,29 @@ interface PartnerMetricsRow {
   reachedTarget: boolean;
   isWinning: boolean;
   prizeStatusLabel: string;
+}
+
+function findLeadEmbajadorSource(
+  lead: Lead,
+  breakdown?: EmbajadorRollupMetrics[]
+): ReferralPartner | null {
+  if (!breakdown || breakdown.length === 0) return null;
+  const leadCode = normalizePartnerCode(lead.referralCode);
+  for (const item of breakdown) {
+    if (lead.referrerId && lead.referrerId === item.embajador.id) {
+      return item.embajador;
+    }
+    const embCode = normalizePartnerCode(item.embajador.code);
+    if (leadCode && embCode && leadCode === embCode) {
+      return item.embajador;
+    }
+  }
+  return null;
+}
+
+function formatOwnerLabel(owner: ResolvedOwnerInfo | null): string {
+  if (!owner || owner.isDirect) return 'Ciprian Directo';
+  return owner.tag ? `${owner.name} (${owner.tag})` : owner.name;
 }
 
 const METRIC_LABELS: Record<ReferralMetricKey, { short: string; label: string; unit: string }> = {
@@ -178,6 +224,8 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
   referrers,
   leads,
   visitLog,
+  accounts = [],
+  qrHistory = [],
   isDateFiltered = false,
   settings,
   defaultOriginUrl,
@@ -234,6 +282,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
 
   // List filters / UI state
   const [search, setSearch] = useState('');
+  const [partnerScope, setPartnerScope] = useState<PartnerScopeFilter>('all');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [sortMode, setSortMode] = useState<SortMode>('prize_rank');
   const [expandedPartnerId, setExpandedPartnerId] = useState<string | null>(null);
@@ -277,6 +326,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       code: qrModalPartner.code,
       referralUrl: url,
       avatarUrl: qrModalPartner.avatarUrl ?? null,
+      emoji: qrModalPartner.emoji ?? null,
       styleId: qrModalStyle,
     })
       .then((dataUrl) => {
@@ -293,26 +343,118 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     };
   }, [qrModalPartner, qrModalStyle, defaultOriginUrl]);
 
-  // Compute live metrics + official prize ranking for all ambassadors
-  const rankedRows = useMemo<PartnerMetricsRow[]>(() => {
-    const base = referrers.map((partner) => {
-      const codeUpper = partner.code.trim().toUpperCase();
-      const matchedLeads = leads.filter(
-        (lead) =>
-          (lead.referrerId && lead.referrerId === partner.id) ||
-          (lead.referralCode && lead.referralCode.trim().toUpperCase() === codeUpper)
-      );
+  const scopeCounts = useMemo(() => {
+    let vendedores = 0;
+    let embajadores = 0;
+    for (const r of referrers) {
+      if (r.partnerType === 'embajador') embajadores += 1;
+      else vendedores += 1;
+    }
+    return { all: referrers.length, vendedores, embajadores };
+  }, [referrers]);
 
-      const leadsCount = matchedLeads.length;
-      const citasCount = matchedLeads.filter((l) => l.category === 'cita').length;
-      const demosCount = matchedLeads.filter((l) => l.category === 'demo').length;
-      const ordenesCount = matchedLeads.filter((l) => l.category === 'orden').length;
-      const salesTotal = matchedLeads
-        .filter((l) => l.category === 'orden')
-        .reduce(
-          (acc, l) => acc + (typeof l.orderAmount === 'number' && l.orderAmount > 0 ? l.orderAmount : 0),
-          0
+  // Compute live metrics + official prize ranking (Vendedores roll up direct + all linked Embajadores)
+  const rankedRows = useMemo<PartnerMetricsRow[]>(() => {
+    const accountById = new Map<string, UserAccount>();
+    const accountByTag = new Map<string, UserAccount>();
+    for (const acc of accounts) {
+      accountById.set(acc.id, acc);
+      const norm = normalizePartnerCode(acc.tag);
+      if (norm) accountByTag.set(norm, acc);
+    }
+
+    const scopedReferrers = referrers.filter((partner) => {
+      if (partnerScope === 'vendedores') return partner.partnerType !== 'embajador';
+      if (partnerScope === 'embajadores') return partner.partnerType === 'embajador';
+      return true;
+    });
+
+    const base = scopedReferrers.map((partner) => {
+      const isEmbajador = partner.partnerType === 'embajador';
+
+      let matchedLeads: Lead[] = [];
+      let leadsCount = 0;
+      let citasCount = 0;
+      let demosCount = 0;
+      let ordenesCount = 0;
+      let salesTotal = 0;
+      let visits = 0;
+      let uniqueVisits = 0;
+      let qrCount = 0;
+      let directQrCount = 0;
+      let embajadoresQrCount = 0;
+      let embajadoresCount = 0;
+      let directLeadsCount = 0;
+      let embajadoresLeadsCount = 0;
+      let owner: ResolvedOwnerInfo | null = null;
+      let vendedorRollup: VendedorRollupMetrics | null = null;
+      let embajadorRollup: EmbajadorRollupMetrics | null = null;
+
+      if (isEmbajador) {
+        const embMetrics = computeEmbajadorMetrics(
+          partner,
+          leads,
+          qrHistory,
+          visitLog,
+          isDateFiltered,
+          accounts,
+          referrers,
+          settings.defaultTicketAmount
         );
+        embajadorRollup = embMetrics;
+        owner = embMetrics.owner;
+        matchedLeads = embMetrics.leads;
+        leadsCount = embMetrics.leadsCount;
+        citasCount = embMetrics.citasCount;
+        demosCount = embMetrics.demosCount;
+        ordenesCount = embMetrics.ordenesCount;
+        salesTotal = embMetrics.salesTotal;
+        visits = embMetrics.visitsCount;
+        uniqueVisits = embMetrics.uniqueVisitsCount;
+        qrCount = embMetrics.qrCount;
+        directQrCount = embMetrics.qrCount;
+        directLeadsCount = embMetrics.leadsCount;
+      } else {
+        const normCode = normalizePartnerCode(partner.code);
+        const matchedAccount =
+          (partner.accountId ? accountById.get(partner.accountId) : undefined) ||
+          (normCode ? accountByTag.get(normCode) : undefined) ||
+          null;
+
+        const rollup = computeVendedorRollupMetrics(
+          {
+            accountId: partner.accountId ?? matchedAccount?.id ?? null,
+            partnerId: partner.id,
+            name: partner.name,
+            tag: partner.code,
+            avatarUrl: partner.avatarUrl ?? matchedAccount?.avatarUrl ?? null,
+            active: partner.active,
+            partner,
+          },
+          referrers,
+          leads,
+          qrHistory,
+          visitLog,
+          isDateFiltered,
+          accounts,
+          settings.defaultTicketAmount
+        );
+        vendedorRollup = rollup;
+        matchedLeads = rollup.leads;
+        leadsCount = rollup.totalLeadsCount;
+        citasCount = rollup.citasCount;
+        demosCount = rollup.demosCount;
+        ordenesCount = rollup.ordenesCount;
+        salesTotal = rollup.salesTotal;
+        visits = rollup.visitsCount;
+        uniqueVisits = rollup.uniqueVisitsCount;
+        qrCount = rollup.totalQrCount;
+        directQrCount = rollup.directQrCount;
+        embajadoresQrCount = rollup.embajadoresQrCount;
+        embajadoresCount = rollup.embajadoresCount;
+        directLeadsCount = rollup.directLeadsCount;
+        embajadoresLeadsCount = rollup.embajadoresLeadsCount;
+      }
 
       const points =
         leadsCount * prizeRule.pointsPerLead +
@@ -320,19 +462,6 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         demosCount * prizeRule.pointsPerDemo +
         ordenesCount * prizeRule.pointsPerOrden;
 
-      let visits = Math.max(0, Number(partner.visitsCount) || 0);
-      let uniqueVisits = Math.max(0, Number(partner.uniqueVisitsCount) || 0);
-      if (Array.isArray(visitLog) && (isDateFiltered || visitLog.length > 0)) {
-        const matchedVisits = visitLog.filter(
-          (ev) =>
-            ev.referrerId === partner.id ||
-            (ev.referralCode && ev.referralCode.trim().toUpperCase() === codeUpper)
-        );
-        if (isDateFiltered || matchedVisits.length > 0) {
-          visits = matchedVisits.length;
-          uniqueVisits = new Set(matchedVisits.map((ev) => ev.visitorId)).size;
-        }
-      }
       const conversionPct =
         visits > 0 ? Math.round((leadsCount / visits) * 1000) / 10 : 0;
 
@@ -349,6 +478,16 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       return {
         partner,
         rank: 0,
+        isEmbajador,
+        owner,
+        qrCount,
+        directQrCount,
+        embajadoresQrCount,
+        embajadoresCount,
+        directLeadsCount,
+        embajadoresLeadsCount,
+        vendedorRollup,
+        embajadorRollup,
         leads: matchedLeads,
         leadsCount,
         visits,
@@ -402,16 +541,43 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         prizeStatusLabel,
       };
     });
-  }, [referrers, leads, visitLog, isDateFiltered, prizeRule]);
+  }, [
+    referrers,
+    leads,
+    visitLog,
+    accounts,
+    qrHistory,
+    isDateFiltered,
+    partnerScope,
+    prizeRule,
+    settings.defaultTicketAmount,
+  ]);
 
-  // Global KPI aggregates
+  // Global KPI aggregates (deduplicated: never double-count Embajadores already rolled up inside a Vendedor row)
   const kpis = useMemo(() => {
-    const totalPartners = referrers.length;
-    const activePartners = referrers.filter((r) => r.active).length;
-    const totalVisits = rankedRows.reduce((acc, r) => acc + r.visits, 0);
-    const totalUniqueVisits = rankedRows.reduce((acc, r) => acc + r.uniqueVisits, 0);
+    const totalPartners = rankedRows.length;
+    const activePartners = rankedRows.filter((r) => r.partner.active).length;
 
-    // Count unique attributed leads across all ambassadors
+    const rolledUpEmbajadorIds = new Set<string>();
+    for (const row of rankedRows) {
+      if (!row.isEmbajador && row.vendedorRollup) {
+        for (const emb of row.vendedorRollup.embajadores) {
+          rolledUpEmbajadorIds.add(emb.id);
+        }
+      }
+    }
+
+    let totalVisits = 0;
+    let totalUniqueVisits = 0;
+    for (const row of rankedRows) {
+      if (row.isEmbajador && rolledUpEmbajadorIds.has(row.partner.id)) {
+        continue;
+      }
+      totalVisits += row.visits;
+      totalUniqueVisits += row.uniqueVisits;
+    }
+
+    // Count unique attributed leads across visible scope
     const attributedLeadIds = new Set<string>();
     const attributedLeads: Lead[] = [];
     for (const row of rankedRows) {
@@ -432,7 +598,11 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     const salesTotal = attributedLeads
       .filter((l) => l.category === 'orden')
       .reduce(
-        (acc, l) => acc + (typeof l.orderAmount === 'number' && l.orderAmount > 0 ? l.orderAmount : 0),
+        (acc, l) =>
+          acc +
+          (typeof l.orderAmount === 'number' && l.orderAmount > 0
+            ? l.orderAmount
+            : settings.defaultTicketAmount || 0),
         0
       );
     const winnersCount = rankedRows.filter((r) => r.isWinning).length;
@@ -452,7 +622,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       winnersCount,
       reachedTargetCount,
     };
-  }, [referrers, rankedRows]);
+  }, [rankedRows, settings.defaultTicketAmount]);
 
   const podiumRows = useMemo(() => rankedRows.slice(0, 3), [rankedRows]);
 
@@ -469,7 +639,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         row.partner.name.toLowerCase().includes(q) ||
         row.partner.code.toLowerCase().includes(q) ||
         (row.partner.phone || '').toLowerCase().includes(q) ||
-        (row.partner.notes || '').toLowerCase().includes(q)
+        (row.partner.notes || '').toLowerCase().includes(q) ||
+        (row.owner?.name || '').toLowerCase().includes(q) ||
+        (row.owner?.tag || '').toLowerCase().includes(q)
       );
     });
 
@@ -660,6 +832,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         code: qrModalPartner.code,
         referralUrl: buildReferralUrl(defaultOriginUrl, qrModalPartner.code),
         avatarUrl: qrModalPartner.avatarUrl ?? null,
+        emoji: qrModalPartner.emoji ?? null,
         styleId: qrModalStyle,
       });
     } catch (err) {
@@ -674,6 +847,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       'Posicion',
       'Nombre',
       'Codigo',
+      'Tipo',
+      'Vendedor Vinculado',
+      'QRs',
       'Estado Premio',
       'Activo',
       'Visitas',
@@ -691,6 +867,13 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       row.rank,
       escapeCsvCell(row.partner.name),
       escapeCsvCell(row.partner.code),
+      escapeCsvCell(row.isEmbajador ? 'Embajador' : 'Vendedor (Equipo)'),
+      escapeCsvCell(
+        row.isEmbajador
+          ? formatOwnerLabel(row.owner)
+          : `Equipo propio (${row.embajadoresCount} emb.)`
+      ),
+      row.qrCount,
       escapeCsvCell(row.prizeStatusLabel),
       escapeCsvCell(row.partner.active ? 'Si' : 'No'),
       row.visits,
@@ -1219,11 +1402,12 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                       <AmbassadorAvatar
                         name={row.partner.name}
                         avatarUrl={row.partner.avatarUrl}
+                        emoji={row.partner.emoji}
                         size="md"
                         ring="gold"
                         className={isFirst ? 'ring-offset-[#1D110A]' : ''}
                       />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <h4
                           className={`font-serif text-base sm:text-lg font-bold truncate ${
                             isFirst ? 'text-white' : 'text-[#22150E]'
@@ -1231,14 +1415,75 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         >
                           {row.partner.name}
                         </h4>
-                        <span
-                          className={`inline-block mt-0.5 font-mono text-[11px] font-bold tracking-wide truncate max-w-full ${
-                            isFirst ? 'text-[#F4CA73]' : 'text-[#9A6315]'
-                          }`}
-                        >
-                          ?ref={row.partner.code}
-                        </span>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`inline-block font-mono text-[11px] font-bold tracking-wide truncate max-w-full ${
+                              isFirst ? 'text-[#F4CA73]' : 'text-[#9A6315]'
+                            }`}
+                          >
+                            ?ref={row.partner.code}
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ${
+                              isFirst
+                                ? 'bg-white/10 border border-white/15 text-[#F4CA73]'
+                                : 'dsb-glass-subtle text-[#594133]'
+                            }`}
+                          >
+                            <QrCode className="h-2.5 w-2.5 shrink-0" />
+                            {row.qrCount} {row.qrCount === 1 ? 'QR' : 'QRs'}
+                          </span>
+                        </div>
                       </div>
+                    </div>
+
+                    {/* Role / Linkage / Breakdown Strip */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {row.isEmbajador ? (
+                        <>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              isFirst
+                                ? 'bg-[#F4CA73]/20 border border-[#F4CA73]/40 text-[#F4CA73]'
+                                : 'border border-[#C8A85B]/55 bg-[#FFF4DC] text-[#7A4610]'
+                            }`}
+                          >
+                            <Sparkles className="h-2.5 w-2.5 shrink-0" />
+                            Embajador
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold max-w-full truncate ${
+                              isFirst
+                                ? 'bg-emerald-500/20 border border-emerald-400/40 text-emerald-200'
+                                : 'border border-emerald-300/70 bg-emerald-50 text-emerald-900'
+                            }`}
+                          >
+                            Vinculado a: {formatOwnerLabel(row.owner)}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              isFirst
+                                ? 'bg-emerald-500/20 border border-emerald-400/40 text-emerald-200'
+                                : 'border border-emerald-300/70 bg-[#E6EEDB] text-emerald-900'
+                            }`}
+                          >
+                            Vendedor · {row.embajadoresCount}{' '}
+                            {row.embajadoresCount === 1 ? 'embajador' : 'embajadores'} · {row.qrCount} QRs
+                          </span>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+                              isFirst
+                                ? 'bg-white/10 text-[#E8D5BE]'
+                                : 'dsb-glass-subtle text-[#594133]'
+                            }`}
+                          >
+                            Directo: {row.directLeadsCount} · Embajadores: {row.embajadoresLeadsCount}
+                          </span>
+                        </>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-3 gap-1.5 sm:gap-2 pt-0.5 sm:pt-1">
@@ -1399,6 +1644,48 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
             </div>
           </div>
 
+          {/* Partner Scope Toggle: Todos | Vendedores (Equipo) | Embajadores */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div
+              role="tablist"
+              aria-label="Filtrar por tipo de socio"
+              className="dsb-glass-subtle inline-flex flex-wrap items-center gap-1 rounded-2xl p-1 border border-[#8B0018]/18 max-w-full"
+            >
+              {(
+                [
+                  { id: 'all', label: `Todos (${scopeCounts.all})` },
+                  { id: 'vendedores', label: `Vendedores (Equipo) (${scopeCounts.vendedores})` },
+                  { id: 'embajadores', label: `Embajadores (${scopeCounts.embajadores})` },
+                ] as Array<{ id: PartnerScopeFilter; label: string }>
+              ).map((tab) => {
+                const active = partnerScope === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setPartnerScope(tab.id)}
+                    className={`min-h-[36px] sm:min-h-[34px] rounded-xl px-3 py-1.5 text-[11.5px] sm:text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                      active
+                        ? adminTheme.activePillClass
+                        : 'text-[#594133] hover:bg-white/75'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="text-[11px] text-[#7B5D4A]">
+              {partnerScope === 'vendedores'
+                ? 'Totales consolidados: canal directo + todos los embajadores vinculados.'
+                : partnerScope === 'embajadores'
+                  ? 'Rendimiento individual de cada embajador y su vendedor vinculado.'
+                  : 'Los vendedores muestran el total consolidado de su equipo.'}
+            </span>
+          </div>
+
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap">
             {(
               [
@@ -1530,6 +1817,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                       <AmbassadorAvatar
                         name={partner.name}
                         avatarUrl={partner.avatarUrl}
+                        emoji={partner.emoji}
                         size="sm"
                         ring={row.isWinning ? 'gold' : 'subtle'}
                       />
@@ -1547,6 +1835,27 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                           <span className="inline-flex items-center gap-1 rounded-md border border-[#E6C99E] bg-[#FAF0E0] px-2 py-0.5 font-mono text-[11px] font-bold text-[#8C4A19]">
                             {partner.code}
                           </span>
+                          {row.isEmbajador ? (
+                            <>
+                              <span className="inline-flex items-center gap-1 rounded-full border border-[#C8A85B]/55 bg-[#FFF4DC] px-2 py-0.5 text-[10.5px] font-bold text-[#7A4610]">
+                                <Sparkles className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
+                                Embajador
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2.5 py-0.5 text-[10.5px] font-bold text-emerald-900 max-w-full truncate">
+                                Vinculado a: {formatOwnerLabel(row.owner)}
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-full dsb-glass-subtle px-2 py-0.5 text-[10.5px] font-bold text-[#594133] tabular-nums">
+                                <QrCode className="h-3 w-3 shrink-0 text-[#8B0018]" />
+                                {row.qrCount} {row.qrCount === 1 ? 'QR' : 'QRs'}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2.5 py-0.5 text-[10.5px] font-bold text-emerald-900 tabular-nums">
+                              Vendedor · {row.embajadoresCount}{' '}
+                              {row.embajadoresCount === 1 ? 'embajador' : 'embajadores'} · {row.qrCount}{' '}
+                              {row.qrCount === 1 ? 'QR' : 'QRs'}
+                            </span>
+                          )}
                           {!partner.active && (
                             <span className="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-bold text-stone-700">
                               Inactivo
@@ -1567,8 +1876,13 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                           )}
                         </div>
 
-                        {/* Secondary meta (phone / notes / last visit) */}
+                        {/* Secondary meta (breakdown / phone / notes / last visit) */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[#7B5D4A]">
+                          {!row.isEmbajador && (
+                            <span className="inline-flex items-center gap-1 rounded-md dsb-glass-subtle px-2 py-0.5 text-[11px] font-semibold text-[#594133] tabular-nums">
+                              Directo: {row.directLeadsCount} · Embajadores: {row.embajadoresLeadsCount}
+                            </span>
+                          )}
                           {partner.phone && (
                             <span className="inline-flex items-center gap-1 font-mono tabular-nums">
                               <Phone className="h-3 w-3 text-[#B84A27]" />
@@ -1788,11 +2102,29 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         exit={{ opacity: 0, height: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="mt-3 pt-3 border-t border-dashed border-[#DFCBB3] space-y-2">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
-                            <span className="font-bold text-[#594133]">
-                              Prospectos traídos por {partner.name} ({row.leadsCount})
-                            </span>
+                        <div className="mt-3 pt-3 border-t border-dashed border-[#DFCBB3] space-y-2.5">
+                          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-1.5 text-xs">
+                            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                              <span className="font-bold text-[#594133]">
+                                {row.isEmbajador
+                                  ? `Prospectos traídos por ${partner.name} (${row.leadsCount})`
+                                  : `Prospectos consolidados de ${partner.name} (${row.leadsCount})`}
+                              </span>
+                              {row.isEmbajador ? (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2 py-0.5 text-[10.5px] font-bold text-emerald-900">
+                                  Vinculado a: {formatOwnerLabel(row.owner)}
+                                </span>
+                              ) : (
+                                <>
+                                  <span className="inline-flex items-center rounded-full dsb-glass-subtle px-2 py-0.5 text-[10.5px] font-semibold text-[#594133] tabular-nums">
+                                    Directo: {row.directLeadsCount} · Embajadores: {row.embajadoresLeadsCount}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full dsb-glass-subtle px-2 py-0.5 text-[10.5px] font-semibold text-[#594133] tabular-nums">
+                                    QRs: {row.qrCount} (Dir: {row.directQrCount} · Emb: {row.embajadoresQrCount})
+                                  </span>
+                                </>
+                              )}
+                            </div>
                             <span className="font-mono text-[11px] text-[#8A6D5B] truncate max-w-full sm:max-w-md">
                               {referralUrl}
                             </span>
@@ -1806,17 +2138,34 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                               {row.leads.map((lead) => {
                                 const badge = CATEGORY_BADGE_MAP[lead.category] || CATEGORY_BADGE_MAP.none;
+                                const sourceEmbajador = !row.isEmbajador
+                                  ? findLeadEmbajadorSource(lead, row.vendedorRollup?.embajadoresBreakdown)
+                                  : null;
                                 return (
                                   <div
                                     key={lead.id}
-                                    className="flex items-center justify-between gap-2 rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-3 py-2 text-xs"
+                                    className="flex items-center justify-between gap-2 rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-3 py-2 text-xs min-w-0"
                                   >
-                                    <div className="min-w-0">
-                                      <p className="font-bold text-[#22150E] truncate">{lead.name}</p>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <p className="font-bold text-[#22150E] truncate">{lead.name}</p>
+                                        {!row.isEmbajador &&
+                                          (sourceEmbajador ? (
+                                            <span className="inline-flex items-center gap-1 rounded-full border border-[#C8A85B]/55 bg-[#FFF4DC] px-2 py-0.5 text-[9.5px] font-bold text-[#7A4610] max-w-full truncate">
+                                              <Sparkles className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
+                                              {sourceEmbajador.emoji ? `${sourceEmbajador.emoji} ` : ''}
+                                              {sourceEmbajador.name}
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center rounded-full border border-emerald-300/70 bg-[#E6EEDB] px-2 py-0.5 text-[9.5px] font-bold text-emerald-900">
+                                              Directo · {partner.code}
+                                            </span>
+                                          ))}
+                                      </div>
                                       <p className="text-[11px] text-[#6E5341] truncate">
                                         <span className="font-mono">{lead.phone}</span> · {lead.giftName || 'Sin regalo'}
                                       </p>
-                                      <p className="text-[10px] text-[#8A6D5B]">
+                                      <p className="text-[10px] text-[#8A6D5B] truncate">
                                         Orden {lead.claimCode} · {formatShortDate(lead.createdAt)}
                                       </p>
                                     </div>

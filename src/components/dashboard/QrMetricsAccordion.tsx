@@ -22,6 +22,7 @@ import type {
   ReferralPartner,
   ReferralPrizeRule,
   ReferralVisitEvent,
+  UserAccount,
 } from '../../types/app';
 import {
   buildReferralUrl,
@@ -32,12 +33,22 @@ import { DEFAULT_PRIZE_RULE } from './ReferralsLeaderboardPanel';
 import { AmbassadorAvatar } from '../shared/AmbassadorAvatar';
 import { GlassSpotlightCard } from './GlassSpotlightCard';
 import { getRoleTheme } from './roleTheme';
+import {
+  computeEmbajadorMetrics,
+  computeVendedorRollupMetrics,
+  normalizePartnerCode,
+  resolveEmbajadorOwner,
+  type EmbajadorRollupMetrics,
+  type ResolvedOwnerInfo,
+  type VendedorRollupMetrics,
+} from '../../utils/partnerMetrics';
 
 interface QrMetricsAccordionProps {
   referrers: ReferralPartner[];
   qrHistory: QrCodeRecord[];
   leads: Lead[];
   visitLog?: ReferralVisitEvent[];
+  accounts?: UserAccount[];
   isDateFiltered?: boolean;
   ambassadorFilter?: string;
   settings: AppSettings;
@@ -54,10 +65,19 @@ interface TrackedQrRow {
   code: string;
   avatarUrl?: string | null;
   emoji?: string | null;
-  partnerType?: 'vendedor' | 'embajador';
+  partnerType: 'vendedor' | 'embajador';
+  owner: ResolvedOwnerInfo | null;
   ownerVendedorAccountId?: string | null;
   ownerVendedorName?: string | null;
   ownerVendedorTag?: string | null;
+  qrCount: number;
+  directQrCount: number;
+  embajadoresQrCount: number;
+  embajadoresCount: number;
+  directLeadsCount: number;
+  embajadoresLeadsCount: number;
+  vendedorRollup: VendedorRollupMetrics | null;
+  embajadorRollup: EmbajadorRollupMetrics | null;
   active: boolean;
   styleId: QrStyleId;
   visits: number;
@@ -74,6 +94,29 @@ interface TrackedQrRow {
   progressPct: number;
   reachedTarget: boolean;
   isWinning: boolean;
+}
+
+function formatOwnerBadgeText(owner: ResolvedOwnerInfo | null): string {
+  if (!owner || owner.isDirect) return 'Ciprian Directo';
+  return owner.tag ? `${owner.name} (${owner.tag})` : owner.name;
+}
+
+function findLeadEmbajadorSource(
+  lead: Lead,
+  breakdown?: EmbajadorRollupMetrics[]
+): ReferralPartner | null {
+  if (!breakdown || breakdown.length === 0) return null;
+  const leadCode = normalizePartnerCode(lead.referralCode);
+  for (const item of breakdown) {
+    if (lead.referrerId && lead.referrerId === item.embajador.id) {
+      return item.embajador;
+    }
+    const embCode = normalizePartnerCode(item.embajador.code);
+    if (leadCode && embCode && leadCode === embCode) {
+      return item.embajador;
+    }
+  }
+  return null;
 }
 
 const METRIC_UNIT_LABELS: Record<ReferralMetricKey, { short: string; unit: string }> = {
@@ -130,6 +173,7 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
   qrHistory,
   leads,
   visitLog,
+  accounts = [],
   isDateFiltered = false,
   ambassadorFilter = 'all',
   settings,
@@ -153,44 +197,63 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
     const seenIds = new Set<string>();
     const seenCodes = new Set<string>();
 
-    const entries: Array<{
+    const accountById = new Map<string, UserAccount>();
+    const accountByTag = new Map<string, UserAccount>();
+    for (const acc of accounts) {
+      accountById.set(acc.id, acc);
+      const norm = normalizePartnerCode(acc.tag);
+      if (norm) accountByTag.set(norm, acc);
+    }
+
+    type BaseEntry = {
       key: string;
+      partner: ReferralPartner | null;
       partnerId: string | null;
       accountId?: string | null;
       name: string;
       code: string;
       avatarUrl?: string | null;
       emoji?: string | null;
-      partnerType?: 'vendedor' | 'embajador';
+      partnerType: 'vendedor' | 'embajador';
+      owner: ResolvedOwnerInfo | null;
       ownerVendedorAccountId?: string | null;
       ownerVendedorName?: string | null;
       ownerVendedorTag?: string | null;
       active: boolean;
       styleId: QrStyleId;
-      visits: number;
-      uniqueVisits: number;
-    }> = [];
+    };
+
+    const entries: BaseEntry[] = [];
 
     for (const partner of referrers) {
-      const codeUpper = normalizeReferralCodeInput(partner.code) || partner.code.trim().toUpperCase();
+      const codeUpper = normalizeReferralCodeInput(partner.code) || normalizePartnerCode(partner.code);
       seenIds.add(partner.id);
       if (codeUpper) seenCodes.add(codeUpper);
+      const isEmbajador = partner.partnerType === 'embajador';
+      const owner = isEmbajador ? resolveEmbajadorOwner(partner, accounts, referrers) : null;
+      const matchedAccount =
+        !isEmbajador
+          ? (partner.accountId ? accountById.get(partner.accountId) : undefined) ||
+            (codeUpper ? accountByTag.get(codeUpper) : undefined) ||
+            null
+          : null;
+
       entries.push({
         key: `partner:${partner.id}`,
+        partner,
         partnerId: partner.id,
-        accountId: partner.accountId ?? null,
+        accountId: partner.accountId ?? matchedAccount?.id ?? null,
         name: partner.name,
         code: codeUpper,
-        avatarUrl: partner.avatarUrl ?? null,
+        avatarUrl: partner.avatarUrl ?? matchedAccount?.avatarUrl ?? null,
         emoji: partner.emoji ?? null,
-        partnerType: partner.partnerType === 'embajador' ? 'embajador' : 'vendedor',
-        ownerVendedorAccountId: partner.ownerVendedorAccountId ?? null,
-        ownerVendedorName: partner.ownerVendedorName ?? null,
-        ownerVendedorTag: partner.ownerVendedorTag ?? null,
+        partnerType: isEmbajador ? 'embajador' : 'vendedor',
+        owner,
+        ownerVendedorAccountId: owner?.accountId ?? partner.ownerVendedorAccountId ?? null,
+        ownerVendedorName: owner?.name ?? partner.ownerVendedorName ?? null,
+        ownerVendedorTag: owner?.tag ?? partner.ownerVendedorTag ?? null,
         active: partner.active,
         styleId: partner.qrStyleId || 'classic-gold',
-        visits: Math.max(0, Number(partner.visitsCount) || 0),
-        uniqueVisits: Math.max(0, Number(partner.uniqueVisitsCount) || 0),
       });
     }
 
@@ -203,35 +266,35 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
       seenCodes.add(codeUpper);
       entries.push({
         key: `qr:${qr.id}`,
+        partner: null,
         partnerId: qr.referrerId || null,
         accountId: qr.accountId ?? null,
         name: qr.name,
         code: codeUpper,
         partnerType: 'vendedor',
+        owner: null,
         active: true,
         styleId: qr.styleId || 'classic-gold',
-        visits: 0,
-        uniqueVisits: 0,
       });
     }
 
     const filteredEntries = entries.filter((entry) => {
       if (ambassadorFilter === 'organic') return false;
       if (ambassadorFilter.startsWith('tag:')) {
-        const targetTag = ambassadorFilter.slice('tag:'.length).trim().toUpperCase();
-        const targetEntry = entries.find((e) => e.code === targetTag);
+        const targetTag = normalizePartnerCode(ambassadorFilter.slice('tag:'.length));
+        const targetEntry = entries.find((e) => normalizePartnerCode(e.code) === targetTag);
+        const targetAcc = accountByTag.get(targetTag);
+        const targetAccountId = targetEntry?.accountId || targetAcc?.id || null;
+
         if (targetEntry?.partnerType === 'embajador') {
-          return entry.code === targetTag;
+          return normalizePartnerCode(entry.code) === targetTag;
         }
-        if (entry.code === targetTag) return true;
+        if (normalizePartnerCode(entry.code) === targetTag) return true;
         if (entry.partnerType === 'embajador') {
-          const ownerTagUpper = (entry.ownerVendedorTag || '').trim().toUpperCase();
+          const ownerTagUpper = normalizePartnerCode(entry.owner?.tag || entry.ownerVendedorTag);
           if (ownerTagUpper && ownerTagUpper === targetTag) return true;
-          if (
-            targetEntry?.accountId &&
-            entry.ownerVendedorAccountId &&
-            entry.ownerVendedorAccountId === targetEntry.accountId
-          ) {
+          const ownerAccId = entry.owner?.accountId || entry.ownerVendedorAccountId;
+          if (targetAccountId && ownerAccId && ownerAccId === targetAccountId) {
             return true;
           }
         }
@@ -243,36 +306,116 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
     const useVisitLog = Array.isArray(visitLog) && (isDateFiltered || visitLog.length > 0);
 
     const computed = filteredEntries.map((entry) => {
-      const matchedLeads = leads.filter(
-        (lead) =>
-          (entry.partnerId && lead.referrerId === entry.partnerId) ||
-          (lead.referralCode && lead.referralCode.trim().toUpperCase() === entry.code)
-      );
+      let matchedLeads: Lead[] = [];
+      let leadsCount = 0;
+      let citasCount = 0;
+      let demosCount = 0;
+      let ordenesCount = 0;
+      let salesTotal = 0;
+      let visits = 0;
+      let uniqueVisits = 0;
+      let qrCount = 1;
+      let directQrCount = 1;
+      let embajadoresQrCount = 0;
+      let embajadoresCount = 0;
+      let directLeadsCount = 0;
+      let embajadoresLeadsCount = 0;
+      let owner: ResolvedOwnerInfo | null = entry.owner;
+      let vendedorRollup: VendedorRollupMetrics | null = null;
+      let embajadorRollup: EmbajadorRollupMetrics | null = null;
 
-      let visits = entry.visits;
-      let uniqueVisits = entry.uniqueVisits;
-      if (useVisitLog && visitLog) {
-        const matchedVisits = visitLog.filter(
-          (ev) =>
-            (entry.partnerId && ev.referrerId === entry.partnerId) ||
-            (ev.referralCode && ev.referralCode.trim().toUpperCase() === entry.code)
+      if (entry.partner && entry.partnerType === 'embajador') {
+        const embMetrics = computeEmbajadorMetrics(
+          entry.partner,
+          leads,
+          qrHistory,
+          visitLog,
+          isDateFiltered,
+          accounts,
+          referrers,
+          settings.defaultTicketAmount
         );
-        if (isDateFiltered || matchedVisits.length > 0) {
-          visits = matchedVisits.length;
-          uniqueVisits = new Set(matchedVisits.map((ev) => ev.visitorId)).size;
+        embajadorRollup = embMetrics;
+        owner = embMetrics.owner;
+        matchedLeads = embMetrics.leads;
+        leadsCount = embMetrics.leadsCount;
+        citasCount = embMetrics.citasCount;
+        demosCount = embMetrics.demosCount;
+        ordenesCount = embMetrics.ordenesCount;
+        salesTotal = embMetrics.salesTotal;
+        visits = embMetrics.visitsCount;
+        uniqueVisits = embMetrics.uniqueVisitsCount;
+        qrCount = embMetrics.qrCount;
+        directQrCount = embMetrics.qrCount;
+        directLeadsCount = embMetrics.leadsCount;
+      } else if (entry.partner) {
+        const rollup = computeVendedorRollupMetrics(
+          {
+            accountId: entry.accountId ?? null,
+            partnerId: entry.partner.id,
+            name: entry.name,
+            tag: entry.code,
+            avatarUrl: entry.avatarUrl ?? null,
+            active: entry.active,
+            partner: entry.partner,
+          },
+          referrers,
+          leads,
+          qrHistory,
+          visitLog,
+          isDateFiltered,
+          accounts,
+          settings.defaultTicketAmount
+        );
+        vendedorRollup = rollup;
+        matchedLeads = rollup.leads;
+        leadsCount = rollup.totalLeadsCount;
+        citasCount = rollup.citasCount;
+        demosCount = rollup.demosCount;
+        ordenesCount = rollup.ordenesCount;
+        salesTotal = rollup.salesTotal;
+        visits = rollup.visitsCount;
+        uniqueVisits = rollup.uniqueVisitsCount;
+        qrCount = rollup.totalQrCount;
+        directQrCount = rollup.directQrCount;
+        embajadoresQrCount = rollup.embajadoresQrCount;
+        embajadoresCount = rollup.embajadoresCount;
+        directLeadsCount = rollup.directLeadsCount;
+        embajadoresLeadsCount = rollup.embajadoresLeadsCount;
+      } else {
+        // Legacy orphan QR history record without ReferralPartner
+        matchedLeads = leads.filter(
+          (lead) =>
+            (entry.partnerId && lead.referrerId === entry.partnerId) ||
+            (lead.referralCode && normalizePartnerCode(lead.referralCode) === entry.code)
+        );
+        if (useVisitLog && visitLog) {
+          const matchedVisits = visitLog.filter(
+            (ev) =>
+              (entry.partnerId && ev.referrerId === entry.partnerId) ||
+              (ev.referralCode && normalizePartnerCode(ev.referralCode) === entry.code)
+          );
+          if (isDateFiltered || matchedVisits.length > 0) {
+            visits = matchedVisits.length;
+            uniqueVisits = new Set(matchedVisits.map((ev) => ev.visitorId)).size;
+          }
         }
+        leadsCount = matchedLeads.length;
+        directLeadsCount = leadsCount;
+        citasCount = matchedLeads.filter((l) => l.category === 'cita').length;
+        demosCount = matchedLeads.filter((l) => l.category === 'demo').length;
+        ordenesCount = matchedLeads.filter((l) => l.category === 'orden').length;
+        salesTotal = matchedLeads
+          .filter((l) => l.category === 'orden')
+          .reduce(
+            (acc, l) =>
+              acc +
+              (typeof l.orderAmount === 'number' && l.orderAmount > 0
+                ? l.orderAmount
+                : settings.defaultTicketAmount || 0),
+            0
+          );
       }
-
-      const leadsCount = matchedLeads.length;
-      const citasCount = matchedLeads.filter((l) => l.category === 'cita').length;
-      const demosCount = matchedLeads.filter((l) => l.category === 'demo').length;
-      const ordenesCount = matchedLeads.filter((l) => l.category === 'orden').length;
-      const salesTotal = matchedLeads
-        .filter((l) => l.category === 'orden')
-        .reduce(
-          (acc, l) => acc + (typeof l.orderAmount === 'number' && l.orderAmount > 0 ? l.orderAmount : 0),
-          0
-        );
 
       const points =
         leadsCount * prizeRule.pointsPerLead +
@@ -294,7 +437,28 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
       const reachedTarget = metricValue >= target;
 
       return {
-        ...entry,
+        key: entry.key,
+        partnerId: entry.partnerId,
+        accountId: entry.accountId,
+        name: entry.name,
+        code: entry.code,
+        avatarUrl: entry.avatarUrl,
+        emoji: entry.emoji,
+        partnerType: entry.partnerType,
+        owner,
+        ownerVendedorAccountId: owner?.accountId ?? entry.ownerVendedorAccountId ?? null,
+        ownerVendedorName: owner?.name ?? entry.ownerVendedorName ?? null,
+        ownerVendedorTag: owner?.tag ?? entry.ownerVendedorTag ?? null,
+        qrCount,
+        directQrCount,
+        embajadoresQrCount,
+        embajadoresCount,
+        directLeadsCount,
+        embajadoresLeadsCount,
+        vendedorRollup,
+        embajadorRollup,
+        active: entry.active,
+        styleId: entry.styleId,
         visits,
         uniqueVisits,
         leads: matchedLeads,
@@ -328,7 +492,17 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
       if (isWinning) winners += 1;
       return { ...row, isWinning };
     });
-  }, [referrers, qrHistory, leads, visitLog, isDateFiltered, ambassadorFilter, prizeRule]);
+  }, [
+    referrers,
+    qrHistory,
+    leads,
+    visitLog,
+    accounts,
+    isDateFiltered,
+    ambassadorFilter,
+    prizeRule,
+    settings.defaultTicketAmount,
+  ]);
 
   const activeCount = useMemo(
     () => trackedRows.filter((r) => r.active).length,
@@ -499,7 +673,7 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
                       size="sm"
                       ring={row.isWinning ? 'gold' : 'subtle'}
                     />
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                         <span className="font-serif text-sm sm:text-base font-bold text-[#1F1714] max-w-full truncate">
                           {row.name}
@@ -507,18 +681,32 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
                         <span className="max-w-full truncate rounded-md border border-[#8B0018]/22 bg-[#FEE2E2]/55 px-1.5 py-0.5 font-mono text-[10.5px] font-bold text-[#8B0018]">
                           ?ref={row.code}
                         </span>
-                        {row.partnerType === 'embajador' && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-[#C8A85B]/55 bg-[#FFF4DC] px-2 py-0.5 text-[10px] font-bold text-[#7A4610]">
-                            <Sparkles className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
-                            <span>Embajador</span>
-                          </span>
-                        )}
-                        {row.partnerType === 'embajador' &&
-                          (row.ownerVendedorName || row.ownerVendedorTag) && (
-                            <span className="max-w-full truncate rounded-full border border-[#3F5432]/25 bg-[#E9F0E2] px-2 py-0.5 text-[10px] font-semibold text-[#2B3A24]">
-                              de {row.ownerVendedorName || row.ownerVendedorTag}
+                        {row.partnerType === 'embajador' ? (
+                          <>
+                            <span className="inline-flex items-center gap-1 rounded-full border border-[#C8A85B]/55 bg-[#FFF4DC] px-2 py-0.5 text-[10px] font-bold text-[#7A4610]">
+                              <Sparkles className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
+                              <span>Embajador</span>
                             </span>
-                          )}
+                            <span className="max-w-full truncate rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2 py-0.5 text-[10px] font-bold text-emerald-900">
+                              Vinculado a: {formatOwnerBadgeText(row.owner)}
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full dsb-glass-subtle px-2 py-0.5 text-[10px] font-bold text-[#594133] tabular-nums">
+                              <QrCode className="h-2.5 w-2.5 shrink-0 text-[#8B0018]" />
+                              {row.qrCount} {row.qrCount === 1 ? 'QR' : 'QRs'}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2 py-0.5 text-[10px] font-bold text-emerald-900 tabular-nums">
+                              {row.embajadoresCount}{' '}
+                              {row.embajadoresCount === 1 ? 'embajador' : 'embajadores'} · {row.qrCount}{' '}
+                              {row.qrCount === 1 ? 'QR' : 'QRs'}
+                            </span>
+                            <span className="inline-flex items-center rounded-full dsb-glass-subtle px-2 py-0.5 text-[10px] font-semibold text-[#594133] tabular-nums">
+                              Directo: {row.directLeadsCount} · Embajadores: {row.embajadoresLeadsCount}
+                            </span>
+                          </>
+                        )}
                         {!row.active && (
                           <span className="rounded-full bg-stone-200/90 px-2 py-0.5 text-[10px] font-bold text-stone-700">
                             Inactivo
@@ -568,6 +756,41 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
                       className="overflow-hidden border-t border-[#8B0018]/14"
                     >
                       <div className="p-3 sm:p-4 bg-white/55 backdrop-blur-md space-y-3.5 sm:space-y-4">
+                        {/* Team Rollup or Vendedor Linkage Context Banner */}
+                        {row.partnerType === 'embajador' ? (
+                          <div className="dsb-glass-subtle flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs">
+                            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                              <span className="inline-flex items-center gap-1 rounded-full border border-[#C8A85B]/55 bg-[#FFF4DC] px-2 py-0.5 text-[10.5px] font-bold text-[#7A4610]">
+                                <Sparkles className="h-3 w-3 shrink-0 text-[#C88A2B]" />
+                                Embajador
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2.5 py-0.5 text-[11px] font-bold text-emerald-900 max-w-full truncate">
+                                Vinculado a: {formatOwnerBadgeText(row.owner)}
+                              </span>
+                            </div>
+                            <span className="inline-flex items-center gap-1 rounded-full dsb-glass-subtle px-2.5 py-0.5 text-[11px] font-bold text-[#594133] tabular-nums shrink-0">
+                              <QrCode className="h-3 w-3 shrink-0 text-[#8B0018]" />
+                              {row.qrCount} {row.qrCount === 1 ? 'QR asignado' : 'QRs asignados'}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="dsb-glass-subtle flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs">
+                            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2.5 py-0.5 text-[11px] font-bold text-emerald-900 tabular-nums">
+                                Equipo Vendedor · {row.embajadoresCount}{' '}
+                                {row.embajadoresCount === 1 ? 'embajador' : 'embajadores'} · {row.qrCount}{' '}
+                                {row.qrCount === 1 ? 'QR' : 'QRs'}
+                              </span>
+                              <span className="text-[11px] font-semibold text-[#594133] tabular-nums">
+                                Directo: {row.directLeadsCount} · Embajadores: {row.embajadoresLeadsCount}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-semibold text-[#7B6253] tabular-nums">
+                              QRs Directos: {row.directQrCount} · Embajadores: {row.embajadoresQrCount}
+                            </span>
+                          </div>
+                        )}
+
                         {/* Metric Tiles */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
                           <div className="dsb-glass-subtle min-w-0 rounded-xl p-2 sm:p-2.5 text-center">
@@ -584,6 +807,11 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
                             <span className="block text-base font-bold text-[#8B0018] tabular-nums">
                               {row.leadsCount}
                             </span>
+                            {row.partnerType !== 'embajador' && (
+                              <span className="block text-[9.5px] text-[#7B6253] tabular-nums truncate">
+                                Dir {row.directLeadsCount} · Emb {row.embajadoresLeadsCount}
+                              </span>
+                            )}
                           </div>
                           <div className="dsb-glass-subtle min-w-0 rounded-xl p-2 sm:p-2.5 text-center">
                             <span className="block text-[10px] font-semibold text-[#7B6253]">Conversión</span>
@@ -698,13 +926,31 @@ export const QrMetricsAccordion: React.FC<QrMetricsAccordionProps> = ({
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                               {row.leads.map((lead) => {
                                 const badge = CATEGORY_BADGES[lead.category] || CATEGORY_BADGES.none;
+                                const sourceEmbajador =
+                                  row.partnerType !== 'embajador'
+                                    ? findLeadEmbajadorSource(lead, row.vendedorRollup?.embajadoresBreakdown)
+                                    : null;
                                 return (
                                   <div
                                     key={lead.id}
                                     className="dsb-glass-subtle min-w-0 max-w-full overflow-hidden flex items-center justify-between gap-2.5 rounded-xl px-3 py-2 text-xs hover:bg-white/80 transition-colors"
                                   >
                                     <div className="min-w-0 flex-1">
-                                      <p className="font-bold text-[#1F1714] truncate">{lead.name}</p>
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <p className="font-bold text-[#1F1714] truncate">{lead.name}</p>
+                                        {row.partnerType !== 'embajador' &&
+                                          (sourceEmbajador ? (
+                                            <span className="inline-flex items-center gap-1 rounded-full border border-[#C8A85B]/55 bg-[#FFF4DC] px-1.5 py-0.5 text-[9.5px] font-bold text-[#7A4610] max-w-full truncate">
+                                              <Sparkles className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
+                                              {sourceEmbajador.emoji ? `${sourceEmbajador.emoji} ` : ''}
+                                              {sourceEmbajador.name}
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center rounded-full border border-emerald-300/70 bg-[#E6EEDB] px-1.5 py-0.5 text-[9.5px] font-bold text-emerald-900">
+                                              Directo
+                                            </span>
+                                          ))}
+                                      </div>
                                       <p className="text-[11px] text-[#594336] truncate">
                                         <span className="font-mono">{lead.phone}</span> ·{' '}
                                         {lead.giftName || 'Sin regalo'}
