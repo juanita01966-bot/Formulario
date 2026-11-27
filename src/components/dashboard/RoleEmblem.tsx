@@ -18,6 +18,115 @@ export const RoleSymbolSvg: React.FC<RoleSymbolSvgProps> = ({
   const prefersReducedMotion = useReducedMotion();
   const allowMotion = animated && !prefersReducedMotion;
 
+  if (role === 'ai_manager') {
+    const medallionGrad = `dsb-aimgr-medallion-${uid}`;
+    const goldBevelGrad = `dsb-aimgr-bevel-${uid}`;
+    const crownStarGrad = `dsb-aimgr-crown-${uid}`;
+    const sheenGrad = `dsb-aimgr-sheen-${uid}`;
+
+    return (
+      <svg
+        viewBox="0 0 40 40"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className={className}
+        aria-hidden="true"
+      >
+        <defs>
+          <radialGradient id={medallionGrad} cx="35%" cy="25%" r="75%">
+            <stop offset="0%" stopColor="#6B480C" />
+            <stop offset="52%" stopColor="#3B2606" />
+            <stop offset="100%" stopColor="#1B1002" />
+          </radialGradient>
+          <linearGradient id={goldBevelGrad} x1="4" y1="3" x2="36" y2="37" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#FFF6D1" />
+            <stop offset="38%" stopColor="#F5D67B" />
+            <stop offset="72%" stopColor="#C8962E" />
+            <stop offset="100%" stopColor="#7A510E" />
+          </linearGradient>
+          <linearGradient id={crownStarGrad} x1="10" y1="7" x2="30" y2="33" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#FFFBEB" />
+            <stop offset="42%" stopColor="#F7DC88" />
+            <stop offset="82%" stopColor="#D4A437" />
+            <stop offset="100%" stopColor="#9A6B16" />
+          </linearGradient>
+          <linearGradient id={sheenGrad} x1="7" y1="4" x2="29" y2="24" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#FFF9E6" stopOpacity="0.45" />
+            <stop offset="100%" stopColor="#F5D67B" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Imperial 24K Octagonal Seal */}
+        <path
+          d="M20 2.5L32.4 7.6L37.5 20L32.4 32.4L20 37.5L7.6 32.4L2.5 20L7.6 7.6L20 2.5Z"
+          fill={`url(#${medallionGrad})`}
+          stroke={`url(#${goldBevelGrad})`}
+          strokeWidth="1.65"
+          strokeLinejoin="round"
+        />
+        {/* Specular top-left bevel sheen */}
+        <path
+          d="M20 4.2L31.2 8.8L35.4 18.8L6.6 26.2L4.2 20L8.8 8.8L20 4.2Z"
+          fill={`url(#${sheenGrad})`}
+        />
+        {/* Subtle orbital neural ring */}
+        <circle
+          cx="20"
+          cy="21.5"
+          r="12.6"
+          stroke="#F5D67B"
+          strokeOpacity="0.34"
+          strokeWidth="0.85"
+          strokeDasharray="2.5 3"
+          className={allowMotion ? 'dsb-orbit-slow' : undefined}
+          style={{ transformOrigin: '20px 21.5px' }}
+        />
+
+        {/* Sovereign Imperial Crown (Top Crest) */}
+        <path
+          d="M13 15.8L11.8 10.6L16.1 13.1L20 8.6L23.9 13.1L28.2 10.6L27 15.8H13Z"
+          fill={`url(#${crownStarGrad})`}
+          stroke="#5A3B08"
+          strokeOpacity="0.5"
+          strokeWidth="0.6"
+          strokeLinejoin="round"
+        />
+        <circle cx="20" cy="7.4" r="1.25" fill="#FFFBEB" />
+        <circle cx="11.8" cy="9.6" r="0.95" fill="#F7DC88" />
+        <circle cx="28.2" cy="9.6" r="0.95" fill="#F7DC88" />
+
+        {/* Neural 4-Point AI Star Core */}
+        <path
+          d="M20 17.2L21.95 22.05L26.8 24L21.95 25.95L20 30.8L18.05 25.95L13.2 24L18.05 22.05L20 17.2Z"
+          fill={`url(#${crownStarGrad})`}
+          stroke="#3D2806"
+          strokeOpacity="0.45"
+          strokeWidth="0.55"
+          strokeLinejoin="round"
+        />
+        {/* Neural Constellation Nodes & Filaments */}
+        <path
+          d="M11 24H13.4M26.6 24H29M20 30.8V33.2"
+          stroke="#F7DC88"
+          strokeOpacity="0.8"
+          strokeWidth="1"
+          strokeLinecap="round"
+        />
+        <circle cx="10.2" cy="24" r="1.1" fill="#FFF6D1" />
+        <circle cx="29.8" cy="24" r="1.1" fill="#FFF6D1" />
+        <circle cx="20" cy="33.8" r="1.1" fill="#F5D67B" />
+        <circle
+          cx="20"
+          cy="24"
+          r="1.7"
+          fill="#FFFBEB"
+          className={allowMotion ? 'dsb-pulse-ring' : undefined}
+          style={{ transformOrigin: '20px 24px' }}
+        />
+      </svg>
+    );
+  }
+
   if (role === 'admin') {
     const shieldGrad = `dsb-admin-shield-${uid}`;
     const crownGrad = `dsb-admin-crown-${uid}`;
@@ -341,20 +450,30 @@ export const RoleEmblemBadge: React.FC<RoleEmblemBadgeProps> = ({
         <div className="flex items-center gap-1.5 flex-wrap">
           <span
             data-dsb-role-label={role}
-            className={`font-bold tracking-tight truncate ${s.label}`}
-            style={{ color: theme.primary }}
+            className={`font-bold tracking-tight truncate ${s.label} ${
+              role === 'ai_manager' ? 'text-[#8A5610]' : ''
+            }`}
+            style={role === 'ai_manager' ? undefined : { color: theme.primary }}
           >
             {cleanName || theme.label}
           </span>
           {cleanTag && (
             <span
               data-dsb-role-tag={role}
-              className={`font-mono font-semibold uppercase tracking-wider rounded-md border ${s.tag}`}
-              style={{
-                backgroundColor: `${theme.primary}14`,
-                borderColor: `${theme.primary}30`,
-                color: theme.primary,
-              }}
+              className={`font-mono font-semibold uppercase tracking-wider rounded-md border ${s.tag} ${
+                role === 'ai_manager'
+                  ? 'bg-[#C8962E]/15 border-[#C8962E]/40 text-[#8A5610]'
+                  : ''
+              }`}
+              style={
+                role === 'ai_manager'
+                  ? undefined
+                  : {
+                      backgroundColor: `${theme.primary}14`,
+                      borderColor: `${theme.primary}30`,
+                      color: theme.primary,
+                    }
+              }
             >
               {cleanTag}
             </span>

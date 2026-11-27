@@ -5,6 +5,8 @@ import {
   Award,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Copy,
   Download,
@@ -34,6 +36,7 @@ import type {
   ReferralPartner,
   ReferralVisitEvent,
   UserAccount,
+  UserRole,
 } from '../../types/app';
 import {
   createEmbajadorRemote,
@@ -64,6 +67,7 @@ import {
 
 export interface EmbajadoresHubPanelProps {
   mode: 'vendedor' | 'admin';
+  userRole?: UserRole;
   currentUser?: {
     userId?: string;
     displayName?: string;
@@ -437,6 +441,7 @@ function getPodiumBadgeClasses(rank: number): {
 
 export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
   mode,
+  userRole,
   currentUser,
   referrers,
   accounts = [],
@@ -446,7 +451,10 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
   defaultOriginUrl,
   onStateUpdated,
 }) => {
-  const roleTheme = getRoleTheme(mode);
+  const isAiManager = userRole === 'ai_manager';
+  const roleTheme = getRoleTheme(userRole || mode);
+  const [currentPage, setCurrentPage] = useState(1);
+  const EMBAJADORES_PAGE_SIZE = 10;
   const leftColumnRef = useRef<HTMLDivElement | null>(null);
   const qrPreviewRef = useRef<HTMLDivElement | null>(null);
 
@@ -834,6 +842,18 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
     );
   }, [filteredRows, sortBy]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, sortBy, vendedorFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / EMBAJADORES_PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStartIdx = (safePage - 1) * EMBAJADORES_PAGE_SIZE;
+  const paginatedRows = useMemo(
+    () => filteredRows.slice(pageStartIdx, pageStartIdx + EMBAJADORES_PAGE_SIZE),
+    [filteredRows, pageStartIdx]
+  );
+
   // Active preview subject: selected embajador OR live draft when none selected
   const selectedPreviewPartner = useMemo(
     () =>
@@ -1039,14 +1059,14 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
   };
 
   const handleConfirmDelete = async (partner: ReferralPartner) => {
-    if (!deletePassword.trim()) {
+    if (!isAiManager && !deletePassword.trim()) {
       setDeleteError('Ingresa tu contraseña de Administrador.');
       return;
     }
     setDeletingBusy(true);
     setDeleteError(null);
     try {
-      const res = await deleteEmbajadorRemote(partner.id, deletePassword);
+      const res = await deleteEmbajadorRemote(partner.id, isAiManager ? '' : deletePassword);
       onStateUpdated(res.state);
       if (editingId === partner.id) {
         resetToCreateMode();
@@ -1920,7 +1940,7 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
             ) : (
               <div className="space-y-3">
                 <AnimatePresence initial={false}>
-                  {filteredRows.map((row) => {
+                  {paginatedRows.map((row) => {
                     const r = row.partner;
                     const podium = getPodiumBadgeClasses(row.rank);
                     const metricVal = getMetricValue(row, sortBy);
@@ -2209,22 +2229,32 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
                                 <div className="flex items-start gap-2 text-xs font-semibold text-rose-900">
                                   <KeyRound className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
                                   <span>
-                                    Eliminar permanentemente a{' '}
-                                    <strong>{r.name}</strong>. Ingresa tu
-                                    contraseña de Administrador:
+                                    {isAiManager ? (
+                                      <>
+                                        ¿Eliminar permanentemente a <strong>{r.name}</strong>? (Autoridad AI Manager · Sin contraseña)
+                                      </>
+                                    ) : (
+                                      <>
+                                        Eliminar permanentemente a{' '}
+                                        <strong>{r.name}</strong>. Ingresa tu
+                                        contraseña de Administrador:
+                                      </>
+                                    )}
                                   </span>
                                 </div>
                                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                                  <input
-                                    type="password"
-                                    value={deletePassword}
-                                    onChange={(e) => {
-                                      setDeletePassword(e.target.value);
-                                      setDeleteError(null);
-                                    }}
-                                    placeholder="Tu contraseña de Administrador"
-                                    className="flex-1 min-h-[42px] rounded-xl border border-rose-200 bg-white px-3 py-2 text-base sm:text-sm text-[#22150E] focus:border-rose-500 focus:outline-none"
-                                  />
+                                  {!isAiManager && (
+                                    <input
+                                      type="password"
+                                      value={deletePassword}
+                                      onChange={(e) => {
+                                        setDeletePassword(e.target.value);
+                                        setDeleteError(null);
+                                      }}
+                                      placeholder="Tu contraseña de Administrador"
+                                      className="flex-1 min-h-[42px] rounded-xl border border-rose-200 bg-white px-3 py-2 text-base sm:text-sm text-[#22150E] focus:border-rose-500 focus:outline-none"
+                                    />
+                                  )}
                                   <div className="flex items-center gap-1.5">
                                     <button
                                       type="button"
@@ -2235,7 +2265,7 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
                                     >
                                       {deletingBusy
                                         ? 'Eliminando...'
-                                        : 'Confirmar'}
+                                        : 'Confirmar eliminación'}
                                     </button>
                                     <button
                                       type="button"
@@ -2264,6 +2294,38 @@ export const EmbajadoresHubPanel: React.FC<EmbajadoresHubPanelProps> = ({
                     );
                   })}
                 </AnimatePresence>
+              </div>
+            )}
+
+            {totalPages > 1 && (
+              <div className="pt-3 border-t border-slate-900/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-[#594133] tabular-nums">
+                  Mostrando {pageStartIdx + 1}–{Math.min(pageStartIdx + EMBAJADORES_PAGE_SIZE, filteredRows.length)} de{' '}
+                  {filteredRows.length}
+                </span>
+                <div className="flex items-center justify-between sm:justify-end gap-1.5">
+                  <button
+                    type="button"
+                    disabled={safePage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    <span>Anterior</span>
+                  </button>
+                  <span className="px-2.5 text-xs font-bold text-[#22150E] tabular-nums">
+                    Página {safePage} de {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    <span>Siguiente</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             )}
           </section>

@@ -283,8 +283,8 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       vendedor2Token = (await l2.json()).sessionToken;
     });
 
-    test('POST /api/accounts/:id/password validates target currentPassword + 2x newPassword, rejects admin, and revokes old tokens', async () => {
-      // Rejects admin account with 400
+    test('POST /api/accounts/:id/password validates target currentPassword + 2x newPassword, rejects admin (403 Opción A), and revokes old tokens', async () => {
+      // Rejects admin account with 403 (Opción A: only AI Manager can change admin passwords)
       const adminReject = await fetch(`${baseUrl}/api/accounts/default/password`, {
         method: 'POST',
         headers: {
@@ -297,7 +297,7 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
           confirmNewPassword: 'NewPassword99!',
         }),
       });
-      assert.strictEqual(adminReject.status, 400);
+      assert.strictEqual(adminReject.status, 403);
 
       // Wrong currentPassword -> 403
       const wrongCurrent = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}/password`, {
@@ -798,40 +798,9 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       assert.strictEqual(okDelGift.status, 200);
     });
 
-    test('POST /api/auth/update-credentials enforces PoloNorte121966@ + PIN 1532 + 2x matching newPassword and rotates admin token', async () => {
-      // Missing PIN -> 403
-      const noPin = await fetch(`${baseUrl}/api/auth/update-credentials`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          masterPassword: MASTER_KEY,
-          newPassword: 'AdminNewPass2027@',
-          confirmNewPassword: 'AdminNewPass2027@',
-        }),
-      });
-      assert.strictEqual(noPin.status, 403);
-
-      // Wrong PIN -> 403
-      const badPin = await fetch(`${baseUrl}/api/auth/update-credentials`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          masterPassword: MASTER_KEY,
-          confirmationPin: '9999',
-          newPassword: 'AdminNewPass2027@',
-          confirmNewPassword: 'AdminNewPass2027@',
-        }),
-      });
-      assert.strictEqual(badPin.status, 403);
-
-      // Mismatched confirmNewPassword -> 400
-      const badConfirm = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+    test('POST /api/auth/update-credentials enforces Opción A (403 for regular admin; AI Manager updates AdminCiprian password and invalidates old admin token)', async () => {
+      // Regular admin is strictly blocked (403) even with MASTER_KEY + PIN 1532
+      const regularAdminBlocked = await fetch(`${baseUrl}/api/auth/update-credentials`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
@@ -840,23 +809,54 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
         body: JSON.stringify({
           masterPassword: MASTER_KEY,
           confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: 'AdminNewPass2027@',
+          confirmNewPassword: 'AdminNewPass2027@',
+        }),
+      });
+      assert.strictEqual(regularAdminBlocked.status, 403);
+
+      // Log in as AI Manager (2FA cognitive security question)
+      const aiLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'JuanOrozco', password: MASTER_KEY }),
+      });
+      assert.strictEqual(aiLoginRes.status, 200);
+      const aiStep1Data = await aiLoginRes.json();
+      const aiSqAnswers = { 'sq-test-1': 'resp-uno', 'sq-test-2': '2099', 'sq-test-3': 'clave-tres', 'sq-test-4': 'codigo-cuatro', 'sq-test-5': 'gusto-cinco' };
+      const aiStep2Res = await fetch(`${baseUrl}/api/auth/verify-security-question`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: aiStep1Data.preAuthToken, answer: aiSqAnswers[aiStep1Data.securityChallenge.questionId] }),
+      });
+      assert.strictEqual(aiStep2Res.status, 200);
+      const aiToken = (await aiStep2Res.json()).sessionToken;
+
+      // Mismatched confirmNewPassword -> 400
+      const badConfirm = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${aiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          targetAccountId: 'default',
           newPassword: 'AdminNewPass2027@',
           confirmNewPassword: 'MismatchPass2027@',
         }),
       });
       assert.strictEqual(badConfirm.status, 400);
 
-      // Valid update rotates token & invalidates old token
+      // Valid AI Manager update rotates AdminCiprian password & invalidates old admin token
       const oldAdminToken = adminSessionToken;
       const okCreds = await fetch(`${baseUrl}/api/auth/update-credentials`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${aiToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          masterPassword: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
+          targetAccountId: 'default',
           newPassword: 'AdminNewPass2027@',
           confirmNewPassword: 'AdminNewPass2027@',
         }),
@@ -864,13 +864,26 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       assert.strictEqual(okCreds.status, 200);
       const credsData = await okCreds.json();
       assert.strictEqual(credsData.ok, true);
-      assert.strictEqual(typeof credsData.sessionToken, 'string');
-      adminSessionToken = credsData.sessionToken;
 
       const oldAdminSess = await fetch(`${baseUrl}/api/auth/session`, {
         headers: { Authorization: `Bearer ${oldAdminToken}` },
       });
       assert.strictEqual(oldAdminSess.status, 401);
+
+      // AdminCiprian logs in with updated password + PIN 1966
+      const relogin1 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminCiprian', password: ADMIN_UPDATED_PASSWORD }),
+      });
+      assert.strictEqual(relogin1.status, 200);
+      const relogin2 = await fetch(`${baseUrl}/api/auth/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: (await relogin1.json()).preAuthToken, pin: '1966' }),
+      });
+      assert.strictEqual(relogin2.status, 200);
+      adminSessionToken = (await relogin2.json()).sessionToken;
 
       const newAdminSess = await fetch(`${baseUrl}/api/auth/session`, {
         headers: { Authorization: `Bearer ${adminSessionToken}` },
@@ -1555,92 +1568,58 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
     });
   });
 
-  describe('7. Admin-Only Password Change Endpoint (POST /api/accounts/:id/admin-password)', () => {
-    test('Enforces RBAC, security key, confirmation PIN, 2x matching newPassword, admin-only target, token rotation, cross-admin update & lockout', async () => {
+  describe('7. Admin-Only Password Change Endpoint (POST /api/accounts/:id/admin-password — Opción A: AI Manager Exclusive)', () => {
+    test('Enforces AI-Manager-only RBAC (403 for telemarketing, vendedor, and regular admin), validates newPassword, rotates target token, and logs audit event', async () => {
       const adminASelfNewPass = 'AdminASelfRotated2028@';
-      const adminBNewPass = 'AdminBByAdminA2028!';
+      const adminBNewPass = 'AdminBByAiMgr2028!';
 
-      // 1. Non-admin callers (telemarketing & vendedor) are rejected with 403
-      const teleCall = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+      // 1. Non-AI-Manager callers (telemarketing, vendedor, and regular admin) are strictly rejected with 403
+      for (const [label, tok] of [
+        ['telemarketing', teleSessionToken],
+        ['vendedor', vendedor1Token],
+        ['regular admin (self)', adminSessionToken],
+      ]) {
+        const res = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${tok}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            securityKey: MASTER_KEY,
+            confirmationPin: ADMIN_CHANGE_PIN,
+            newPassword: adminASelfNewPass,
+            confirmNewPassword: adminASelfNewPass,
+          }),
+        });
+        assert.strictEqual(res.status, 403, `Expected 403 for ${label}`);
+      }
+
+      // Log in as AI Manager (2FA cognitive security question)
+      const aiLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${teleSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
-          newPassword: adminASelfNewPass,
-          confirmNewPassword: adminASelfNewPass,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'JuanOrozco', password: MASTER_KEY }),
       });
-      assert.strictEqual(teleCall.status, 403);
-
-      const vendCall = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+      assert.strictEqual(aiLoginRes.status, 200);
+      const aiStep1Data = await aiLoginRes.json();
+      const aiSqAnswers = { 'sq-test-1': 'resp-uno', 'sq-test-2': '2099', 'sq-test-3': 'clave-tres', 'sq-test-4': 'codigo-cuatro', 'sq-test-5': 'gusto-cinco' };
+      const aiStep2Res = await fetch(`${baseUrl}/api/auth/verify-security-question`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${vendedor1Token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
-          newPassword: adminASelfNewPass,
-          confirmNewPassword: adminASelfNewPass,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: aiStep1Data.preAuthToken, answer: aiSqAnswers[aiStep1Data.securityChallenge.questionId] }),
       });
-      assert.strictEqual(vendCall.status, 403);
+      assert.strictEqual(aiStep2Res.status, 200);
+      const aiToken = (await aiStep2Res.json()).sessionToken;
 
-      // 2. Wrong security key -> 401
-      const wrongKey = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          securityKey: 'WrongSecurityKey999!',
-          confirmationPin: ADMIN_CHANGE_PIN,
-          newPassword: adminASelfNewPass,
-          confirmNewPassword: adminASelfNewPass,
-        }),
-      });
-      assert.strictEqual(wrongKey.status, 401);
-      const wrongKeyBody = await wrongKey.json();
-      assert.strictEqual(wrongKeyBody.error, 'Clave de seguridad incorrecta.');
-      assert.strictEqual(wrongKeyBody.locked, false);
-      assert.strictEqual(typeof wrongKeyBody.remainingAttempts, 'number');
-
-      // 3. Wrong confirmation PIN -> 401
-      const wrongPin = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: '0000',
-          newPassword: adminASelfNewPass,
-          confirmNewPassword: adminASelfNewPass,
-        }),
-      });
-      assert.strictEqual(wrongPin.status, 401);
-      const wrongPinBody = await wrongPin.json();
-      assert.strictEqual(wrongPinBody.error, 'PIN de confirmación incorrecto.');
-      assert.strictEqual(wrongPinBody.locked, false);
-      assert.strictEqual(typeof wrongPinBody.remainingAttempts, 'number');
-
-      // 4. Short newPassword (<8 chars) & mismatched confirmNewPassword -> 400
+      // 2. Short newPassword (<8 chars) & mismatched confirmNewPassword -> 400
       const shortPass = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${aiToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
           newPassword: 'short1!',
           confirmNewPassword: 'short1!',
         }),
@@ -1650,12 +1629,10 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       const mismatchPass = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${aiToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
           newPassword: adminASelfNewPass,
           confirmNewPassword: 'DifferentConfirm2028@',
         }),
@@ -1664,86 +1641,57 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       const mismatchBody = await mismatchPass.json();
       assert.strictEqual(mismatchBody.error, 'La confirmación de la nueva contraseña no coincide.');
 
-      // 5. Rejects ANY target id !== req.dsbSession.userId (vendedor, telemarketing, unknown, or other admin) with 403 Forbidden
+      // 3. Rejects non-admin targets (400) and nonexistent target (404)
       const nonAdminVend = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}/admin-password`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${aiToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
           newPassword: adminASelfNewPass,
           confirmNewPassword: adminASelfNewPass,
         }),
       });
-      assert.strictEqual(nonAdminVend.status, 403);
-
-      const nonAdminTele = await fetch(`${baseUrl}/api/accounts/telemarketing/admin-password`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
-          newPassword: adminASelfNewPass,
-          confirmNewPassword: adminASelfNewPass,
-        }),
-      });
-      assert.strictEqual(nonAdminTele.status, 403);
+      assert.strictEqual(nonAdminVend.status, 400);
 
       const missingTarget = await fetch(`${baseUrl}/api/accounts/nonexistent-admin-id/admin-password`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${aiToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
           newPassword: adminASelfNewPass,
           confirmNewPassword: adminASelfNewPass,
         }),
       });
-      assert.strictEqual(missingTarget.status, 403);
+      assert.strictEqual(missingTarget.status, 404);
 
-      // 6. Self update (Admin A updates Admin A): returns fresh sessionToken, revokes old token, logs audit alert, 2FA works with new password & rejects old
+      // 4. AI Manager updates AdminCiprian ("default") without securityKey/PIN: revokes old token, logs audit alert, 2FA works with new password
       const oldAdminAToken = adminSessionToken;
-      const selfOk = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+      const updateOk = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${oldAdminAToken}`,
+          Authorization: `Bearer ${aiToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
           newPassword: adminASelfNewPass,
           confirmNewPassword: adminASelfNewPass,
         }),
       });
-      assert.strictEqual(selfOk.status, 200);
-      const selfData = await selfOk.json();
-      assert.strictEqual(selfData.ok, true);
-      assert.strictEqual(selfData.message, 'Contraseña de administrador actualizada correctamente.');
-      assert.strictEqual(typeof selfData.sessionToken, 'string');
-      assert.strictEqual(selfData.account.id, 'default');
-      assert.strictEqual(selfData.account.passwordHash, undefined);
-      adminSessionToken = selfData.sessionToken;
+      assert.strictEqual(updateOk.status, 200);
+      const updateData = await updateOk.json();
+      assert.strictEqual(updateData.ok, true);
+      assert.strictEqual(updateData.account.id, 'default');
+      assert.strictEqual(updateData.account.passwordHash, undefined);
 
-      // Old token revoked, fresh token active
+      // Old token revoked
       const oldASess = await fetch(`${baseUrl}/api/auth/session`, {
         headers: { Authorization: `Bearer ${oldAdminAToken}` },
       });
       assert.strictEqual(oldASess.status, 401);
-
-      const newASess = await fetch(`${baseUrl}/api/auth/session`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(newASess.status, 200);
 
       // Old password rejected on login
       const oldALogin = await fetch(`${baseUrl}/api/auth/login`, {
@@ -1769,12 +1717,13 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
         body: JSON.stringify({ preAuthToken: newALogin1Data.preAuthToken, pin: '1966' }),
       });
       assert.strictEqual(newALogin2.status, 200);
-      assert.strictEqual(typeof (await newALogin2.json()).sessionToken, 'string');
+      adminSessionToken = (await newALogin2.json()).sessionToken;
+      assert.strictEqual(typeof adminSessionToken, 'string');
 
       // Audit event recorded in securityAlerts
       const stateAfterSelf = await (
         await fetch(`${baseUrl}/api/state`, {
-          headers: { Authorization: `Bearer ${adminSessionToken}` },
+          headers: { Authorization: `Bearer ${aiToken}` },
         })
       ).json();
       const selfAudit = (stateAfterSelf.securityAlerts || []).find(
@@ -1785,10 +1734,9 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
           a.metadata?.action === 'admin_password_change' &&
           a.metadata?.targetAccountId === 'default'
       );
-      assert.ok(selfAudit, 'Expected admin_audit_event for Admin A self password update');
+      assert.ok(selfAudit, 'Expected admin_audit_event for AdminCiprian password update by AI Manager');
 
-      // 7. Strict Self-Only Cross-Admin Block: Admin A attempting to change Admin B's ("admin-segundo") password -> 403 + critical alert
-      // First establish an active Admin B session so we can prove it stays untouched
+      // 5. Cross-Admin Block: Regular Admin A attempting to change Admin B ("admin-segundo") -> 403 + critical alert
       const bPre1 = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1803,7 +1751,6 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       assert.strictEqual(bPre2.status, 200);
       const oldAdminBToken = (await bPre2.json()).sessionToken;
 
-      // Admin A attempting to update Admin B (even WITH valid MASTER_KEY + PIN 1532) MUST return 403
       const crossBlocked = await fetch(`${baseUrl}/api/accounts/admin-segundo/admin-password`, {
         method: 'POST',
         headers: {
@@ -1820,11 +1767,6 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       assert.strictEqual(crossBlocked.status, 403);
 
       // Both sessions remain valid and Admin B's original password still works (unchanged)
-      const aStillValid = await fetch(`${baseUrl}/api/auth/session`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(aStillValid.status, 200);
-
       const bStillValid = await fetch(`${baseUrl}/api/auth/session`, {
         headers: { Authorization: `Bearer ${oldAdminBToken}` },
       });
@@ -1837,17 +1779,9 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
       });
       assert.strictEqual(bOrigLogin.status, 200);
 
-      const bForgedLogin = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'AdminSegundo', password: adminBNewPass }),
-      });
-      assert.strictEqual(bForgedLogin.status, 401);
-
-      // Critical security alert recorded for cross-admin password attempt
       const stateAfterCross = await (
         await fetch(`${baseUrl}/api/state`, {
-          headers: { Authorization: `Bearer ${adminSessionToken}` },
+          headers: { Authorization: `Bearer ${aiToken}` },
         })
       ).json();
       assert.ok(
@@ -1855,74 +1789,10 @@ describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & 
           (a) =>
             a.code === 'rbac_unauthorized_attempt' &&
             a.severity === 'critical' &&
-            a.metadata?.reason === 'cross_admin_password_attempt' &&
-            a.metadata?.targetAccountId === 'admin-segundo'
+            a.metadata?.reason === 'ai_manager_route_denied'
         ),
-        'Expected critical rbac_unauthorized_attempt alert for cross-admin password attempt'
+        'Expected critical rbac_unauthorized_attempt alert for blocked admin-password call'
       );
-
-      // 8. Rate-limit lockout on admin_pw_change bucket (5 failures -> 429)
-      const pwTestIp = '203.0.113.88';
-      for (let i = 1; i <= 4; i += 1) {
-        const failRes = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${adminSessionToken}`,
-            'Content-Type': 'application/json',
-            'x-test-ip': pwTestIp,
-          },
-          body: JSON.stringify({
-            securityKey: i % 2 === 0 ? MASTER_KEY : 'WrongKey!',
-            confirmationPin: i % 2 === 0 ? '9999' : ADMIN_CHANGE_PIN,
-            newPassword: 'AnotherPass2029!',
-            confirmNewPassword: 'AnotherPass2029!',
-          }),
-        });
-        assert.strictEqual(failRes.status, 401);
-        const failBody = await failRes.json();
-        assert.strictEqual(failBody.locked, false);
-        assert.strictEqual(failBody.remainingAttempts, 5 - i);
-      }
-
-      const fifthFail = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-          'x-test-ip': pwTestIp,
-        },
-        body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: '9999',
-          newPassword: 'AnotherPass2029!',
-          confirmNewPassword: 'AnotherPass2029!',
-        }),
-      });
-      assert.strictEqual(fifthFail.status, 429);
-      const lockedData = await fifthFail.json();
-      assert.strictEqual(lockedData.locked, true);
-      assert.ok(lockedData.retryAfterSeconds > 0);
-      assert.strictEqual(lockedData.remainingAttempts, 0);
-
-      // Even with valid credentials, locked IP gets 429
-      const blockedValid = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-          'x-test-ip': pwTestIp,
-        },
-        body: JSON.stringify({
-          securityKey: MASTER_KEY,
-          confirmationPin: ADMIN_CHANGE_PIN,
-          newPassword: 'AnotherPass2029!',
-          confirmNewPassword: 'AnotherPass2029!',
-        }),
-      });
-      assert.strictEqual(blockedValid.status, 429);
-      const blockedBody = await blockedValid.json();
-      assert.strictEqual(blockedBody.locked, true);
-      assert.strictEqual(blockedBody.remainingAttempts, 0);
     });
   });
 });

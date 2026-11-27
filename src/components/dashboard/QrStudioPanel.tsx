@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   BookmarkCheck,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   Eye,
@@ -31,6 +33,7 @@ import type {
   ReferralPartner,
   ReferralVisitEvent,
   UserAccount,
+  UserRole,
 } from '../../types/app';
 import type { CreateQrPayload } from '../../services/storeClient';
 import {
@@ -57,6 +60,7 @@ interface QrStudioPanelProps {
   visitLog?: ReferralVisitEvent[];
   defaultTicketAmount?: number;
   defaultUrl: string;
+  userRole?: UserRole;
   onCreateQr: (payload: CreateQrPayload) => Promise<void>;
   onDeleteQr: (id: string) => Promise<void>;
   onGoToAccounts?: () => void;
@@ -750,12 +754,16 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
   visitLog = [],
   defaultTicketAmount = 0,
   defaultUrl,
+  userRole = 'admin',
   onCreateQr,
   onDeleteQr,
   onGoToAccounts,
 }) => {
   const studioTopRef = useRef<HTMLDivElement | null>(null);
   const lastSavedSignatureRef = useRef<string | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<'create' | 'metrics' | 'history'>('create');
+  const [historyPage, setHistoryPage] = useState(1);
+  const HISTORY_PAGE_SIZE = 9;
 
   const activeVendedores = useMemo(
     () => accounts.filter((a) => a.role === 'vendedor' && a.active),
@@ -1332,6 +1340,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
       type: 'success',
       text: `Cargado "${record.name}" en el editor en vivo.`,
     });
+    setActiveSubTab('create');
     studioTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -1351,16 +1360,23 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
     }
   };
 
-  const adminTheme = getRoleTheme('admin');
+  const adminTheme = getRoleTheme(userRole);
+  const historyTotalPages = Math.max(1, Math.ceil(qrHistory.length / HISTORY_PAGE_SIZE));
+  const safeHistoryPage = Math.min(historyPage, historyTotalPages);
+  const historyStartIdx = (safeHistoryPage - 1) * HISTORY_PAGE_SIZE;
+  const paginatedQrHistory = useMemo(
+    () => qrHistory.slice(historyStartIdx, historyStartIdx + HISTORY_PAGE_SIZE),
+    [qrHistory, historyStartIdx]
+  );
 
   return (
-    <div ref={studioTopRef} className="space-y-5 sm:space-y-6">
-      {/* Studio Editorial Header */}
+    <div ref={studioTopRef} className="space-y-4">
+      {/* Studio Editorial Header + 3 Instant Sub-Tabs */}
       <motion.section
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-        className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-7"
+        className="relative overflow-hidden dsb-glass rounded-[22px] sm:rounded-[26px] p-3.5 sm:p-5 space-y-3.5"
       >
         <div
           aria-hidden="true"
@@ -1368,41 +1384,97 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
           style={{ background: adminTheme.headerStrip }}
         />
         <div className="pointer-events-none hidden sm:block absolute -right-12 -top-12 h-44 w-44 rounded-full bg-[#8B0018]/10 blur-2xl" />
-        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-3.5 sm:gap-4">
-          <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div
-              className="flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl text-[#FDE68A] shadow-md border border-white/25"
+              className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl text-[#FDE68A] shadow-md border border-white/25"
               style={{ background: adminTheme.heroGradient }}
             >
-              <QrCode className="h-5 w-5 sm:h-6 sm:w-6" />
+              <QrCode className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <span className="inline-flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[#8B0018]">
-                <Sparkles className="h-3.5 w-3.5 text-[#B91C1C] shrink-0" />
+              <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#8B0018]">
+                <Sparkles className="h-3 w-3 text-[#B91C1C] shrink-0" />
                 Estudio QR · Alta Definición
               </span>
-              <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E] mt-0.5 leading-snug">
+              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#22150E] leading-snug">
                 Generador de Códigos QR The Ciprian Company
               </h2>
-              <p className="text-xs sm:text-sm text-[#594133] mt-1 max-w-2xl">
-                Crea tarjetas QR con acabados de lujo, emblema dorado central e impresión en 1024×1024 PNG o SVG vectorial para mesas, invitaciones y flyers.
-              </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/90 backdrop-blur-sm border border-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-800">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/90 backdrop-blur-sm border border-emerald-200 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-              Corrección Nivel H (30%)
+              Nivel H (30%)
             </span>
-            <span className="dsb-glass-subtle inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-[#594133] tabular-nums">
+            <span className="dsb-glass-subtle inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[#594133] tabular-nums">
               <History className="h-3.5 w-3.5 text-[#8B0018]" />
               {qrHistory.length} {qrHistory.length === 1 ? 'guardado' : 'guardados'}
             </span>
           </div>
         </div>
+
+        {/* 3 Instant Sub-Tabs: Crear QR | Métricas Vendedores | Historial QR */}
+        <div
+          role="tablist"
+          aria-label="Secciones de Estudio QR"
+          className="relative dsb-glass-subtle grid grid-cols-3 sm:inline-flex gap-1 w-full sm:w-auto rounded-2xl p-1 border"
+          style={{ borderColor: adminTheme.borderTint }}
+        >
+          {(
+            [
+              { id: 'create', label: 'Crear QR', mobileLabel: 'Crear QR', icon: QrCode, badge: null },
+              {
+                id: 'metrics',
+                label: 'Métricas Vendedores',
+                mobileLabel: 'Vendedores',
+                icon: Users,
+                badge: activeVendedorRollupList.length,
+              },
+              {
+                id: 'history',
+                label: 'Historial QR',
+                mobileLabel: 'Historial',
+                icon: History,
+                badge: qrHistory.length,
+              },
+            ] as const
+          ).map((tab) => {
+            const Icon = tab.icon;
+            const active = activeSubTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveSubTab(tab.id)}
+                className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl px-2.5 sm:px-3.5 py-1.5 text-[11px] sm:text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  active ? adminTheme.activePillClass : 'text-[#594133] hover:bg-white/70'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="sm:hidden">{tab.mobileLabel}</span>
+                <span className="hidden sm:inline">{tab.label}</span>
+                {tab.badge !== null && (
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                      active ? 'bg-white/20 text-white' : 'bg-black/10 text-[#594133]'
+                    }`}
+                  >
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </motion.section>
 
+      {/* Sub-tab 1: Crear QR */}
+      {activeSubTab === 'create' && (
+        <>
       {/* Main Split Workspace: Empty State if no Active Vendedor or Embajador, else Controls + Live Preview */}
       {activeVendedores.length === 0 && activeEmbajadores.length === 0 ? (
         <section className="dsb-glass rounded-[24px] sm:rounded-[26px] border-dashed border-[#C88A2B]/60 p-6 sm:p-10 text-center space-y-3.5">
@@ -2174,10 +2246,23 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
         </aside>
       </div>
       )}
+        </>
+      )}
 
-      {/* Vendedores Rollup Overview Strip */}
-      {activeVendedorRollupList.length > 0 && (
-        <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-7 space-y-4 min-w-0">
+      {/* Sub-tab 2: Métricas Vendedores */}
+      {activeSubTab === 'metrics' && (
+        activeVendedorRollupList.length === 0 ? (
+          <section className="dsb-glass rounded-[24px] p-8 text-center space-y-2">
+            <Users className="mx-auto h-8 w-8 text-[#C88A2B]/80" />
+            <p className="font-serif text-base font-bold text-[#22150E]">
+              Sin vendedores activos registrados
+            </p>
+            <p className="text-xs text-[#6E5341]">
+              Crea cuentas de Vendedor desde la pestaña Cuentas para consultar métricas consolidadas de equipo.
+            </p>
+          </section>
+        ) : (
+        <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-6 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex items-start gap-2.5 min-w-0">
               <div
@@ -2210,6 +2295,7 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
                   type="button"
                   onClick={() => {
                     applyAccountSelection(account);
+                    setActiveSubTab('create');
                     studioTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   }}
                   className={`dsb-glass-subtle text-left rounded-2xl p-3.5 sm:p-4 space-y-3 transition-all cursor-pointer min-w-0 hover:-translate-y-0.5 hover:shadow-md ${
@@ -2300,10 +2386,12 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
             })}
           </div>
         </section>
+        )
       )}
 
-      {/* Saved QR Codes History Gallery */}
-      <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-7 space-y-5">
+      {/* Sub-tab 3: Historial QR (Paginated 9 per page) */}
+      {activeSubTab === 'history' && (
+      <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="font-serif text-lg sm:text-xl font-bold text-[#22150E]">
@@ -2325,13 +2413,13 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
               Aún no has guardado códigos QR
             </p>
             <p className="text-xs text-[#7B5D4A] max-w-md mx-auto">
-              Personaliza el estilo arriba y presiona <strong>Guardar QR en historial</strong> para tener tus diseños listos para reimprimir.
+              Personaliza el estilo en <strong>Crear QR</strong> y presiona <strong>Guardar QR en historial</strong> para tener tus diseños listos para reimprimir.
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             <AnimatePresence initial={false}>
-              {qrHistory.map((item) => {
+              {paginatedQrHistory.map((item) => {
                 const presetMeta = QR_PRESETS.find((p) => p.id === item.styleId) || QR_PRESETS[0];
                 const isConfirming = confirmDeleteId === item.id;
                 const isDeleting = deletingId === item.id;
@@ -2633,7 +2721,40 @@ export const QrStudioPanel: React.FC<QrStudioPanelProps> = ({
             </AnimatePresence>
           </div>
         )}
+
+        {historyTotalPages > 1 && (
+          <div className="pt-3 border-t border-slate-900/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-[#594133] tabular-nums">
+              Mostrando {historyStartIdx + 1}–{Math.min(historyStartIdx + HISTORY_PAGE_SIZE, qrHistory.length)} de{' '}
+              {qrHistory.length} QRs
+            </span>
+            <div className="flex items-center justify-between sm:justify-end gap-1.5">
+              <button
+                type="button"
+                disabled={safeHistoryPage <= 1}
+                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                <span>Anterior</span>
+              </button>
+              <span className="px-2.5 text-xs font-bold text-[#22150E] tabular-nums">
+                Página {safeHistoryPage} de {historyTotalPages}
+              </span>
+              <button
+                type="button"
+                disabled={safeHistoryPage >= historyTotalPages}
+                onClick={() => setHistoryPage((p) => Math.min(historyTotalPages, p + 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <span>Siguiente</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </section>
+      )}
     </div>
   );
 };

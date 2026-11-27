@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowUp,
   Check,
   Copy,
   Delete,
@@ -21,6 +22,7 @@ import type {
   AppSettings,
   AppState,
   GiftThemeId,
+  AiSecurityQuestionChallenge,
   QrStyleId,
   ReferralPrizeRule,
   SecurityAlertStatus,
@@ -56,6 +58,7 @@ import {
   updateSettings,
   verifyDsbSession,
   verifyPinStep2,
+  verifySecurityQuestionStep2,
   type CreateAccountPayload,
   type CreateQrPayload,
   type UpdateAccountPasswordPayload,
@@ -96,6 +99,8 @@ import { SettingsPanel } from '../components/dashboard/SettingsPanel';
 import { SecurityCenterPanel } from '../components/dashboard/SecurityCenterPanel';
 import { ActivityLogPanel } from '../components/dashboard/ActivityLogPanel';
 import { MasterResetModal } from '../components/dashboard/MasterResetModal';
+import { AiManagerPanel } from '../components/dashboard/AiManagerPanel';
+import { setClientGuardEnabled } from '../utils/clientGuard';
 import {
   buildReferralUrl,
   downloadReferralQrPng,
@@ -110,7 +115,12 @@ interface DashboardPageProps {
   onSyncPauseChange?: (paused: boolean) => void;
 }
 
-type SecurityStage = 'checking' | 'filter1_credentials' | 'filter2_pin' | 'authenticated';
+type SecurityStage =
+  | 'checking'
+  | 'filter1_credentials'
+  | 'filter2_pin'
+  | 'filter2_security_question'
+  | 'authenticated';
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   appState,
@@ -144,6 +154,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   const [masterResetOpen, setMasterResetOpen] = useState(false);
   const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
+  const [createAdminSignal, setCreateAdminSignal] = useState(0);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [prospectsBusy, setProspectsBusy] = useState(false);
   const [reposoBusy, setReposoBusy] = useState(false);
   const [giftsBusy, setGiftsBusy] = useState(false);
@@ -159,6 +171,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [preAuthToken, setPreAuthToken] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
+  const [securityChallenge, setSecurityChallenge] = useState<AiSecurityQuestionChallenge | null>(null);
+  const [securityAnswerInput, setSecurityAnswerInput] = useState('');
+  const [showSecurityAnswer, setShowSecurityAnswer] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [lockoutSeconds, setLockoutSeconds] = useState<number>(0);
@@ -182,10 +197,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     settingsBusy ||
     securityBusy;
 
+  const isElevated = userRole === 'admin' || userRole === 'ai_manager';
+
   const securityAlerts = useMemo(
-    () => (userRole === 'admin' && Array.isArray(appState.securityAlerts) ? appState.securityAlerts : []),
-    [userRole, appState.securityAlerts]
+    () => (isElevated && Array.isArray(appState.securityAlerts) ? appState.securityAlerts : []),
+    [isElevated, appState.securityAlerts]
   );
+
+  // Keep client-side DevTools / context-menu security guard synced with live AI Manager process controls
+  useEffect(() => {
+    const enabled = appState.settings.processControls?.clientGuardEnabled ?? true;
+    setClientGuardEnabled(enabled);
+  }, [appState.settings.processControls?.clientGuardEnabled]);
+
+  // Subtle floating "Volver arriba" button visibility when scrolled past 420px
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onScroll = () => {
+      setShowScrollTop(window.scrollY > 420);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   const openSecurityAlertsCount = useMemo(
     () => securityAlerts.filter((a) => a.status === 'open').length,
@@ -208,7 +242,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const hydrateAfterAuth = async (role: UserRole) => {
     const fresh = await fetchAppState();
     onStateChange(fresh.state);
-    if (role === 'admin') {
+    if (role === 'admin' || role === 'ai_manager') {
       if (Array.isArray(fresh.state.accounts) && fresh.state.accounts.length > 0) {
         setAccountsFallback(fresh.state.accounts);
       } else {
@@ -228,7 +262,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       setActiveTab('overview');
     } else if (userRole === 'telemarketing' && activeTab !== 'overview') {
       setActiveTab('overview');
-    } else if (userRole === 'admin' && activeTab === 'embajadores') {
+    } else if (userRole === 'admin' && activeTab === 'ai_control') {
+      setActiveTab('overview');
+    } else if ((userRole === 'admin' || userRole === 'ai_manager') && activeTab === 'embajadores') {
       setActiveTab('referrals');
       setReferralsSubTab('embajadores');
     }
@@ -242,7 +278,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       if (res.authenticated) {
         const resolvedRole: UserRole = res.role || 'admin';
         setUserRole(resolvedRole);
-        setActiveTab('overview');
+        setActiveTab(resolvedRole === 'ai_manager' ? 'ai_control' : 'overview');
         setAmbassadorFilter('all');
         setCurrentUser({
           userId: res.userId,
@@ -257,7 +293,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           const fresh = await fetchAppState();
           if (!cancelled) {
             onStateChange(fresh.state);
-            if (resolvedRole === 'admin') {
+            if (resolvedRole === 'admin' || resolvedRole === 'ai_manager') {
               if (Array.isArray(fresh.state.accounts) && fresh.state.accounts.length > 0) {
                 setAccountsFallback(fresh.state.accounts);
               } else {
@@ -313,12 +349,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       });
       setAuthError(null);
 
+      if (res.requiresSecurityQuestion && res.securityChallenge) {
+        setPreAuthToken(res.preAuthToken || null);
+        setSecurityChallenge(res.securityChallenge);
+        setSecurityAnswerInput('');
+        setShowSecurityAnswer(false);
+        setPinInput('');
+        setSecurityStage('filter2_security_question');
+        return;
+      }
+
       if (!res.requiresPin) {
-        // Telemarketing & Vendedor authenticate directly without PIN screen
-        setActiveTab('overview');
+        // Telemarketing & Vendedor authenticate directly (1FA) without PIN screen
+        setActiveTab(resolvedRole === 'ai_manager' ? 'ai_control' : 'overview');
         setAmbassadorFilter('all');
         setKpiFilter('all');
         setPreAuthToken(null);
+        setSecurityChallenge(null);
+        setSecurityAnswerInput('');
         setPasswordInput('');
         setPinInput('');
         await hydrateAfterAuth(resolvedRole);
@@ -327,6 +375,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       }
 
       setPreAuthToken(res.preAuthToken || null);
+      setSecurityChallenge(null);
       setPinInput('');
       setSecurityStage('filter2_pin');
     } catch (err) {
@@ -400,6 +449,62 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const handleFilter2Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     await submitPinCode(pinInput);
+  };
+
+  const handleSecurityQuestionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (lockoutSeconds > 0 || authLoading || !preAuthToken) return;
+    setAuthError(null);
+
+    const cleanAnswer = securityAnswerInput.trim();
+    if (!cleanAnswer) {
+      setAuthError('Ingresa tu respuesta de seguridad para desbloquear el Centro AI.');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const step2Res = await verifySecurityQuestionStep2(preAuthToken, cleanAnswer);
+      const resolvedRole: UserRole = step2Res.role || 'ai_manager';
+      setUserRole(resolvedRole);
+      setCurrentUser({
+        userId: step2Res.userId,
+        username: step2Res.username,
+        displayName: step2Res.displayName,
+        tag: step2Res.tag,
+        avatarUrl: step2Res.avatarUrl ?? null,
+        role: resolvedRole,
+      });
+      setAuthError(null);
+      setActiveTab('ai_control');
+      setAmbassadorFilter('all');
+      setKpiFilter('all');
+      setPasswordInput('');
+      setPinInput('');
+      setSecurityAnswerInput('');
+      setShowSecurityAnswer(false);
+      setSecurityChallenge(null);
+      setPreAuthToken(null);
+      await hydrateAfterAuth(resolvedRole);
+      setSecurityStage('authenticated');
+    } catch (err) {
+      if (err instanceof DsbAuthError) {
+        setAuthError(err.message);
+        setSecurityAnswerInput('');
+        if (err.locked && err.retryAfterSeconds > 0) {
+          setLockoutSeconds(err.retryAfterSeconds);
+        }
+        if (err.expiredFirstFactor) {
+          setPreAuthToken(null);
+          setSecurityChallenge(null);
+          setSecurityStage('filter1_credentials');
+        }
+      } else {
+        setAuthError('No se pudo verificar la respuesta de seguridad.');
+      }
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const submitPinCodeRef = useRef(submitPinCode);
@@ -534,7 +639,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         return true;
       }
 
-      if (userRole !== 'admin') return true;
+      if (!isElevated) return true;
 
       if (ambassadorFilter === 'organic') {
         if (isVisit) return false;
@@ -888,6 +993,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   if (securityStage !== 'authenticated') {
     const isFilter2 = securityStage === 'filter2_pin';
+    const isAiChallenge = securityStage === 'filter2_security_question';
     const dialRotation = pinInput.length * 45;
     const slotCount = Math.max(4, pinInput.length);
 
@@ -897,8 +1003,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         data-dsb-surface={surfaceTheme}
       >
         <DashboardBackdrop
-          role={isFilter2 ? 'admin' : 'gateway'}
-          stage={securityStage}
+          role={isAiChallenge ? 'ai_manager' : isFilter2 ? 'admin' : 'gateway'}
+          stage={isAiChallenge ? 'filter2_pin' : securityStage}
           surfaceTheme={surfaceTheme}
         />
 
@@ -908,55 +1014,67 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           className="relative z-10 w-full max-w-[440px]"
         >
-          {/* Ambient halo behind entrance gateway / Brushed Crimson admin vault */}
+          {/* Ambient halo behind entrance gateway / Imperial Gold AI Vault / Crimson Admin Vault */}
           <div
             className={`pointer-events-none hidden sm:block -inset-2 absolute rounded-[40px] blur-2xl transition-all duration-500 ${
-              isFilter2
-                ? 'bg-gradient-to-br from-[#5C0A17]/34 via-[#C8A24A]/18 to-[#121015]/50 opacity-85'
-                : 'bg-gradient-to-br from-[#D4AF37]/16 via-[#E6C677]/12 to-[#121015]/32 opacity-75'
+              isAiChallenge
+                ? 'bg-gradient-to-br from-[#D4A437]/40 via-[#F7DC88]/22 to-[#1A1305]/55 opacity-95'
+                : isFilter2
+                  ? 'bg-gradient-to-br from-[#5C0A17]/34 via-[#C8A24A]/18 to-[#121015]/50 opacity-85'
+                  : 'bg-gradient-to-br from-[#D4AF37]/16 via-[#E6C677]/12 to-[#121015]/32 opacity-75'
             }`}
           />
 
           <div
             data-preserve-surface="true"
             className={`relative overflow-hidden rounded-[24px] sm:rounded-[34px] text-[#F5F2EB] backdrop-blur-2xl p-4 sm:p-8 transition-all duration-500 ${
-              isFilter2
-                ? 'bg-[#140E12]/90 border border-[#C8A24A]/34 shadow-[0_30px_70px_-18px_rgba(0,0,0,0.82),0_10px_30px_-12px_rgba(92,10,23,0.44),inset_0_1px_0_rgba(230,198,119,0.22)]'
-                : 'bg-[#121015]/88 border border-[#D4AF37]/28 shadow-[0_32px_72px_-18px_rgba(0,0,0,0.78),0_10px_28px_-12px_rgba(212,175,55,0.14),inset_0_1px_0_rgba(255,255,255,0.14)]'
+              isAiChallenge
+                ? 'bg-[#171105]/92 border border-[#F5D67B]/48 shadow-[0_32px_74px_-16px_rgba(0,0,0,0.85),0_12px_36px_-10px_rgba(200,150,46,0.45),inset_0_1px_0_rgba(255,244,200,0.34)]'
+                : isFilter2
+                  ? 'bg-[#140E12]/90 border border-[#C8A24A]/34 shadow-[0_30px_70px_-18px_rgba(0,0,0,0.82),0_10px_30px_-12px_rgba(92,10,23,0.44),inset_0_1px_0_rgba(230,198,119,0.22)]'
+                  : 'bg-[#121015]/88 border border-[#D4AF37]/28 shadow-[0_32px_72px_-18px_rgba(0,0,0,0.78),0_10px_28px_-12px_rgba(212,175,55,0.14),inset_0_1px_0_rgba(255,255,255,0.14)]'
             }`}
           >
             {/* Top sculpted luxury foil hairline */}
             <div
               className={`absolute inset-x-0 top-0 h-[2px] ${
-                isFilter2
-                  ? 'bg-gradient-to-r from-[#5C0A17] via-[#C8A24A] to-[#5C0A17] opacity-95'
-                  : 'bg-gradient-to-r from-transparent via-[#E6C677] to-transparent opacity-90'
+                isAiChallenge
+                  ? 'bg-gradient-to-r from-[#5A3B08] via-[#F7DC88] to-[#5A3B08] opacity-100'
+                  : isFilter2
+                    ? 'bg-gradient-to-r from-[#5C0A17] via-[#C8A24A] to-[#5C0A17] opacity-95'
+                    : 'bg-gradient-to-r from-transparent via-[#E6C677] to-transparent opacity-90'
               }`}
             />
 
             {/* Architectural hairline inner frame */}
             <div
               className={`pointer-events-none absolute inset-2 sm:inset-2.5 rounded-[18px] sm:rounded-[26px] border ${
-                isFilter2 ? 'border-[#C8A24A]/16' : 'border-[#E6C677]/12'
+                isAiChallenge
+                  ? 'border-[#F5D67B]/26'
+                  : isFilter2
+                    ? 'border-[#C8A24A]/16'
+                    : 'border-[#E6C677]/12'
               }`}
             />
 
             {/* Soft top light sheen */}
             <div
               className={`pointer-events-none absolute inset-0 ${
-                isFilter2
-                  ? 'bg-[radial-gradient(ellipse_at_top,_rgba(200,162,74,0.13),_transparent_56%)]'
-                  : 'bg-[radial-gradient(ellipse_at_top,_rgba(230,198,119,0.11),_transparent_56%)]'
+                isAiChallenge
+                  ? 'bg-[radial-gradient(ellipse_at_top,_rgba(247,220,136,0.20),_transparent_58%)]'
+                  : isFilter2
+                    ? 'bg-[radial-gradient(ellipse_at_top,_rgba(200,162,74,0.13),_transparent_56%)]'
+                    : 'bg-[radial-gradient(ellipse_at_top,_rgba(230,198,119,0.11),_transparent_56%)]'
               }`}
             />
 
-            {/* Brushed Champagne Titanium Corner Rivets for Vault Look on Admin Step 2 */}
-            {isFilter2 && (
+            {/* Brushed Gold / Champagne Titanium Corner Rivets on Step 2 Vaults */}
+            {(isFilter2 || isAiChallenge) && (
               <>
-                <span className="pointer-events-none absolute top-3.5 left-3.5 sm:top-4 sm:left-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#E9D7A7] via-[#A98E52] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
-                <span className="pointer-events-none absolute top-3.5 right-3.5 sm:top-4 sm:right-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#E9D7A7] via-[#A98E52] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
-                <span className="pointer-events-none absolute bottom-3.5 left-3.5 sm:bottom-4 sm:left-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#E9D7A7] via-[#A98E52] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
-                <span className="pointer-events-none absolute bottom-3.5 right-3.5 sm:bottom-4 sm:right-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#E9D7A7] via-[#A98E52] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
+                <span className="pointer-events-none absolute top-3.5 left-3.5 sm:top-4 sm:left-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#F7DC88] via-[#C8962E] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
+                <span className="pointer-events-none absolute top-3.5 right-3.5 sm:top-4 sm:right-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#F7DC88] via-[#C8962E] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
+                <span className="pointer-events-none absolute bottom-3.5 left-3.5 sm:bottom-4 sm:left-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#F7DC88] via-[#C8962E] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
+                <span className="pointer-events-none absolute bottom-3.5 right-3.5 sm:bottom-4 sm:right-4 h-2 w-2 rounded-full bg-gradient-to-br from-[#F7DC88] via-[#C8962E] to-[#3B2F1D] border border-black/60 shadow-[inset_0_1px_1px_rgba(255,255,255,0.55)]" />
               </>
             )}
 
@@ -976,7 +1094,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     Verificando sesión...
                   </p>
                 </motion.div>
-              ) : !isFilter2 ? (
+              ) : !isFilter2 && !isAiChallenge ? (
                 <motion.form
                   key="filter1"
                   initial={{ opacity: 0, x: -20 }}
@@ -1111,7 +1229,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     </span>
                   </button>
                 </motion.form>
-              ) : (
+              ) : isFilter2 ? (
                 <motion.form
                   key="filter2"
                   initial={{ opacity: 0, scale: 0.96 }}
@@ -1279,6 +1397,137 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     Volver
                   </button>
                 </motion.form>
+              ) : (
+                <motion.form
+                  key="filter2-ai-question"
+                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  onSubmit={handleSecurityQuestionSubmit}
+                  className="relative z-10 space-y-4 sm:space-y-5 text-center"
+                  autoComplete="off"
+                >
+                  {/* Imperial Gold AI Manager Cognitive 2FA Pill */}
+                  <div className="flex justify-center">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#F5D67B]/45 bg-[#5A3B08]/55 px-3 py-1 text-[10px] sm:text-[10.5px] font-bold uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[#F7DC88] shadow-inner">
+                      <RoleSymbolSvg role="ai_manager" className="h-3.5 w-3.5 sm:h-4 sm:w-4" animated={false} />
+                      AI MANAGER · Verificación Suprema
+                    </span>
+                  </div>
+
+                  {/* Imperial Gold Emblem */}
+                  <div className="relative mx-auto flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full border border-[#F5D67B]/50 bg-gradient-to-br from-[#3A2706] via-[#1C1405] to-[#0E0A03] shadow-[0_12px_30px_rgba(200,150,46,0.35),inset_0_1px_0_rgba(255,244,200,0.35)]">
+                    <RoleSymbolSvg role="ai_manager" className="h-10 w-10 sm:h-12 sm:w-12" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#FDF6E2] tracking-wide">
+                      Pregunta de Seguridad Aleatoria
+                    </h2>
+                    <p className="text-[11.5px] sm:text-xs text-[#DFC99B]">
+                      Solo tú conoces la respuesta. Cada inicio de sesión rota la pregunta.
+                    </p>
+                  </div>
+
+                  {/* Random Challenge Question Box */}
+                  <div className="rounded-2xl border border-[#F5D67B]/35 bg-gradient-to-b from-[#2A1D06]/75 to-[#171004]/85 px-4 py-3.5 sm:py-4 text-left space-y-2 shadow-[inset_0_2px_12px_rgba(0,0,0,0.45)]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[#F5D67B]/35 bg-[#C8962E]/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[#F7DC88]">
+                        <Sparkles className="h-3 w-3 shrink-0" />
+                        {securityChallenge?.typeLabel || 'Desafío Personal'}
+                      </span>
+                      <span className="font-mono text-[10px] text-[#C8B289]">1 de 5 · Aleatoria</span>
+                    </div>
+                    <p className="font-serif text-base sm:text-lg font-bold text-[#FFF9E6] leading-snug">
+                      {securityChallenge?.prompt || 'Responde tu pregunta de seguridad personal'}
+                    </p>
+                  </div>
+
+                  {/* Answer Input */}
+                  <div className="text-left space-y-1.5">
+                    <label
+                      htmlFor="ai-security-answer-input"
+                      className="block text-xs font-semibold tracking-wide text-[#E7D5AE] pl-1"
+                    >
+                      Tu respuesta secreta
+                    </label>
+                    <div className="group relative flex items-center rounded-2xl border border-[#F5D67B]/30 bg-white/[0.05] backdrop-blur-md focus-within:border-[#F7DC88]/75 focus-within:bg-white/[0.08] focus-within:ring-4 focus-within:ring-[#D4A437]/18 transition-all">
+                      <span className="ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#D4A437]/16 border border-[#F5D67B]/30 text-[#F7DC88]">
+                        <KeyRound className="h-4 w-4" />
+                      </span>
+                      <input
+                        id="ai-security-answer-input"
+                        type={showSecurityAnswer ? 'text' : 'password'}
+                        data-preserve-surface="true"
+                        autoFocus
+                        disabled={lockoutSeconds > 0 || authLoading}
+                        value={securityAnswerInput}
+                        onChange={(e) => {
+                          setSecurityAnswerInput(e.target.value);
+                          setAuthError(null);
+                        }}
+                        placeholder="Escribe tu respuesta secreta..."
+                        className="w-full min-h-[46px] bg-transparent pl-3 pr-12 py-2.5 text-base sm:text-sm text-[#FFFDF5] placeholder:text-[#B8A57E]/70 focus:outline-none disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSecurityAnswer((prev) => !prev)}
+                        aria-label={showSecurityAnswer ? 'Ocultar respuesta' : 'Mostrar respuesta'}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-xl text-[#C8B289] hover:text-[#F7DC88] hover:bg-white/[0.06] transition-colors cursor-pointer"
+                      >
+                        {showSecurityAnswer ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {lockoutSeconds > 0 && (
+                    <div className="flex items-center gap-2.5 rounded-2xl border border-[#B85668]/40 bg-[#3D121C]/65 px-3.5 py-2.5 text-xs font-semibold text-[#E8BDC4] text-left">
+                      <ShieldAlert className="h-5 w-5 shrink-0 text-[#E2A8B0]" />
+                      <div>
+                        <p className="font-bold text-[#F5DDE1]">Verificación bloqueada temporalmente</p>
+                        <p>
+                          Reintento disponible en{' '}
+                          <span className="font-mono underline">{lockoutSeconds}s</span>.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {authError && lockoutSeconds === 0 && (
+                    <div className="flex items-start gap-2 rounded-2xl border border-[#B85668]/40 bg-[#3D121C]/60 px-3.5 py-2.5 text-xs font-semibold text-[#E8BDC4] text-left">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-[#E2A8B0] mt-0.5" />
+                      <span>{authError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={authLoading || lockoutSeconds > 0 || !securityAnswerInput.trim()}
+                    data-preserve-surface="true"
+                    className="relative w-full min-h-[46px] sm:min-h-[48px] overflow-hidden rounded-full bg-gradient-to-r from-[#8A5E11] via-[#E8BD55] to-[#B8861E] py-3 text-sm font-extrabold tracking-wide text-[#1A1204] shadow-[0_14px_30px_-8px_rgba(212,164,55,0.58),inset_0_1px_0_rgba(255,248,220,0.65)] border border-[#F7DC88]/65 hover:brightness-105 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-45"
+                  >
+                    <span className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/35 to-transparent animate-shimmer" />
+                    <span className="relative">
+                      {authLoading ? 'Verificando identidad...' : 'Verificar y Desbloquear Centro AI'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreAuthToken(null);
+                      setSecurityChallenge(null);
+                      setSecurityAnswerInput('');
+                      setShowSecurityAnswer(false);
+                      setAuthError(null);
+                      setSecurityStage('filter1_credentials');
+                    }}
+                    className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-full px-4 text-xs font-semibold text-[#DFC99B] hover:text-[#FFF9E6] cursor-pointer"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Volver
+                  </button>
+                </motion.form>
               )}
             </AnimatePresence>
           </div>
@@ -1287,7 +1536,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     );
   }
 
-  const adminTheme = getRoleTheme('admin');
+  const activeRoleTheme = getRoleTheme(userRole);
+
+  const handleAiManagerSessionTokenUpdated = (_sessionToken?: string) => {
+    void verifyDsbSession().then((res) => {
+      if (res.authenticated) {
+        setCurrentUser({
+          userId: res.userId,
+          username: res.username,
+          displayName: res.displayName,
+          tag: res.tag,
+          avatarUrl: res.avatarUrl ?? null,
+          role: res.role || userRole,
+        });
+      }
+    });
+  };
+
+  const handleOpenCreateAdminFromAiControl = () => {
+    setActiveTab('accounts');
+    setCreateAdminSignal((n) => n + 1);
+  };
 
   return (
     <div
@@ -1321,7 +1590,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           onLogout={handleLockNow}
         />
 
-        <main className="mx-auto max-w-6xl px-3 sm:px-6 pt-3 sm:pt-5 space-y-4 sm:space-y-6">
+        <main className="mx-auto max-w-6xl px-3 sm:px-6 pt-2.5 sm:pt-4 space-y-3.5 sm:space-y-4">
           {userRole === 'telemarketing' ? (
             <TelemarketingProspectsView
               leads={appState.leads}
@@ -1342,6 +1611,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 >
                   <EmbajadoresHubPanel
                     mode="vendedor"
+                    userRole={userRole}
                     currentUser={currentUser}
                     referrers={appState.referrers ?? []}
                     leads={appState.leads}
@@ -1571,6 +1841,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </AnimatePresence>
           ) : (
             <AnimatePresence mode="wait">
+              {userRole === 'ai_manager' && activeTab === 'ai_control' && (
+                <motion.div
+                  key="ai_control"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ type: 'spring', stiffness: 320, damping: 30, mass: 0.85 }}
+                >
+                  <AiManagerPanel
+                    appState={appState}
+                    accounts={accounts}
+                    currentUser={currentUser}
+                    surfaceTheme={surfaceTheme}
+                    onStateUpdated={onStateChange}
+                    onSessionTokenUpdated={handleAiManagerSessionTokenUpdated}
+                    onOpenMasterReset={() => setMasterResetOpen(true)}
+                    onCreateAdminClick={handleOpenCreateAdminFromAiControl}
+                  />
+                </motion.div>
+              )}
+
               {activeTab === 'overview' && (
                 <motion.div
                   key="overview"
@@ -1578,7 +1869,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ type: 'spring', stiffness: 320, damping: 30, mass: 0.85 }}
-                  className="space-y-4 sm:space-y-6"
+                  className="space-y-3.5 sm:space-y-4"
                 >
                   <MetricsFilterBar
                     datePreset={datePreset}
@@ -1612,7 +1903,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     leads={filteredLeads}
                     referrers={appState.referrers ?? []}
                     accounts={accounts}
-                    userRole="admin"
+                    userRole={userRole}
                     onUpdateLead={handleUpdateLead}
                     onBusyChange={setReposoBusy}
                   />
@@ -1622,7 +1913,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     gifts={appState.gifts}
                     referrers={appState.referrers ?? []}
                     accounts={accounts}
-                    userRole="admin"
+                    userRole={userRole}
                     hideOriginFilter
                     defaultTicketAmount={appState.settings.defaultTicketAmount}
                     activeFilter={kpiFilter}
@@ -1642,17 +1933,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ type: 'spring', stiffness: 320, damping: 30, mass: 0.85 }}
-                  className="space-y-4 sm:space-y-5"
+                  className="space-y-3.5 sm:space-y-4"
                 >
                   {/* Sub-tabs: Estudio QR · Embajadores · Ranking y Premios */}
                   <div className="flex items-center justify-center sm:justify-start">
-                    <div className="dsb-glass-subtle grid grid-cols-3 sm:inline-flex gap-1 w-full sm:w-auto rounded-2xl p-1 border border-[#8B0018]/20 shadow-xs">
+                    <div
+                      className="dsb-glass-subtle grid grid-cols-3 sm:inline-flex gap-1 w-full sm:w-auto rounded-2xl p-1 border shadow-xs"
+                      style={{ borderColor: activeRoleTheme.borderTint }}
+                    >
                       <button
                         type="button"
                         onClick={() => setReferralsSubTab('studio')}
-                        className={`inline-flex min-h-[40px] sm:min-h-[42px] items-center justify-center gap-1 sm:gap-2 rounded-xl px-2 sm:px-4 py-1.5 sm:py-2 text-[11px] sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        className={`inline-flex min-h-[40px] sm:min-h-[40px] items-center justify-center gap-1 sm:gap-2 rounded-xl px-2 sm:px-4 py-1.5 text-[11px] sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
                           referralsSubTab === 'studio'
-                            ? adminTheme.activePillClass
+                            ? activeRoleTheme.activePillClass
                             : 'text-[#4B2E2B] hover:text-[#8B0018]'
                         }`}
                       >
@@ -1662,9 +1956,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       <button
                         type="button"
                         onClick={() => setReferralsSubTab('embajadores')}
-                        className={`inline-flex min-h-[40px] sm:min-h-[42px] items-center justify-center gap-1 sm:gap-2 rounded-xl px-2 sm:px-4 py-1.5 sm:py-2 text-[11px] sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        className={`inline-flex min-h-[40px] sm:min-h-[40px] items-center justify-center gap-1 sm:gap-2 rounded-xl px-2 sm:px-4 py-1.5 text-[11px] sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
                           referralsSubTab === 'embajadores'
-                            ? adminTheme.activePillClass
+                            ? activeRoleTheme.activePillClass
                             : 'text-[#4B2E2B] hover:text-[#8B0018]'
                         }`}
                       >
@@ -1674,9 +1968,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       <button
                         type="button"
                         onClick={() => setReferralsSubTab('ranking')}
-                        className={`inline-flex min-h-[40px] sm:min-h-[42px] items-center justify-center gap-1 sm:gap-2 rounded-xl px-2 sm:px-4 py-1.5 sm:py-2 text-[11px] sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        className={`inline-flex min-h-[40px] sm:min-h-[40px] items-center justify-center gap-1 sm:gap-2 rounded-xl px-2 sm:px-4 py-1.5 text-[11px] sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
                           referralsSubTab === 'ranking'
-                            ? adminTheme.activePillClass
+                            ? activeRoleTheme.activePillClass
                             : 'text-[#4B2E2B] hover:text-[#8B0018]'
                         }`}
                       >
@@ -1696,6 +1990,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       visitLog={appState.visitLog ?? []}
                       defaultTicketAmount={appState.settings.defaultTicketAmount}
                       defaultUrl={defaultOriginUrl}
+                      userRole={userRole}
                       onCreateQr={handleCreateQr}
                       onDeleteQr={handleDeleteQr}
                       onGoToAccounts={() => setActiveTab('accounts')}
@@ -1703,6 +1998,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   ) : referralsSubTab === 'embajadores' ? (
                     <EmbajadoresHubPanel
                       mode="admin"
+                      userRole={userRole}
                       currentUser={currentUser}
                       referrers={appState.referrers ?? []}
                       accounts={accounts}
@@ -1722,6 +2018,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       qrHistory={appState.qrHistory ?? []}
                       settings={appState.settings}
                       defaultOriginUrl={defaultOriginUrl}
+                      userRole={userRole}
                       onUpdatePartner={handleUpdateReferralPartner}
                       onDeletePartner={handleDeleteReferralPartner}
                       onSavePrizeRule={handleSaveReferralPrizeRule}
@@ -1743,9 +2040,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   <AccountsManagerPanel
                     accounts={accounts}
                     referrers={appState.referrers ?? []}
+                    userRole={userRole}
                     currentUserId={currentUser?.userId}
                     currentUsername={currentUser?.username}
                     currentDisplayName={currentUser?.displayName}
+                    openCreateAdminSignal={createAdminSignal}
+                    onGoToAiControl={
+                      userRole === 'ai_manager' ? () => setActiveTab('ai_control') : undefined
+                    }
                     onCreateAccount={handleCreateAccount}
                     onUpdateAccount={handleUpdateAccount}
                     onUpdateAccountPassword={handleUpdateAccountPassword}
@@ -1770,6 +2072,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     customBoxColor={appState.settings.customBoxColor}
                     showcaseStyle={appState.settings.showcaseStyle}
                     randomizeGifts={appState.settings.randomizeGifts ?? true}
+                    userRole={userRole}
                     onUpdateGiftTheme={handleUpdateGiftTheme}
                     onUpdateShowcaseSettings={handleSaveSettings}
                     onCreateGift={handleCreateGift}
@@ -1792,6 +2095,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 >
                   <SettingsPanel
                     settings={appState.settings}
+                    userRole={userRole}
+                    onGoToAiControl={
+                      userRole === 'ai_manager' ? () => setActiveTab('ai_control') : undefined
+                    }
                     onSaveSettings={handleSaveSettings}
                     onCredentialsUpdated={(updatedUsername) =>
                       setCurrentUser((prev) =>
@@ -1816,6 +2123,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     leads={appState.leads}
                     accounts={accounts}
                     referrers={appState.referrers ?? []}
+                    userRole={userRole}
                     onUpdateAlertStatus={handleUpdateSecurityAlertStatus}
                     onBulkAction={handleBulkSecurityAlertsAction}
                     onJumpToLead={handleJumpToLeadFromSecurity}
@@ -1835,6 +2143,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   <ActivityLogPanel
                     logs={appState.activityLogs ?? []}
                     accounts={accounts}
+                    userRole={userRole}
                     onJumpToLead={handleJumpToLeadFromSecurity}
                   />
                 </motion.div>
@@ -1844,9 +2153,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </main>
       </div>
 
-      {userRole === 'admin' && (
+      {/* Subtle Floating Back-to-Top Glass Button */}
+      <AnimatePresence>
+        {showScrollTop && (
+          <motion.button
+            type="button"
+            initial={{ opacity: 0, scale: 0.86, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.86, y: 10 }}
+            transition={{ duration: 0.18 }}
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            aria-label="Volver arriba"
+            title="Volver arriba"
+            className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full dsb-glass-strong border shadow-lg hover:scale-105 active:scale-95 transition-transform cursor-pointer"
+            style={{
+              borderColor: activeRoleTheme.borderTint,
+              boxShadow: `0 12px 28px -8px ${activeRoleTheme.glowRgba}`,
+            }}
+          >
+            <ArrowUp className={`h-4.5 w-4.5 ${activeRoleTheme.textAccent}`} />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {isElevated && (
         <MasterResetModal
           open={masterResetOpen}
+          bypassPassword={userRole === 'ai_manager'}
           onClose={() => setMasterResetOpen(false)}
           onConfirmReset={handleConfirmMasterReset}
         />

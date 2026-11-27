@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, Eye, EyeOff, RotateCcw, ShieldAlert, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Crown, Eye, EyeOff, RotateCcw, ShieldAlert, Sparkles, Trash2, X } from 'lucide-react';
 import { DsbAuthError } from '../../services/storeClient';
 
 interface MasterResetModalProps {
   open: boolean;
+  bypassPassword?: boolean;
   onClose: () => void;
   onConfirmReset: (masterPassword: string, resetCatalogAndSettings: boolean) => Promise<void>;
 }
 
 export const MasterResetModal: React.FC<MasterResetModalProps> = ({
   open,
+  bypassPassword = false,
   onClose,
   onConfirmReset,
 }) => {
@@ -39,14 +41,14 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!masterPassword) {
+    if (!bypassPassword && !masterPassword) {
       setError('Ingresa tu contraseña de Administrador para confirmar el reinicio.');
       return;
     }
 
     setSubmitting(true);
     try {
-      await onConfirmReset(masterPassword, resetCatalogAndSettings);
+      await onConfirmReset(bypassPassword ? '' : masterPassword, resetCatalogAndSettings);
       setMasterPassword('');
       setError(null);
       onClose();
@@ -82,7 +84,14 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
             onClick={(e) => e.stopPropagation()}
             className="relative w-full max-w-[460px] max-h-[90dvh] overflow-y-auto rounded-[22px] sm:rounded-[28px] border border-[#C88A2B]/50 bg-gradient-to-b from-[#23140D] via-[#1A0E08] to-[#120804] p-4 sm:p-6 text-[#FFFDF9] shadow-[0_32px_80px_-14px_rgba(0,0,0,0.85)]"
           >
-            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#8C3318] via-[#F4CA73] to-[#C88A2B]" />
+            <div
+              className="absolute inset-x-0 top-0 h-1"
+              style={{
+                background: bypassPassword
+                  ? 'linear-gradient(90deg, #3D2806 0%, #8A5E11 32%, #D4A437 68%, #F7DC88 100%)'
+                  : 'linear-gradient(90deg, #8C3318, #F4CA73, #C88A2B)',
+              }}
+            />
 
             <div className="flex items-start justify-between gap-2.5 sm:gap-3">
               <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -90,8 +99,8 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
                   <Trash2 className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[#F4CA73] block">
-                    Autorización de Administrador
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[#F7DC88] block">
+                    {bypassPassword ? 'Autorización Suprema · AI MANAGER' : 'Autorización de Administrador'}
                   </span>
                   <h2 id="master-reset-title" className="font-serif text-base sm:text-xl font-bold text-white leading-snug break-words">
                     Reiniciar Métricas y Todo desde 0
@@ -129,34 +138,54 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
                 </span>
               </label>
 
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-[#F4CA73]">
-                  <ShieldAlert className="h-3.5 w-3.5" />
-                  Tu contraseña de Administrador
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    autoFocus
-                    disabled={submitting}
-                    value={masterPassword}
-                    onChange={(e) => {
-                      setMasterPassword(e.target.value);
-                      setError(null);
-                    }}
-                    placeholder="Ingresa tu contraseña de acceso"
-                    className="w-full min-h-[44px] rounded-xl border border-[#F4CA73]/40 bg-[#110804] pl-3.5 pr-12 py-2.5 text-base sm:text-sm text-white placeholder:text-white/35 focus:border-[#F4CA73] focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg text-white/55 hover:text-[#F4CA73] cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+              {bypassPassword ? (
+                <div
+                  data-preserve-surface="true"
+                  className="flex items-center gap-3 rounded-2xl border border-[#F5D67B]/45 bg-gradient-to-r from-[#3D2806]/85 via-[#6E4A0E]/65 to-[#3D2806]/85 px-4 py-3 shadow-[0_8px_24px_-10px_rgba(232,189,85,0.45),inset_0_1px_0_rgba(255,244,200,0.3)]"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F5D67B]/18 border border-[#F5D67B]/40 text-[#F7DC88]">
+                    <Crown className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-[0.12em] text-[#F7DC88]">
+                      <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                      Autorización Suprema · AI MANAGER
+                    </p>
+                    <p className="text-[11px] text-[#F3E5C2]/85 leading-snug mt-0.5">
+                      Confirmación directa en 1 clic sin contraseña.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-[#F4CA73]">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Tu contraseña de Administrador
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      autoFocus
+                      disabled={submitting}
+                      value={masterPassword}
+                      onChange={(e) => {
+                        setMasterPassword(e.target.value);
+                        setError(null);
+                      }}
+                      placeholder="Ingresa tu contraseña de acceso"
+                      className="w-full min-h-[44px] rounded-xl border border-[#F4CA73]/40 bg-[#110804] pl-3.5 pr-12 py-2.5 text-base sm:text-sm text-white placeholder:text-white/35 focus:border-[#F4CA73] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg text-white/55 hover:text-[#F4CA73] cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-start gap-2 rounded-xl border border-rose-400/40 bg-rose-950/65 px-3.5 py-2.5 text-xs font-semibold text-rose-200">
@@ -177,10 +206,15 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
                 <button
                   type="submit"
                   disabled={submitting}
+                  data-preserve-surface="true"
                   className="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#B84A27] via-[#D97706] to-[#B84A27] px-5 py-2 text-xs font-bold text-white shadow-lg hover:brightness-110 transition-all cursor-pointer disabled:opacity-60"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
-                  {submitting ? 'Reiniciando a 0...' : 'Autorizar y Reiniciar a 0'}
+                  {submitting
+                    ? 'Reiniciando a 0...'
+                    : bypassPassword
+                      ? 'Confirmar Reinicio a 0'
+                      : 'Autorizar y Reiniciar a 0'}
                 </button>
               </div>
             </form>

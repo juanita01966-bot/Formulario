@@ -5,6 +5,8 @@ import {
   Award,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Copy,
   Crown,
@@ -39,6 +41,7 @@ import type {
   ReferralPrizeRule,
   ReferralVisitEvent,
   UserAccount,
+  UserRole,
 } from '../../types/app';
 import type {
   UpdateReferralPayload,
@@ -86,6 +89,7 @@ interface ReferralsLeaderboardPanelProps {
   isDateFiltered?: boolean;
   settings: AppSettings;
   defaultOriginUrl: string;
+  userRole?: UserRole;
   onUpdatePartner: (id: string, updates: UpdateReferralPayload, masterPassword: string) => Promise<void>;
   onDeletePartner: (id: string, masterPassword: string) => Promise<void>;
   onSavePrizeRule: (rule: ReferralPrizeRule, masterPassword: string) => Promise<void>;
@@ -229,28 +233,33 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
   isDateFiltered = false,
   settings,
   defaultOriginUrl,
+  userRole = 'admin',
   onUpdatePartner,
   onDeletePartner,
   onSavePrizeRule,
   onGoToAccounts,
   onBusyChange,
 }) => {
+  const isAiManager = userRole === 'ai_manager';
+  const [activeSubTab, setActiveSubTab] = useState<'ranking' | 'rules'>('ranking');
+  const [currentPage, setCurrentPage] = useState(1);
+  const RANKING_PAGE_SIZE = 10;
+
   const prizeRule = useMemo(
     () => sanitizePrizeRule(settings.referralPrizeRule),
     [settings.referralPrizeRule]
   );
 
   // Prize Rule editor state
-  const [rulePanelOpen, setRulePanelOpen] = useState(false);
   const [ruleDraft, setRuleDraft] = useState<ReferralPrizeRule>(prizeRule);
   const [savingRule, setSavingRule] = useState(false);
 
-  // Sync draft when server settings update and editor is closed
+  // Sync draft when server settings update and not on rules tab
   useEffect(() => {
-    if (!rulePanelOpen) {
+    if (activeSubTab !== 'rules') {
       setRuleDraft(prizeRule);
     }
-  }, [prizeRule, rulePanelOpen]);
+  }, [prizeRule, activeSubTab]);
 
   // Edit Partner Modal
   const [editingPartner, setEditingPartner] = useState<ReferralPartner | null>(null);
@@ -297,7 +306,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       Boolean(editingPartner) ||
       Boolean(qrModalPartner) ||
       Boolean(pendingSecretAction) ||
-      rulePanelOpen ||
+      activeSubTab === 'rules' ||
       savingRule ||
       savingEdit;
     onBusyChange?.(isBusy);
@@ -306,7 +315,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     editingPartner,
     qrModalPartner,
     pendingSecretAction,
-    rulePanelOpen,
+    activeSubTab,
     savingRule,
     savingEdit,
     onBusyChange,
@@ -662,6 +671,18 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     return sorted;
   }, [rankedRows, search, filterMode, sortMode]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, partnerScope, filterMode, sortMode]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / RANKING_PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStartIdx = (safePage - 1) * RANKING_PAGE_SIZE;
+  const paginatedRows = useMemo(
+    () => visibleRows.slice(pageStartIdx, pageStartIdx + RANKING_PAGE_SIZE),
+    [visibleRows, pageStartIdx]
+  );
+
   // Handlers
   const showBanner = (type: 'success' | 'error', text: string) => {
     setBanner({ type, text });
@@ -671,21 +692,27 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     e.preventDefault();
     const cleaned = sanitizePrizeRule(ruleDraft);
     setBanner(null);
+    const runSave = async (masterPassword: string) => {
+      setSavingRule(true);
+      try {
+        await onSavePrizeRule(cleaned, masterPassword);
+        setRuleDraft(cleaned);
+        showBanner('success', `Reglas del premio "${cleaned.prizeName}" actualizadas.`);
+      } finally {
+        setSavingRule(false);
+      }
+    };
+    if (isAiManager) {
+      void runSave('').catch((err) =>
+        showBanner('error', err instanceof Error ? err.message : 'No se pudieron guardar las reglas.')
+      );
+      return;
+    }
     setPendingSecretAction({
       title: 'Guardar reglas del premio',
       description: `Ingresa tu contraseña de Administrador para actualizar las reglas de "${cleaned.prizeName}".`,
       confirmLabel: 'Autorizar y guardar',
-      run: async (masterPassword) => {
-        setSavingRule(true);
-        try {
-          await onSavePrizeRule(cleaned, masterPassword);
-          setRuleDraft(cleaned);
-          setRulePanelOpen(false);
-          showBanner('success', `Reglas del premio "${cleaned.prizeName}" actualizadas.`);
-        } finally {
-          setSavingRule(false);
-        }
-      },
+      run: runSave,
     });
   };
 
@@ -900,16 +927,16 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
   };
 
   const metricInfo = METRIC_LABELS[prizeRule.metric];
-  const adminTheme = getRoleTheme('admin');
+  const adminTheme = getRoleTheme(userRole);
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      {/* Editorial Header + Main CTAs */}
+    <div className="space-y-4">
+      {/* Editorial Header + Main CTAs + 2 Instant Sub-Tabs */}
       <motion.section
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-        className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-6"
+        className="relative overflow-hidden dsb-glass rounded-[22px] sm:rounded-[26px] p-3.5 sm:p-5 space-y-3.5"
       >
         <div
           aria-hidden="true"
@@ -917,25 +944,22 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
           style={{ background: adminTheme.headerStrip }}
         />
         <div className="pointer-events-none hidden sm:block absolute -right-12 -top-12 h-44 w-44 rounded-full bg-[#8B0018]/10 blur-2xl" />
-        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
-          <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div
-              className="flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl text-[#FDE68A] shadow-md border border-white/25"
+              className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl text-[#FDE68A] shadow-md border border-white/25"
               style={{ background: adminTheme.heroGradient }}
             >
-              <Trophy className="h-5 w-5 sm:h-6 sm:w-6" />
+              <Trophy className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <span className="inline-flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.15em] text-[#8B0018]">
-                <Sparkles className="h-3.5 w-3.5 text-[#B91C1C] shrink-0" />
+              <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#8B0018]">
+                <Sparkles className="h-3 w-3 text-[#B91C1C] shrink-0" />
                 Programa de Embajadores QR · Competencia de Premios
               </span>
-              <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E] mt-0.5 leading-snug">
+              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#22150E] leading-snug">
                 Ranking de Referidos y Ganadores
               </h2>
-              <p className="text-xs sm:text-sm text-[#594133] mt-1 max-w-2xl">
-                Controla los QRs individuales de tus embajadores, mide visitas, registros y ventas atribuidas en tiempo real, e identifica automáticamente a los ganadores del premio.
-              </p>
             </div>
           </div>
 
@@ -945,22 +969,62 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                 type="button"
                 onClick={onGoToAccounts}
                 style={{ background: adminTheme.heroGradient }}
-                className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-[11.5px] sm:text-xs font-bold text-white border border-white/20 hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer shadow-md"
+                className="inline-flex min-h-[40px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold text-white border border-white/20 hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer shadow-md"
               >
-                <Users className="h-4 w-4 shrink-0" />
-                Gestionar Embajadores en Cuentas
+                <Users className="h-3.5 w-3.5 shrink-0" />
+                Gestionar en Cuentas
               </button>
             )}
             <button
               type="button"
               onClick={handleExportCsv}
               disabled={visibleRows.length === 0}
-              className="dsb-glass-subtle inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-xs font-semibold text-[#4E382B] hover:bg-white/85 transition-colors cursor-pointer disabled:opacity-45"
+              className="dsb-glass-subtle inline-flex min-h-[40px] shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold text-[#4E382B] hover:bg-white/85 transition-colors cursor-pointer disabled:opacity-45"
             >
               <Download className="h-3.5 w-3.5 shrink-0" />
               CSV
             </button>
           </div>
+        </div>
+
+        {/* 2 Instant Sub-Tabs: Ranking en Vivo | Reglas del Premio */}
+        <div className="relative flex flex-wrap items-center justify-between gap-2">
+          <div
+            role="tablist"
+            aria-label="Secciones de ranking de referidos"
+            className="dsb-glass-subtle grid grid-cols-2 sm:inline-flex gap-1 w-full sm:w-auto rounded-2xl p-1 border"
+            style={{ borderColor: adminTheme.borderTint }}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeSubTab === 'ranking'}
+              onClick={() => setActiveSubTab('ranking')}
+              className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                activeSubTab === 'ranking' ? adminTheme.activePillClass : 'text-[#594133] hover:bg-white/70'
+              }`}
+            >
+              <Trophy className="h-3.5 w-3.5 shrink-0" />
+              <span>Ranking en Vivo</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeSubTab === 'rules'}
+              onClick={() => setActiveSubTab('rules')}
+              className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                activeSubTab === 'rules' ? adminTheme.activePillClass : 'text-[#594133] hover:bg-white/70'
+              }`}
+            >
+              <Settings2 className="h-3.5 w-3.5 shrink-0" />
+              <span>Reglas del Premio</span>
+            </button>
+          </div>
+
+          <span className="text-[11px] font-semibold text-[#6E5341]">
+            Premio activo: <strong className="text-[#22150E]">{prizeRule.prizeName}</strong> · Meta:{' '}
+            <strong className="tabular-nums">{prizeRule.targetCount} {metricInfo.unit}</strong>
+          </span>
         </div>
       </motion.section>
 
@@ -1078,9 +1142,10 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         </div>
       </section>
 
-      {/* Prize Rules Card (Collapsible) */}
+      {/* Sub-tab 2: Reglas del Premio */}
+      {activeSubTab === 'rules' && (
       <section className="dsb-glass rounded-[22px] overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-3.5 bg-white/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-3.5 bg-white/40 border-b border-[#EFE3D2]">
           <div className="flex items-start sm:items-center gap-3 min-w-0">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF3DA] border border-[#E5C17B] text-[#8C5510]">
               <Settings2 className="h-5 w-5" />
@@ -1108,35 +1173,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               </p>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setRulePanelOpen((prev) => !prev)}
-            className="inline-flex min-h-[40px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-white px-4 py-1.5 text-xs font-bold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer shrink-0"
-          >
-            {rulePanelOpen ? (
-              <>
-                <ChevronUp className="h-4 w-4" />
-                Ocultar reglas
-              </>
-            ) : (
-              <>
-                <Settings2 className="h-3.5 w-3.5 text-[#C88A2B]" />
-                Configurar premio
-              </>
-            )}
-          </button>
         </div>
 
-        <AnimatePresence>
-          {rulePanelOpen && (
-            <motion.form
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              onSubmit={handleSaveRuleSubmit}
-              className="overflow-hidden border-t border-[#EFE3D2]"
-            >
+        <form onSubmit={handleSaveRuleSubmit} className="overflow-hidden">
               <div className="p-4 sm:p-5 space-y-4 bg-[#FFFDF9]">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                   <div className="sm:col-span-2 lg:col-span-1">
@@ -1307,11 +1346,11 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     type="button"
                     onClick={() => {
                       setRuleDraft(prizeRule);
-                      setRulePanelOpen(false);
+                      setActiveSubTab('ranking');
                     }}
                     className="min-h-[44px] sm:min-h-[40px] w-full sm:w-auto rounded-full border border-[#DFCBB3] px-4 py-1.5 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF1E4] cursor-pointer"
                   >
-                    Cancelar
+                    Volver al Ranking
                   </button>
                   <button
                     type="submit"
@@ -1323,11 +1362,13 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                   </button>
                 </div>
               </div>
-            </motion.form>
-          )}
-        </AnimatePresence>
+        </form>
       </section>
+      )}
 
+      {/* Sub-tab 1: Ranking en Vivo */}
+      {activeSubTab === 'ranking' && (
+        <>
       {/* Top 3 Winners Podium */}
       {podiumRows.length > 0 && (
         <section aria-label="Podio Top 3 Embajadores" className="space-y-3">
@@ -1763,7 +1804,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
           </div>
         ) : (
           <div className="space-y-3">
-            {visibleRows.map((row) => {
+            {paginatedRows.map((row) => {
               const { partner } = row;
               const isExpanded = expandedPartnerId === partner.id;
               const referralUrl = buildReferralUrl(defaultOriginUrl, partner.code);
@@ -2195,7 +2236,41 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
             })}
           </div>
         )}
+
+        {totalPages > 1 && (
+          <div className="pt-3 border-t border-slate-900/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-[#594133] tabular-nums">
+              Mostrando {pageStartIdx + 1}–{Math.min(pageStartIdx + RANKING_PAGE_SIZE, visibleRows.length)} de{' '}
+              {visibleRows.length}
+            </span>
+            <div className="flex items-center justify-between sm:justify-end gap-1.5">
+              <button
+                type="button"
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                <span>Anterior</span>
+              </button>
+              <span className="px-2.5 text-xs font-bold text-[#22150E] tabular-nums">
+                Página {safePage} de {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <span>Siguiente</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </section>
+        </>
+      )}
 
       {/* Modal 2: Edit Ambassador */}
       <AnimatePresence>
@@ -2507,6 +2582,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
 
       <SecretKeyModal
         open={Boolean(pendingSecretAction)}
+        bypassPassword={isAiManager}
         title={pendingSecretAction?.title || 'Autorizar cambio'}
         description={pendingSecretAction?.description}
         confirmLabel={pendingSecretAction?.confirmLabel}

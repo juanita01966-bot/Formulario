@@ -120,14 +120,14 @@ export const ReposoProspectsSection: React.FC<ReposoProspectsSectionProps> = ({
     }
   };
 
-  const isAdmin = userRole === 'admin';
+  const isAdminLike = userRole === 'admin' || userRole === 'ai_manager';
 
   return (
     <section
       aria-label="Prospectos en reposo (No agendados)"
-      className="dsb-glass rounded-[24px] sm:rounded-[26px] overflow-hidden border border-amber-400/45 shadow-[0_16px_36px_-18px_rgba(34,21,14,0.18)]"
+      className="dsb-glass rounded-[18px] sm:rounded-[20px] overflow-hidden border border-amber-400/45 shadow-[0_12px_28px_-18px_rgba(34,21,14,0.16)]"
       style={{
-        boxShadow: `0 16px 36px -20px ${roleTheme.glowRgba}, inset 0 1px 0 rgba(255,255,255,0.85)`,
+        boxShadow: `0 12px 28px -18px ${roleTheme.glowRgba}, inset 0 1px 0 rgba(255,255,255,0.85)`,
       }}
     >
       <button
@@ -135,35 +135,33 @@ export const ReposoProspectsSection: React.FC<ReposoProspectsSectionProps> = ({
         aria-expanded={expanded}
         data-dsb-banner="amber"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full px-3.5 sm:px-6 py-3.5 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 bg-gradient-to-r from-amber-50/70 via-white/40 to-amber-50/35 text-left cursor-pointer hover:bg-white/60 transition-colors"
+        className="w-full min-h-[46px] px-3.5 sm:px-5 py-2.5 sm:py-3 flex items-center justify-between gap-2.5 bg-gradient-to-r from-amber-50/70 via-white/40 to-amber-50/35 text-left cursor-pointer hover:bg-white/60 transition-colors"
       >
-        <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
-          <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/85 border border-amber-300/90 text-amber-900 shadow-2xs">
-            <PauseCircle className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-100/85 border border-amber-300/90 text-amber-900 shadow-2xs">
+            <PauseCircle className="h-4 w-4" />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <h2 className="font-serif text-base sm:text-xl font-bold text-[#1F1714] leading-snug">
-                En Reposo · No Agendados
-              </h2>
-              <span className="inline-flex items-center rounded-full bg-amber-200/75 border border-amber-400/50 px-2.5 py-0.5 text-[11px] sm:text-xs font-bold text-amber-950 tabular-nums">
-                {reposoLeads.length} {reposoLeads.length === 1 ? 'prospecto' : 'prospectos'}
-              </span>
-            </div>
-            <p className="text-xs text-[#6B5447] mt-0.5 leading-relaxed">
-              {isAdmin
-                ? 'Prospectos llamados por Telemarketing que no agendaron cita. Puedes reactivarlos a pendiente o pasarlos a agendado.'
-                : 'Prospectos llamados por Telemarketing que no agendaron cita (vista de solo lectura).'}
-            </p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
+            <h2 className="font-serif text-sm sm:text-base font-bold text-[#1F1714] leading-snug">
+              En Reposo
+            </h2>
+            <span className="inline-flex items-center rounded-full bg-amber-200/75 border border-amber-400/50 px-2.5 py-0.5 text-[11px] font-bold text-amber-950 tabular-nums">
+              {reposoLeads.length} {reposoLeads.length === 1 ? 'prospecto' : 'prospectos'}
+            </span>
+            <span className="hidden md:inline text-xs text-[#6B5447] truncate">
+              {isAdminLike
+                ? '· No agendados por Telemarketing (clic para reactivar o agendar)'
+                : '· No agendados por Telemarketing (solo lectura)'}
+            </span>
           </div>
         </div>
 
         <div
-          className={`inline-flex min-h-[38px] sm:min-h-0 w-full sm:w-auto items-center justify-between sm:justify-center gap-1.5 rounded-full border border-white/65 bg-white/65 px-3.5 sm:px-3 py-1.5 text-xs font-bold shrink-0 sm:self-center shadow-2xs ${roleTheme.textAccent}`}
+          className={`inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-full border border-white/65 bg-white/65 px-3 py-1 text-xs font-bold shrink-0 shadow-2xs ${roleTheme.textAccent}`}
         >
-          <span>{expanded ? 'Ocultar lista' : 'Ver en reposo'}</span>
+          <span>{expanded ? 'Ocultar lista' : 'Ver lista'}</span>
           <ChevronDown
-            className={`h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+            className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
           />
         </div>
       </button>
@@ -277,7 +275,7 @@ export const ReposoProspectsSection: React.FC<ReposoProspectsSectionProps> = ({
                           )}
                         </div>
 
-                        {isAdmin && onUpdateLead && (
+                        {isAdminLike && onUpdateLead && (
                           <div className="grid grid-cols-1 sm:flex sm:flex-nowrap items-stretch sm:items-center gap-2 w-full lg:w-auto shrink-0 pt-2.5 lg:pt-0 border-t lg:border-t-0 border-amber-300/40">
                             <button
                               type="button"

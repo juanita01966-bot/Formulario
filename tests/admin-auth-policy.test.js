@@ -702,10 +702,10 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
           (a) =>
             a.code === 'rbac_unauthorized_attempt' &&
             a.severity === 'critical' &&
-            a.metadata?.reason === 'cross_admin_password_attempt' &&
-            a.metadata?.targetAccountId === kevinId
+            (a.metadata?.reason === 'ai_manager_route_denied' ||
+              a.metadata?.reason === 'cross_admin_password_attempt')
         ),
-        'Expected critical rbac_unauthorized_attempt alert for cross_admin_password_attempt'
+        'Expected critical rbac_unauthorized_attempt alert for admin-password attempt'
       );
       assert.ok(
         alerts.some(
@@ -729,31 +729,14 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
       );
     });
 
-    test('POST /api/accounts/:ownId/admin-password rejects normal login password and succeeds with PoloNorte121966@ + PIN 1532 + 2x newPassword; new password immediately works for login and operational mutations', async () => {
+    test('Opción A: Regular Admin CANNOT rotate own password via /admin-password (403); AI Manager rotates Admin password without securityKey/PIN and new password works immediately', async () => {
       const kevinRotatedPass = 'KevinKarenRotated2028!';
 
-      // Normal Admin login password rejected (401/403)
+      // Regular Admin attempting /admin-password -> strictly 403 (even with PoloNorte121966@ + PIN 1532)
       const normalPassRejected = await fetch(`${baseUrl}/api/accounts/${kevinId}/admin-password`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${kevinToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          securityKey: KEVIN_KAREN_PASS,
-          confirmationPin: ADMIN_CHANGE_PIN,
-          newPassword: kevinRotatedPass,
-          confirmNewPassword: kevinRotatedPass,
-        }),
-      });
-      assertUnauthorized(normalPassRejected.status, 'admin-password with normal login password');
-
-      // Special Security Key + PIN 1532 + 2x matching newPassword -> 200
-      const oldKevinToken = kevinToken;
-      const rotatedRes = await fetch(`${baseUrl}/api/accounts/${kevinId}/admin-password`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${oldKevinToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -763,13 +746,41 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
           confirmNewPassword: kevinRotatedPass,
         }),
       });
+      assert.strictEqual(normalPassRejected.status, 403);
+
+      // AI Manager logs in via 2FA cognitive security question and rotates KevinyKaren password without securityKey/PIN -> 200
+      const aiStep1 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'JuanOrozco', password: SPECIAL_SECURITY_KEY }),
+      });
+      assert.strictEqual(aiStep1.status, 200);
+      const aiD1 = await aiStep1.json();
+      const aiAnswers = { 'sq-test-1': 'resp-uno', 'sq-test-2': '2099', 'sq-test-3': 'clave-tres', 'sq-test-4': 'codigo-cuatro', 'sq-test-5': 'gusto-cinco' };
+      const aiStep2 = await fetch(`${baseUrl}/api/auth/verify-security-question`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: aiD1.preAuthToken, answer: aiAnswers[aiD1.securityChallenge.questionId] }),
+      });
+      assert.strictEqual(aiStep2.status, 200);
+      const aiLogin = await aiStep2.json();
+      const oldKevinToken = kevinToken;
+      const rotatedRes = await fetch(`${baseUrl}/api/accounts/${kevinId}/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${aiLogin.sessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          newPassword: kevinRotatedPass,
+          confirmNewPassword: kevinRotatedPass,
+        }),
+      });
       assert.strictEqual(rotatedRes.status, 200);
       const rotatedBody = await rotatedRes.json();
       assert.strictEqual(rotatedBody.ok, true);
-      assert.strictEqual(typeof rotatedBody.sessionToken, 'string');
-      kevinToken = rotatedBody.sessionToken;
 
-      // Old token revoked; old password rejected on login & operational mutations
+      // Old token revoked; old password rejected on login
       const oldTokenCheck = await fetch(`${baseUrl}/api/auth/session`, {
         headers: { Authorization: `Bearer ${oldKevinToken}` },
       });
@@ -782,6 +793,15 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
       });
       assert.strictEqual(oldLoginCheck.status, 401);
 
+      // New password immediately works for full 2FA login AND subsequent operational mutations
+      const freshLogin = await loginAdmin2FA(
+        baseUrl,
+        KEVIN_KAREN_USER,
+        kevinRotatedPass,
+        KEVIN_KAREN_PIN
+      );
+      kevinToken = freshLogin.sessionToken;
+
       const oldPassMutation = await fetch(`${baseUrl}/api/settings`, {
         method: 'PATCH',
         headers: {
@@ -791,15 +811,6 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
         body: JSON.stringify({ advisorName: 'Old Pass Fail', adminPassword: KEVIN_KAREN_PASS }),
       });
       assertUnauthorized(oldPassMutation.status, 'settings with old KevinyKaren password after rotation');
-
-      // New password immediately works for full 2FA login AND subsequent operational mutations
-      const freshLogin = await loginAdmin2FA(
-        baseUrl,
-        KEVIN_KAREN_USER,
-        kevinRotatedPass,
-        KEVIN_KAREN_PIN
-      );
-      kevinToken = freshLogin.sessionToken;
 
       const newPassMutation = await fetch(`${baseUrl}/api/settings`, {
         method: 'PATCH',
@@ -812,31 +823,14 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
       assert.strictEqual(newPassMutation.status, 200);
     });
 
-    test('POST /api/auth/update-credentials rejects normal login password and updates ONLY logged-in Admin with PoloNorte121966@ + PIN 1532 + 2x newPassword', async () => {
+    test('Opción A: Regular Admin CANNOT use /api/auth/update-credentials (403); AI Manager updates AdminCiprian credentials and leaves KevinyKaren untouched', async () => {
       const ciprianRotatedPass = 'CiprianRotated2028@';
 
-      // Normal Admin login password rejected (401/403)
-      const normalPassRejected = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+      // Regular Admin rejected with 403
+      const regularAdminRejected = await fetch(`${baseUrl}/api/auth/update-credentials`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${ciprianToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          masterPassword: ADMIN_CIPRIAN_PASS,
-          confirmationPin: ADMIN_CHANGE_PIN,
-          newPassword: ciprianRotatedPass,
-          confirmNewPassword: ciprianRotatedPass,
-        }),
-      });
-      assertUnauthorized(normalPassRejected.status, 'update-credentials with normal login password');
-
-      // Succeeds with PoloNorte121966@ + PIN 1532 + 2x matching newPassword
-      const oldCiprianToken = ciprianToken;
-      const updateRes = await fetch(`${baseUrl}/api/auth/update-credentials`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${oldCiprianToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -846,11 +840,40 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
           confirmNewPassword: ciprianRotatedPass,
         }),
       });
+      assert.strictEqual(regularAdminRejected.status, 403);
+
+      // AI Manager rotates AdminCiprian's password via update-credentials -> 200
+      const aiStep1b = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'JuanOrozco', password: SPECIAL_SECURITY_KEY }),
+      });
+      assert.strictEqual(aiStep1b.status, 200);
+      const aiD1b = await aiStep1b.json();
+      const aiAnswersB = { 'sq-test-1': 'resp-uno', 'sq-test-2': '2099', 'sq-test-3': 'clave-tres', 'sq-test-4': 'codigo-cuatro', 'sq-test-5': 'gusto-cinco' };
+      const aiStep2b = await fetch(`${baseUrl}/api/auth/verify-security-question`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: aiD1b.preAuthToken, answer: aiAnswersB[aiD1b.securityChallenge.questionId] }),
+      });
+      assert.strictEqual(aiStep2b.status, 200);
+      const aiLogin = await aiStep2b.json();
+      const oldCiprianToken = ciprianToken;
+      const updateRes = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${aiLogin.sessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          targetAccountId: ciprianId,
+          newPassword: ciprianRotatedPass,
+          confirmNewPassword: ciprianRotatedPass,
+        }),
+      });
       assert.strictEqual(updateRes.status, 200);
       const updateBody = await updateRes.json();
       assert.strictEqual(updateBody.ok, true);
-      assert.strictEqual(typeof updateBody.sessionToken, 'string');
-      ciprianToken = updateBody.sessionToken;
 
       // Old token revoked; new password works immediately for login AND subsequent operational mutations
       const oldSess = await fetch(`${baseUrl}/api/auth/session`, {

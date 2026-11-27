@@ -6,12 +6,17 @@ import {
   Calendar,
   CalendarCheck2,
   Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   Eye,
   EyeOff,
   Hash,
   KeyRound,
+  LayoutList,
+  List,
   Lock,
   MapPin,
   MessageCircle,
@@ -228,9 +233,15 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   onDeleteLead,
   onBusyChange,
 }) => {
-  const isAdmin = userRole === 'admin';
+  const isAiManager = userRole === 'ai_manager';
+  const isAdmin = userRole === 'admin' || isAiManager;
   const isVendedor = userRole === 'vendedor';
   const roleTheme = getRoleTheme(userRole);
+
+  const [viewMode, setViewMode] = useState<'compact' | 'detailed'>('compact');
+  const [expandedCompactIds, setExpandedCompactIds] = useState<Record<string, boolean>>({});
+  const [pageSize, setPageSize] = useState<10 | 20 | 50>(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [search, setSearch] = useState('');
   const [originFilter, setOriginFilter] = useState<string>('all');
@@ -563,6 +574,23 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     });
   }, [leads, activeFilter, originFilter, search, referrerById, referrerByCode]);
 
+  // Reset pagination to page 1 when filters, search, or pageSize change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, activeFilter, originFilter, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStartIndex = (safePage - 1) * pageSize;
+  const paginatedLeads = useMemo(
+    () => filteredLeads.slice(pageStartIndex, pageStartIndex + pageSize),
+    [filteredLeads, pageStartIndex, pageSize]
+  );
+
+  const toggleCompactRowExpanded = (leadId: string) => {
+    setExpandedCompactIds((prev) => ({ ...prev, [leadId]: !prev[leadId] }));
+  };
+
   const handleToggleCalled = async (lead: Lead) => {
     if (!isAdmin || togglingLeadId) return;
     setActionError(null);
@@ -613,6 +641,44 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     }
   };
 
+  const handleImmediateAiDowngrade = async (lead: Lead, cat: Exclude<LeadCategory, 'none'>) => {
+    if (updatingCategoryLeadId) return;
+    setActionError(null);
+    setUpdatingCategoryLeadId(lead.id);
+    try {
+      await onUpdateLead(lead.id, {
+        category: cat,
+        ...(lead.category === 'orden' ? { orderAmount: null } : {}),
+      });
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'No se pudo retroceder el estado del prospecto.'
+      );
+    } finally {
+      setUpdatingCategoryLeadId(null);
+    }
+  };
+
+  const handleImmediateAiReactivate = async (lead: Lead) => {
+    if (updatingCategoryLeadId) return;
+    setActionError(null);
+    setUpdatingCategoryLeadId(lead.id);
+    try {
+      await onUpdateLead(lead.id, {
+        category: 'none',
+        promoCodeInvalidated: false,
+        sellerLocked: false,
+        orderAmount: null,
+      });
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'No se pudo revertir el estado del prospecto.'
+      );
+    } finally {
+      setUpdatingCategoryLeadId(null);
+    }
+  };
+
   const handleCategoryClick = (lead: Lead, cat: Exclude<LeadCategory, 'none'>) => {
     const outcome: CallOutcome = lead.callOutcome ?? (lead.called ? 'scheduled' : 'pending');
     const currentRank = CATEGORY_RANK[lead.category];
@@ -623,8 +689,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       return;
     }
 
-    // Backward / Downgrade (targetRank < currentRank) — requires Admin password for both Admin & Vendedor
+    // Backward / Downgrade (targetRank < currentRank)
     if (targetRank < currentRank) {
+      if (isAiManager) {
+        void handleImmediateAiDowngrade(lead, cat);
+        return;
+      }
       if (!isAdmin && !isVendedor) {
         return;
       }
@@ -666,6 +736,10 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   };
 
   const handleOpenReactivateModal = (lead: Lead) => {
+    if (isAiManager) {
+      void handleImmediateAiReactivate(lead);
+      return;
+    }
     if (!isAdmin && !isVendedor) return;
     setActionError(null);
     setAdminPassword('');
@@ -948,19 +1022,60 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
         style={{ background: roleTheme.headerStrip }}
       />
       {/* Toolbar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 pb-3.5 sm:pb-5 border-b border-slate-900/10">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 sm:pb-4 border-b border-slate-900/10">
         <div className="min-w-0">
-          <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E] leading-snug">
-            {isVendedor ? 'Mis Prospectos del Show de Cocina' : 'Prospectos del Show de Cocina'}
-          </h2>
-          <p className="text-xs sm:text-sm text-[#594133] mt-0.5 leading-relaxed">
-            {isVendedor
-              ? 'Visualiza y registra tus prospectos. Puedes avanzar libremente (Cita → Demo → Orden) sin contraseña en cualquier prospecto activo; retroceder requiere contraseña de Administrador.'
-              : 'Gestiona los prospectos, su estado de Telemarketing y avanza libremente (Cita → Demo → Orden) sin contraseña; retroceder a un estado anterior requiere contraseña de Administrador.'}
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-serif text-lg sm:text-xl font-bold text-[#22150E] leading-snug">
+              {isVendedor ? 'Mis Prospectos del Show de Cocina' : 'Prospectos del Show de Cocina'}
+            </h2>
+            <span className="dsb-glass-subtle inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold text-[#594133] tabular-nums">
+              {filteredLeads.length}
+            </span>
+          </div>
+          <p className="text-xs text-[#594133] mt-0.5 leading-relaxed">
+            {isAiManager
+              ? 'Autoridad AI Manager: avanza, retrocede o reactiva códigos en 1 clic sin contraseña.'
+              : isVendedor
+                ? 'Visualiza y registra tus prospectos. Avanza libremente (Cita → Demo → Orden) sin contraseña; retroceder requiere contraseña de Administrador.'
+                : 'Gestiona prospectos y avanza libremente (Cita → Demo → Orden) sin contraseña; retroceder requiere contraseña de Administrador.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto shrink-0">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto shrink-0">
+          {/* Compact vs Detailed View Toggle */}
+          <div
+            role="group"
+            aria-label="Modo de vista de prospectos"
+            className="dsb-glass-subtle inline-flex items-center rounded-full p-0.5 border border-[#DFCBB3]/75 shrink-0"
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode('compact')}
+              aria-pressed={viewMode === 'compact'}
+              className={`inline-flex min-h-[36px] items-center gap-1 rounded-full px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'compact'
+                  ? roleTheme.activePillClass
+                  : 'text-[#594133] hover:text-[#22150E]'
+              }`}
+            >
+              <List className="h-3.5 w-3.5 shrink-0" />
+              <span>Compacta</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('detailed')}
+              aria-pressed={viewMode === 'detailed'}
+              className={`inline-flex min-h-[36px] items-center gap-1 rounded-full px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'detailed'
+                  ? roleTheme.activePillClass
+                  : 'text-[#594133] hover:text-[#22150E]'
+              }`}
+            >
+              <LayoutList className="h-3.5 w-3.5 shrink-0" />
+              <span>Detallada</span>
+            </button>
+          </div>
+
           {(isAdmin || isVendedor) && onCreateManualLead && (
             <button
               type="button"
@@ -972,7 +1087,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 setManualOpen(true);
               }}
               style={{ background: roleTheme.heroGradient }}
-              className="inline-flex min-h-[42px] sm:min-h-[44px] flex-1 sm:flex-none min-w-0 items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-xs font-semibold text-white whitespace-nowrap shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer"
+              className="inline-flex min-h-[40px] flex-1 sm:flex-none min-w-0 items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-1.5 text-xs font-semibold text-white whitespace-nowrap shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5 shrink-0" />
               <span>Agregar prospecto</span>
@@ -981,7 +1096,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
           <button
             type="button"
             onClick={handleExportCsv}
-            className="dsb-glass-subtle inline-flex min-h-[42px] sm:min-h-[44px] items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-xs font-semibold text-[#4E382B] hover:bg-white/85 transition-colors cursor-pointer shrink-0"
+            className="dsb-glass-subtle inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold text-[#4E382B] hover:bg-white/85 transition-colors cursor-pointer shrink-0"
           >
             <Download className="h-3.5 w-3.5 shrink-0" />
             CSV
@@ -1073,16 +1188,16 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       )}
 
       {/* Leads List */}
-      <div className="mt-5 space-y-3">
+      <div className={viewMode === 'compact' ? 'mt-3.5 space-y-2' : 'mt-4 space-y-3'}>
         {filteredLeads.length === 0 ? (
-          <div className="dsb-glass-subtle rounded-2xl border-dashed border-[#DFCBB3] py-12 text-center">
+          <div className="dsb-glass-subtle rounded-2xl border-dashed border-[#DFCBB3] py-10 text-center">
             <p className="font-serif text-lg font-semibold text-[#594133]">Sin prospectos en esta vista</p>
             <p className="mt-1 text-xs text-[#7B5D4A]">
               Cuando alguien complete el formulario público aparecerá automáticamente aquí.
             </p>
           </div>
         ) : (
-          filteredLeads.map((lead) => {
+          paginatedLeads.map((lead) => {
             const matchedGift = gifts.find((g) => g.id === lead.giftId);
             const referralSource = resolveLeadReferral(lead);
             const showLockHint = lockedHintId === lead.id;
@@ -1109,6 +1224,191 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
             const whatsappUrl = `https://wa.me/${cleanTel.replace(/^\+/, '')}?text=${encodeURIComponent(
               `Hola ${lead.name}, te saludo de Royal Prestige / Show de Cocina respecto a tu obsequio "${lead.giftName || 'regalo de otoño'}" (Número de orden ${lead.claimCode}).`
             )}`;
+            const isCompactCollapsed = viewMode === 'compact' && !expandedCompactIds[lead.id];
+
+            if (isCompactCollapsed) {
+              return (
+                <div
+                  key={lead.id}
+                  data-dsb-card={
+                    isFinalStage ? 'locked' : lead.called || hasAssignedCategory ? 'default' : 'pending'
+                  }
+                  className={`min-w-0 max-w-full rounded-2xl border px-3 py-2 sm:px-3.5 sm:py-2.5 backdrop-blur-md transition-all duration-150 ${
+                    isFinalStage
+                      ? 'border-stone-300/80 bg-stone-50/70'
+                      : lead.called || hasAssignedCategory
+                        ? 'border-white/75 bg-white/72 shadow-[0_4px_14px_-10px_rgba(15,23,42,0.14)] hover:bg-white/88'
+                        : 'border-amber-300/80 bg-gradient-to-r from-white/78 to-[#FEF7E8]/75 hover:bg-white/90'
+                  }`}
+                >
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 min-w-0">
+                    {/* Clickable Compact Summary Info */}
+                    <button
+                      type="button"
+                      onClick={() => toggleCompactRowExpanded(lead.id)}
+                      aria-expanded={false}
+                      className="flex flex-wrap sm:flex-nowrap items-center gap-x-2.5 gap-y-1 min-w-0 flex-1 text-left cursor-pointer group"
+                    >
+                      <span
+                        className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                          lead.category === 'orden'
+                            ? 'bg-emerald-500'
+                            : lead.category === 'demo'
+                              ? 'bg-sky-500'
+                              : lead.category === 'cita'
+                                ? 'bg-rose-500'
+                                : leadOutcome === 'not_scheduled'
+                                  ? 'bg-amber-500'
+                                  : lead.called
+                                    ? 'bg-emerald-400'
+                                    : 'bg-amber-400'
+                        }`}
+                      />
+                      <span className="text-[13.5px] sm:text-sm font-bold text-[#22150E] truncate max-w-[180px] sm:max-w-[200px] group-hover:underline">
+                        {lead.name}
+                      </span>
+                      <span className="font-mono text-[11.5px] text-[#594133] tabular-nums shrink-0">
+                        {lead.phone}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums shrink-0 ${
+                          promoInvalidated
+                            ? 'bg-stone-100 border-stone-300 text-stone-500 line-through'
+                            : 'bg-[#FAF0E0] border-[#E6C99E] text-[#8C4A19]'
+                        }`}
+                      >
+                        {lead.claimCode}
+                      </span>
+                      {referralSource && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[#E5C17B] bg-[#FFF4DC] px-2 py-0.5 text-[10px] font-bold text-[#7A4610] max-w-[150px] truncate shrink-0">
+                          {referralSource.isEmbajador && (
+                            <Sparkles className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
+                          )}
+                          <span className="truncate">
+                            {referralSource.name || referralSource.code}
+                          </span>
+                        </span>
+                      )}
+                      {lead.qualification?.tier === 'alto' && (
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 shrink-0">
+                          🔥 VIP
+                        </span>
+                      )}
+                      {lead.category === 'orden' && lead.orderAmount != null && (
+                        <span className="font-mono text-[11px] font-bold text-emerald-700 tabular-nums shrink-0">
+                          ${Number(lead.orderAmount).toLocaleString('en-US')}
+                        </span>
+                      )}
+                      {lead.category === 'none' && leadOutcome === 'not_scheduled' && (
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 shrink-0">
+                          Reposo
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Right: Quick Status Pills (Cita | Demo | Orden) + Expand Chevron */}
+                    <div className="relative flex items-center justify-between md:justify-end gap-1.5 shrink-0">
+                      <div
+                        data-dsb-segmented={canChangeStatusBase ? 'active' : 'disabled'}
+                        className={`grid grid-cols-3 flex-1 md:flex-none md:inline-flex items-center rounded-xl p-0.5 border transition-opacity ${
+                          canChangeStatusBase
+                            ? 'bg-[#FAF3E8] border-[#E3D0B8]'
+                            : 'bg-stone-100 border-stone-200 opacity-65'
+                        }`}
+                      >
+                        {CATEGORIES.map((cat) => {
+                          const Icon = cat.icon;
+                          const targetRank = CATEGORY_RANK[cat.id];
+                          const isSelected = targetRank === currentRank;
+                          const isForward = targetRank > currentRank;
+                          const isBackward = targetRank < currentRank;
+
+                          const btnDisabled =
+                            isUpdatingCategoryThis ||
+                            (isSelected
+                              ? true
+                              : isBackward
+                                ? !(isAdmin || isVendedor)
+                                : isVendedor && !canChangeStatusBase);
+
+                          const btnTitle = isSelected
+                            ? `Estado actual: ${cat.label}`
+                            : isBackward
+                              ? isAiManager
+                                ? `Retroceder a ${cat.label} (1 clic · AI Manager)`
+                                : `Retroceder a ${cat.label} (requiere contraseña de Administrador)`
+                              : canChangeStatusBase
+                                ? `Avanzar a ${cat.label}`
+                                : isVendedor
+                                  ? 'En Reposo · No disponible'
+                                  : 'Expande y marca llamada primero';
+
+                          return (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              disabled={btnDisabled}
+                              aria-current={isSelected ? 'step' : undefined}
+                              onClick={() => handleCategoryClick(lead, cat.id)}
+                              title={btnTitle}
+                              className={`min-w-0 inline-flex min-h-[36px] sm:min-h-[30px] items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-all ${
+                                isSelected
+                                  ? `${cat.activeClass} cursor-default`
+                                  : isBackward
+                                    ? isAdmin || isVendedor
+                                      ? 'text-[#6E5341] hover:bg-amber-50 hover:text-[#8C3318] cursor-pointer disabled:opacity-55'
+                                      : 'text-stone-400 opacity-55 cursor-not-allowed'
+                                    : btnDisabled
+                                      ? 'text-stone-400 cursor-not-allowed'
+                                      : isForward && canChangeStatusBase
+                                        ? 'text-[#594133] hover:bg-white/75 cursor-pointer'
+                                        : 'text-stone-500 hover:bg-white/40 cursor-pointer'
+                              }`}
+                            >
+                              {isSelected ? (
+                                <Icon className="h-3 w-3 shrink-0" />
+                              ) : isBackward && !isAiManager ? (
+                                <Lock className="h-2.5 w-2.5 shrink-0 opacity-75" />
+                              ) : !canChangeStatusBase && isForward ? (
+                                <Lock className="h-2.5 w-2.5 opacity-70 shrink-0" />
+                              ) : (
+                                <Icon className="h-3 w-3 shrink-0" />
+                              )}
+                              <span className="truncate">{cat.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => toggleCompactRowExpanded(lead.id)}
+                        aria-label={`Expandir detalles de ${lead.name}`}
+                        title="Ver detalles completos"
+                        className="inline-flex h-9 w-9 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl border border-[#DFCBB3]/85 bg-white/75 hover:bg-white text-[#594133] transition-colors cursor-pointer"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+
+                      <AnimatePresence>
+                        {showLockHint && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute right-0 -bottom-8 z-20 rounded-lg bg-[#22150E] px-2.5 py-1 text-[10px] font-semibold text-amber-200 shadow-lg whitespace-nowrap"
+                          >
+                            {isVendedor
+                              ? 'En Reposo · No disponible'
+                              : 'Expande y marca “Ya se llamó” primero'}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -1122,6 +1422,21 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                       : 'border-amber-300/80 bg-gradient-to-r from-white/78 to-[#FEF7E8]/75 shadow-[0_6px_20px_-14px_rgba(180,83,9,0.16),inset_0_1px_0_rgba(255,255,255,0.85)] hover:bg-white/88'
                 }`}
               >
+                {viewMode === 'compact' && (
+                  <div className="mb-2.5 pb-2 border-b border-slate-900/10 flex items-center justify-between gap-2">
+                    <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#7B5D4A]">
+                      Vista expandida · {lead.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleCompactRowExpanded(lead.id)}
+                      className="inline-flex min-h-[30px] items-center gap-1 rounded-full border border-[#DFCBB3] bg-white/80 hover:bg-white px-2.5 py-0.5 text-[11px] font-bold text-[#594133] cursor-pointer"
+                    >
+                      <span>Contraer</span>
+                      <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 min-w-0">
                   {/* Left: Person & Revealed Gift */}
                   <div className="flex items-start gap-2.5 sm:gap-3.5 min-w-0 flex-1">
@@ -1516,7 +1831,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                           const btnTitle = isSelected
                             ? `Estado actual: ${cat.label}`
                             : isBackward
-                              ? `Retroceder a ${cat.label} (requiere contraseña de Administrador)`
+                              ? isAiManager
+                                ? `Retroceder a ${cat.label} (1 clic · AI Manager)`
+                                : `Retroceder a ${cat.label} (requiere contraseña de Administrador)`
                               : canChangeStatusBase
                                 ? currentRank === 0
                                   ? `Asignar a ${cat.label} (sin contraseña)`
@@ -1549,9 +1866,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                             >
                               {isSelected ? (
                                 <Icon className="h-3.5 w-3.5 shrink-0" />
-                              ) : isBackward ? (
+                              ) : isBackward && !isAiManager ? (
                                 <Lock className="h-3 w-3 shrink-0 opacity-75" />
-                              ) : !canChangeStatusBase ? (
+                              ) : !canChangeStatusBase && isForward ? (
                                 <Lock className="h-3 w-3 opacity-70 shrink-0" />
                               ) : (
                                 <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -1674,6 +1991,58 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
           })
         )}
       </div>
+
+      {/* Pagination Bar */}
+      {filteredLeads.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-slate-900/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[#594133]">
+            <span className="font-semibold tabular-nums">
+              Mostrando {pageStartIndex + 1}–{Math.min(pageStartIndex + pageSize, filteredLeads.length)} de{' '}
+              {filteredLeads.length}
+            </span>
+            <span className="text-[#C8B29A]">·</span>
+            <label className="inline-flex items-center gap-1.5 font-semibold">
+              <span>Por página:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value) as 10 | 20 | 50)}
+                aria-label="Prospectos por página"
+                className="min-h-[34px] rounded-lg border border-[#DFCBB3] bg-white/80 px-2 py-1 text-base sm:text-xs font-bold text-[#22150E] focus:outline-none cursor-pointer"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </label>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between sm:justify-end gap-1.5">
+              <button
+                type="button"
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                <span>Anterior</span>
+              </button>
+              <span className="px-2.5 text-xs font-bold text-[#22150E] tabular-nums whitespace-nowrap">
+                Página {safePage} de {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <span>Siguiente</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </section>
 
       {/* Modal 1: Security Confirmation before assigning category (invalidates promo code) */}

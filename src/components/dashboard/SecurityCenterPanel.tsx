@@ -1,7 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   ExternalLink,
   Eye,
@@ -26,6 +28,7 @@ import type {
   SecurityAlertSeverity,
   SecurityAlertStatus,
   UserAccount,
+  UserRole,
 } from '../../types/app';
 
 interface SecurityCenterPanelProps {
@@ -33,6 +36,7 @@ interface SecurityCenterPanelProps {
   leads: Lead[];
   accounts: UserAccount[];
   referrers: ReferralPartner[];
+  userRole?: UserRole;
   onUpdateAlertStatus: (
     id: string,
     status: SecurityAlertStatus,
@@ -134,6 +138,8 @@ function normalizeKey(value?: string | null): string {
   return (value || '').trim().toUpperCase();
 }
 
+const ALERTS_PAGE_SIZE = 15;
+
 export const SecurityCenterPanel: React.FC<SecurityCenterPanelProps> = ({
   alerts,
   leads,
@@ -148,6 +154,7 @@ export const SecurityCenterPanel: React.FC<SecurityCenterPanelProps> = ({
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<'mark_all_reviewed' | 'clear_resolved' | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
@@ -584,6 +591,18 @@ export const SecurityCenterPanel: React.FC<SecurityCenterPanelProps> = ({
       });
   }, [alerts, statusFilter, severityFilter, categoryFilter, searchQuery]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, severityFilter, categoryFilter, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredAlerts.length / ALERTS_PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStartIdx = (safePage - 1) * ALERTS_PAGE_SIZE;
+  const paginatedAlerts = useMemo(
+    () => filteredAlerts.slice(pageStartIdx, pageStartIdx + ALERTS_PAGE_SIZE),
+    [filteredAlerts, pageStartIdx]
+  );
+
   // ---------------------------------------------------------------------------
   // Action Handlers
   // ---------------------------------------------------------------------------
@@ -642,9 +661,9 @@ export const SecurityCenterPanel: React.FC<SecurityCenterPanelProps> = ({
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-3.5 sm:space-y-4">
       {/* a) Header + Quick Actions */}
-      <section className="dsb-glass rounded-[24px] sm:rounded-[28px] border border-slate-200/80 p-3.5 sm:p-6 shadow-sm">
+      <section className="dsb-glass rounded-[22px] sm:rounded-[24px] border border-slate-200/80 p-3.5 sm:p-5 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5 sm:gap-4">
           <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
             <div
@@ -1125,8 +1144,8 @@ export const SecurityCenterPanel: React.FC<SecurityCenterPanelProps> = ({
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {filteredAlerts.map((alert) => {
+          <div className="space-y-2.5">
+            {paginatedAlerts.map((alert) => {
               const sevMeta = SEVERITY_META[alert.severity] || SEVERITY_META.info;
               const isRowBusy = busyId === alert.id || Boolean(bulkBusy);
               return (
@@ -1288,6 +1307,38 @@ export const SecurityCenterPanel: React.FC<SecurityCenterPanelProps> = ({
                 </article>
               );
             })}
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-600 tabular-nums">
+              Mostrando {pageStartIdx + 1}–{Math.min(pageStartIdx + ALERTS_PAGE_SIZE, filteredAlerts.length)} de{' '}
+              {filteredAlerts.length} alertas
+            </span>
+            <div className="flex items-center justify-between sm:justify-end gap-1.5">
+              <button
+                type="button"
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-slate-300 bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-slate-700 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                <span>Anterior</span>
+              </button>
+              <span className="px-2.5 text-xs font-bold text-slate-900 tabular-nums">
+                Página {safePage} de {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-slate-300 bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-slate-700 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <span>Siguiente</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </section>

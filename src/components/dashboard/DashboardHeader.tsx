@@ -23,6 +23,7 @@ import {
 } from './surfaceTheme';
 
 export type DashboardTab =
+  | 'ai_control'
   | 'overview'
   | 'referrals'
   | 'embajadores'
@@ -253,7 +254,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
       ),
     [leads]
   );
-  const isAdmin = userRole === 'admin';
+  const isAdminLike = userRole === 'admin' || userRole === 'ai_manager';
 
   const openSecurityAlerts = useMemo(
     () => (securityAlerts ?? []).filter((a) => a.status === 'open'),
@@ -476,7 +477,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 <span className="hidden sm:inline">Cerrar sesión</span>
               </button>
 
-              {isAdmin && (
+              {isAdminLike && (
                 <div ref={bellContainerRef} className="relative">
                   <button
                     type="button"
@@ -731,7 +732,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           </div>
         </div>
 
-        {(isAdmin || userRole === 'vendedor') && activeTab && onTabChange && (
+        {(isAdminLike || userRole === 'vendedor') && activeTab && onTabChange && (
           <DashboardNavDock
             embedded
             activeTab={activeTab}

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
   ClipboardList,
+  Crown,
   Gift,
   LayoutDashboard,
   QrCode,
@@ -40,6 +41,16 @@ const ADMIN_TABS: Array<{
   { id: 'settings', label: 'Ajustes', mobileLabel: 'Ajustes', icon: Settings },
   { id: 'security', label: 'Seguridad', mobileLabel: 'Seguridad', icon: ShieldAlert },
   { id: 'activity', label: 'Registro', mobileLabel: 'Registro', icon: ClipboardList },
+];
+
+const AI_MANAGER_TABS: Array<{
+  id: DashboardTab;
+  label: string;
+  mobileLabel: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'ai_control', label: 'Centro AI', mobileLabel: 'Centro AI', icon: Crown },
+  ...ADMIN_TABS,
 ];
 
 const VENDEDOR_TABS: Array<{
@@ -100,22 +111,29 @@ export const DashboardNavDock: React.FC<DashboardNavDockProps> = ({
     return { openAlertsCount: count, highestSeverity: highest };
   }, [securityAlerts]);
 
-  if (userRole !== 'admin' && userRole !== 'vendedor') {
+  const isAiManager = userRole === 'ai_manager';
+  const isAdminLike = userRole === 'admin' || isAiManager;
+
+  if (!isAdminLike && userRole !== 'vendedor') {
     return null;
   }
 
   const isVendedor = userRole === 'vendedor';
-  const tabs = isVendedor ? VENDEDOR_TABS : ADMIN_TABS;
+  const tabs = isVendedor ? VENDEDOR_TABS : isAiManager ? AI_MANAGER_TABS : ADMIN_TABS;
   const theme = getRoleTheme(userRole);
   const isDarkSurface = surfaceTheme !== 'porcelain';
 
   const dockBorderColor =
     surfaceTheme === 'obsidian-marble'
-      ? isVendedor
-        ? 'rgba(200, 168, 91, 0.24)'
-        : 'rgba(226, 194, 117, 0.18)'
+      ? isAiManager
+        ? 'rgba(212, 175, 55, 0.34)'
+        : isVendedor
+          ? 'rgba(200, 168, 91, 0.24)'
+          : 'rgba(226, 194, 117, 0.18)'
       : surfaceTheme === 'royal-blue'
-        ? 'rgba(186, 212, 245, 0.20)'
+        ? isAiManager
+          ? 'rgba(212, 175, 55, 0.30)'
+          : 'rgba(186, 212, 245, 0.20)'
         : theme.borderTint;
 
   const dockShadow =
@@ -146,7 +164,9 @@ export const DashboardNavDock: React.FC<DashboardNavDockProps> = ({
       aria-label={
         isVendedor
           ? 'Navegación principal del vendedor'
-          : 'Navegación principal del panel de administración'
+          : isAiManager
+            ? 'Navegación principal de AI Manager'
+            : 'Navegación principal del panel de administración'
       }
       className={
         embedded
@@ -195,7 +215,9 @@ export const DashboardNavDock: React.FC<DashboardNavDockProps> = ({
               className={`relative flex items-center justify-center rounded-xl font-semibold tracking-tight transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E2C275]/75 ${
                 isVendedor
                   ? 'min-h-[40px] sm:min-h-[38px] sm:min-w-[152px] px-3 sm:px-5 py-1.5 text-xs sm:text-[13px]'
-                  : 'min-h-[40px] md:min-h-[38px] min-w-[68px] shrink-0 lg:min-w-0 md:flex-auto px-2.5 md:px-2 lg:px-3.5 py-1.5 text-[10.5px] md:text-xs lg:text-[13px]'
+                  : isAiManager
+                    ? 'min-h-[40px] md:min-h-[38px] min-w-[66px] shrink-0 lg:min-w-0 md:flex-auto px-2 md:px-2 lg:px-2.5 xl:px-3 py-1.5 text-[10.5px] md:text-[11.5px] lg:text-xs'
+                    : 'min-h-[40px] md:min-h-[38px] min-w-[68px] shrink-0 lg:min-w-0 md:flex-auto px-2.5 md:px-2 lg:px-3.5 py-1.5 text-[10.5px] md:text-xs lg:text-[13px]'
               } ${isActive ? 'text-white' : inactiveTabClass}`}
             >
               {isActive && (

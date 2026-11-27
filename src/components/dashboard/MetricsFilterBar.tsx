@@ -252,10 +252,10 @@ export const MetricsFilterBar: React.FC<MetricsFilterBarProps> = ({
   return (
     <section
       aria-label="Filtros globales de métricas"
-      className="rounded-[18px] sm:rounded-[24px] dsb-glass px-3 sm:px-5 py-3 sm:py-4 space-y-2.5 sm:space-y-3 min-w-0 max-w-full overflow-hidden"
+      className="rounded-[18px] sm:rounded-[20px] dsb-glass px-3 sm:px-4 py-2.5 sm:py-3 space-y-2 min-w-0 max-w-full overflow-hidden"
       style={{ borderColor: theme.borderTint }}
     >
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 min-w-0">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 sm:gap-2.5 min-w-0">
         {/* Date Presets */}
         <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-1.5 sm:gap-2 min-w-0 w-full lg:w-auto">
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 shrink-0">

@@ -5,6 +5,7 @@ import {
   Edit3,
   Eye,
   EyeOff,
+  Gift,
   ImagePlus,
   Link2,
   Palette,
@@ -17,7 +18,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import type { GiftItem, GiftThemeId, GiftVisualKey, ShowcaseStyleId } from '../../types/app';
+import type { GiftItem, GiftThemeId, GiftVisualKey, ShowcaseStyleId, UserRole } from '../../types/app';
 import { GIFT_THEME_PRESETS, resolveBoxPalette } from '../../shared/giftThemes';
 import {
   GIFT_VISUAL_OPTIONS,
@@ -145,6 +146,7 @@ interface GiftsEditorProps {
   customBoxColor?: string;
   showcaseStyle?: ShowcaseStyleId;
   randomizeGifts?: boolean;
+  userRole?: UserRole;
   onUpdateGiftTheme?: (
     giftTheme: GiftThemeId,
     customBoxColor: string | undefined,
@@ -315,7 +317,7 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
         <div
           onMouseMove={handleStageMouseMove}
           onMouseLeave={handleStageMouseLeave}
-          className={`relative h-40 sm:h-48 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-end pb-3 pt-4 ${
+          className={`relative h-32 sm:h-36 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-end pb-2.5 pt-3 ${
             gift.active
               ? `${tokens.stageBorder} shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_12px_26px_-14px_rgba(15,8,4,0.6)]`
               : 'border-stone-300 opacity-70 grayscale-[0.4]'
@@ -579,6 +581,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   customBoxColor = '#B84A27',
   showcaseStyle = 'luminous-gold',
   randomizeGifts = true,
+  userRole = 'admin',
   onUpdateGiftTheme,
   onUpdateShowcaseSettings,
   onCreateGift,
@@ -588,6 +591,8 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   onResetGifts,
   onBusyChange,
 }) => {
+  const isAiManager = userRole === 'ai_manager';
+  const [activeSubTab, setActiveSubTab] = useState<'catalog' | 'aesthetics' | 'raffle'>('catalog');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingGiftId, setEditingGiftId] = useState<string | null>(null);
   const [draft, setDraft] = useState<UpsertGiftWithProbability>(EMPTY_DRAFT);
@@ -622,9 +627,17 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     description: string,
     confirmLabel: string,
     run: (masterPassword: string) => Promise<void>,
-    onCancel?: () => void
+    onCancel?: () => void,
+    allowInstantForAi = true
   ) => {
     setErrorMsg(null);
+    if (isAiManager && allowInstantForAi) {
+      void run('').catch((err) => {
+        setErrorMsg(err instanceof Error ? err.message : 'No se pudo completar el cambio.');
+        onCancel?.();
+      });
+      return;
+    }
     setPendingSecretAction({ title, description, confirmLabel, run, onCancel });
   };
 
@@ -734,12 +747,16 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     const targetGift = gifts.find((g) => g.id === id);
     requestSecretAuth(
       'Eliminar regalo del catálogo',
-      `Ingresa tu contraseña de Administrador para eliminar "${targetGift?.name || 'este regalo'}".`,
+      isAiManager
+        ? `Confirma para eliminar "${targetGift?.name || 'este regalo'}" del catálogo (AI Manager · Sin contraseña).`
+        : `Ingresa tu contraseña de Administrador para eliminar "${targetGift?.name || 'este regalo'}".`,
       'Autorizar y eliminar',
       async (masterPassword) => {
         await onDeleteGift(id, masterPassword);
         setConfirmDeleteId(null);
-      }
+      },
+      undefined,
+      false
     );
   };
 
@@ -791,44 +808,50 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
       ? (modalWeightNumber / modalTotalActiveWeight) * 100
       : 0;
 
-  const adminTheme = getRoleTheme('admin');
+  const adminTheme = getRoleTheme(userRole);
 
   return (
-    <section className="space-y-5">
-      <div className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-3.5 sm:p-6">
+    <section className="space-y-4">
+      <div className="relative overflow-hidden dsb-glass rounded-[22px] sm:rounded-[26px] p-3.5 sm:p-5">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 h-1"
           style={{ background: adminTheme.headerStrip }}
         />
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="min-w-0">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/75 border border-[#8B0018]/20 px-3 py-0.5 text-[11px] font-semibold text-[#8B0018] mb-2">
-              <Sparkles className="h-3 w-3 text-[#B91C1C] shrink-0" />
-              {activeCount} {activeCount === 1 ? 'regalo activo' : 'regalos activos'} en tarjetas ocultas
-            </span>
-            <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E]">
-              Catálogo de Regalos de Cocina
-            </h2>
-            <p className="text-xs sm:text-sm text-[#594133] mt-0.5">
-              Añade, edita, oculta o ajusta las probabilidades de los regalos que se revelan en las 9 cajas doradas.
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#22150E]">
+                Catálogo de Regalos de Cocina
+              </h2>
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/75 border border-[#8B0018]/20 px-2.5 py-0.5 text-[11px] font-semibold text-[#8B0018]">
+                <Sparkles className="h-3 w-3 text-[#B91C1C] shrink-0" />
+                {activeCount} {activeCount === 1 ? 'activo' : 'activos'}
+              </span>
+            </div>
+            <p className="text-xs text-[#594133]">
+              Añade, edita, oculta o ajusta probabilidades y estética de las 9 cajas doradas.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
             {confirmReset ? (
-              <div className="inline-flex min-h-[44px] w-full sm:w-auto flex-wrap items-center justify-center gap-2 rounded-2xl sm:rounded-full bg-amber-50 border border-amber-300 px-3.5 py-2 text-xs">
+              <div className="inline-flex min-h-[40px] w-full sm:w-auto flex-wrap items-center justify-center gap-2 rounded-2xl sm:rounded-full bg-amber-50 border border-amber-300 px-3.5 py-1.5 text-xs">
                 <button
                   type="button"
                   onClick={() => {
                     requestSecretAuth(
                       'Restaurar 9 regalos oficiales',
-                      'Ingresa tu contraseña de Administrador para restaurar el catálogo original de 9 regalos Royal Prestige.',
+                      isAiManager
+                        ? 'Confirma para restaurar el catálogo original de 9 regalos Royal Prestige (AI Manager · Sin contraseña).'
+                        : 'Ingresa tu contraseña de Administrador para restaurar el catálogo original de 9 regalos Royal Prestige.',
                       'Autorizar y restaurar',
                       async (masterPassword) => {
                         await onResetGifts(masterPassword);
                         setConfirmReset(false);
-                      }
+                      },
+                      undefined,
+                      false
                     );
                   }}
                   className="font-bold text-[#8C3318] hover:underline cursor-pointer"
@@ -847,7 +870,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
               <button
                 type="button"
                 onClick={() => setConfirmReset(true)}
-                className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-3.5 py-2 text-xs font-semibold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
+                className="inline-flex min-h-[40px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-3.5 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
               >
                 <RotateCcw className="h-3.5 w-3.5 shrink-0" />
                 Restaurar base
@@ -858,7 +881,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
               type="button"
               onClick={openCreateModal}
               style={{ background: adminTheme.heroGradient }}
-              className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold text-white shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer"
+              className="inline-flex min-h-[40px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold text-white shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer"
             >
               <Plus className="h-4 w-4 shrink-0" />
               Añadir regalo
@@ -866,14 +889,82 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
           </div>
         </div>
 
+        {/* 3 Instant Sub-Tabs: Catálogo y Probabilidades | Estética Cajas 3D | Sorteo y Orden */}
+        <div
+          role="tablist"
+          aria-label="Secciones del editor de regalos"
+          className="mt-3.5 dsb-glass-subtle grid grid-cols-3 sm:inline-flex gap-1 w-full sm:w-auto rounded-2xl p-1 border"
+          style={{ borderColor: adminTheme.borderTint }}
+        >
+          {(
+            [
+              { id: 'catalog', label: 'Catálogo y Probabilidades', mobileLabel: 'Catálogo', icon: Gift },
+              { id: 'aesthetics', label: 'Estética Cajas 3D', mobileLabel: 'Cajas 3D', icon: Palette },
+              { id: 'raffle', label: 'Sorteo y Orden', mobileLabel: 'Sorteo', icon: Shuffle },
+            ] as const
+          ).map((tab) => {
+            const Icon = tab.icon;
+            const active = activeSubTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveSubTab(tab.id)}
+                className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl px-2.5 sm:px-3.5 py-1.5 text-[11px] sm:text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  active ? adminTheme.activePillClass : 'text-[#594133] hover:bg-white/70'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="sm:hidden">{tab.mobileLabel}</span>
+                <span className="hidden sm:inline">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {errorMsg && (
-          <div className="mt-4 rounded-xl bg-red-50/90 backdrop-blur-sm border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-700">
+          <div className="mt-3.5 rounded-xl bg-red-50/90 backdrop-blur-sm border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-700">
             {errorMsg}
           </div>
         )}
 
+        {/* Sub-tab 1: Catálogo y Probabilidades (DEFAULT) */}
+        {activeSubTab === 'catalog' && (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4">
+            <AnimatePresence>
+              {gifts.map((gift, idx) => {
+                const weight = getGiftProbability(gift);
+                const effectivePercent =
+                  gift.active && totalActiveWeight > 0 ? (weight / totalActiveWeight) * 100 : 0;
+                return (
+                  <GiftCatalogCard
+                    key={gift.id}
+                    gift={gift}
+                    index={idx}
+                    weight={weight}
+                    effectivePercent={effectivePercent}
+                    showcaseStyle={showcaseStyle}
+                    confirmDeleteId={confirmDeleteId}
+                    onToggleActive={handleToggleActive}
+                    onSaveCardProbability={handleQuickSaveCardProbability}
+                    onEdit={openEditModal}
+                    onRequestDelete={(id) => setConfirmDeleteId(id)}
+                    onConfirmDelete={handleDelete}
+                    onCancelDelete={() => setConfirmDeleteId(null)}
+                  />
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* Sub-tab 2: Estética Cajas 3D */}
+        {activeSubTab === 'aesthetics' && (
+          <div className="mt-4 space-y-4">
         {/* Thematic & Custom Color Selector for 3D Gift Boxes */}
-        <div className="mt-5 dsb-glass-subtle rounded-2xl p-3.5 sm:p-5">
+        <div className="dsb-glass-subtle rounded-2xl p-3.5 sm:p-5">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
             <div className="flex items-center gap-3 sm:gap-3.5 min-w-0">
               {/* Live Floating 3D Box Mini Preview */}
@@ -1047,9 +1138,14 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
             })}
           </div>
         </div>
+          </div>
+        )}
 
+        {/* Sub-tab 3: Sorteo y Orden */}
+        {activeSubTab === 'raffle' && (
+          <div className="mt-4 space-y-4">
         {/* Selección Aleatoria Anti-Abuso */}
-        <div className="mt-4 dsb-glass-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl p-3.5 sm:px-5 sm:py-3.5">
+        <div className="dsb-glass-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl p-3.5 sm:px-5 sm:py-4">
           <div className="flex items-center gap-2.5 min-w-0">
             <span
               className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
@@ -1084,32 +1180,55 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
           </button>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-          <AnimatePresence>
-            {gifts.map((gift, idx) => {
+        {/* Live Probability Weight Distribution Summary */}
+        <div className="dsb-glass-subtle rounded-2xl p-3.5 sm:p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-[#22150E]">
+                Distribución actual de probabilidades
+              </h3>
+              <p className="text-xs text-[#6E5341]">
+                Peso total activo: <strong className="tabular-nums">{formatWeightNumber(totalActiveWeight)}</strong> · {activeCount} regalos participando
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('catalog')}
+              className="inline-flex min-h-[34px] items-center gap-1 rounded-full border border-[#DFCBB3] bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-[#594133] cursor-pointer"
+            >
+              Ajustar pesos en Catálogo
+            </button>
+          </div>
+          <div className="space-y-2">
+            {gifts.map((gift) => {
               const weight = getGiftProbability(gift);
-              const effectivePercent =
-                gift.active && totalActiveWeight > 0 ? (weight / totalActiveWeight) * 100 : 0;
+              const pct = gift.active && totalActiveWeight > 0 ? (weight / totalActiveWeight) * 100 : 0;
               return (
-                <GiftCatalogCard
-                  key={gift.id}
-                  gift={gift}
-                  index={idx}
-                  weight={weight}
-                  effectivePercent={effectivePercent}
-                  showcaseStyle={showcaseStyle}
-                  confirmDeleteId={confirmDeleteId}
-                  onToggleActive={handleToggleActive}
-                  onSaveCardProbability={handleQuickSaveCardProbability}
-                  onEdit={openEditModal}
-                  onRequestDelete={(id) => setConfirmDeleteId(id)}
-                  onConfirmDelete={handleDelete}
-                  onCancelDelete={() => setConfirmDeleteId(null)}
-                />
+                <div key={gift.id} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className={`font-semibold truncate ${gift.active ? 'text-[#22150E]' : 'text-stone-400 line-through'}`}>
+                      {gift.name}
+                    </span>
+                    <span className="font-mono text-[11px] font-bold text-[#8C4A19] tabular-nums shrink-0">
+                      {gift.active ? `${formatProbabilityPercent(pct)} (p:${formatWeightNumber(weight)})` : 'Oculto · 0%'}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-900/10">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(100, Math.max(pct > 0 ? 3 : 0, pct))}%`,
+                        background: gift.active ? adminTheme.progressGradient : '#a8a29e',
+                      }}
+                    />
+                  </div>
+                </div>
               );
             })}
-          </AnimatePresence>
+          </div>
         </div>
+          </div>
+        )}
       </div>
 
       {/* Add / Edit Modal */}
@@ -1561,6 +1680,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
 
       <SecretKeyModal
         open={Boolean(pendingSecretAction)}
+        bypassPassword={isAiManager}
         title={pendingSecretAction?.title || 'Autorizar cambio'}
         description={pendingSecretAction?.description}
         confirmLabel={pendingSecretAction?.confirmLabel}

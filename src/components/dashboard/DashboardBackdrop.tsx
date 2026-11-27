@@ -194,6 +194,12 @@ const ROLE_DARK_AURAS: Record<
     orbTertiary: 'rgba(185, 28, 28, 0.14)',
     washTint: 'rgba(139, 0, 24, 0.14)',
   },
+  ai_manager: {
+    orbPrimary: 'rgba(232, 189, 85, 0.28)',
+    orbSecondary: 'rgba(200, 150, 46, 0.22)',
+    orbTertiary: 'rgba(247, 220, 136, 0.18)',
+    washTint: 'rgba(200, 150, 46, 0.19)',
+  },
   admin: {
     orbPrimary: 'rgba(185, 28, 28, 0.22)',
     orbSecondary: 'rgba(244, 202, 115, 0.14)',
@@ -222,6 +228,7 @@ export const DashboardBackdrop: React.FC<DashboardBackdropProps> = ({
   const prefersReducedMotion = useReducedMotion();
 
   const isGateway = role === 'gateway';
+  const isAiManager = role === 'ai_manager';
   const isVault = stage === 'filter2_pin';
   const isObsidian = surfaceTheme === 'obsidian-marble';
   const isRoyalBlue = surfaceTheme === 'royal-blue';
@@ -232,23 +239,25 @@ export const DashboardBackdrop: React.FC<DashboardBackdropProps> = ({
 
   const palette = isObsidian
     ? {
-        backdropWash: `radial-gradient(ellipse 80% 60% at 16% 14%, ${darkAura.washTint} 0%, transparent 56%), radial-gradient(ellipse 70% 55% at 84% 84%, rgba(244, 202, 115, 0.10) 0%, transparent 58%), linear-gradient(155deg, #08080A 0%, #111015 48%, #0A090C 100%)`,
+        backdropWash: isAiManager
+          ? `radial-gradient(ellipse 82% 62% at 16% 14%, rgba(232, 189, 85, 0.22) 0%, transparent 56%), radial-gradient(ellipse 74% 58% at 84% 84%, rgba(200, 150, 46, 0.16) 0%, transparent 58%), linear-gradient(155deg, #090806 0%, #14110B 48%, #0B0907 100%)`
+          : `radial-gradient(ellipse 80% 60% at 16% 14%, ${darkAura.washTint} 0%, transparent 56%), radial-gradient(ellipse 70% 55% at 84% 84%, rgba(244, 202, 115, 0.10) 0%, transparent 58%), linear-gradient(155deg, #08080A 0%, #111015 48%, #0A090C 100%)`,
         orbPrimary: darkAura.orbPrimary,
         orbSecondary: darkAura.orbSecondary,
         orbTertiary: darkAura.orbTertiary,
-        ringStroke: 'rgba(244, 202, 115, 0.30)',
-        glowRgba: 'rgba(244, 202, 115, 0.24)',
-        dotColor: 'rgba(244, 202, 115, 0.08)',
+        ringStroke: isAiManager ? 'rgba(245, 214, 123, 0.44)' : 'rgba(244, 202, 115, 0.30)',
+        glowRgba: isAiManager ? 'rgba(232, 189, 85, 0.34)' : 'rgba(244, 202, 115, 0.24)',
+        dotColor: isAiManager ? 'rgba(245, 214, 123, 0.11)' : 'rgba(244, 202, 115, 0.08)',
       }
     : isRoyalBlue
       ? {
           backdropWash: `radial-gradient(ellipse 82% 62% at 18% 12%, rgba(59, 130, 246, 0.22) 0%, transparent 58%), radial-gradient(ellipse 72% 58% at 84% 86%, rgba(244, 202, 115, 0.14) 0%, transparent 58%), radial-gradient(ellipse 55% 45% at 74% 18%, ${darkAura.washTint} 0%, transparent 55%), linear-gradient(155deg, #040B24 0%, #0A1D56 38%, #102C7A 72%, #061133 100%)`,
-          orbPrimary: 'rgba(37, 99, 235, 0.26)',
+          orbPrimary: isAiManager ? 'rgba(232, 189, 85, 0.24)' : 'rgba(37, 99, 235, 0.26)',
           orbSecondary: darkAura.orbPrimary,
-          orbTertiary: 'rgba(244, 202, 115, 0.16)',
-          ringStroke: 'rgba(147, 197, 253, 0.32)',
-          glowRgba: 'rgba(96, 165, 250, 0.28)',
-          dotColor: 'rgba(147, 197, 253, 0.10)',
+          orbTertiary: 'rgba(244, 202, 115, 0.18)',
+          ringStroke: isAiManager ? 'rgba(245, 214, 123, 0.42)' : 'rgba(147, 197, 253, 0.32)',
+          glowRgba: isAiManager ? 'rgba(232, 189, 85, 0.32)' : 'rgba(96, 165, 250, 0.28)',
+          dotColor: isAiManager ? 'rgba(245, 214, 123, 0.11)' : 'rgba(147, 197, 253, 0.10)',
         }
       : theme
         ? {

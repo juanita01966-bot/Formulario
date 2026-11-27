@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
+  ArrowRight,
   Check,
-  ChevronDown,
-  Clock,
+  Crown,
   Edit3,
   Eye,
   EyeOff,
@@ -18,7 +18,7 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import type { ReferralPartner, UserAccount } from '../../types/app';
+import type { ReferralPartner, UserAccount, UserRole } from '../../types/app';
 import type {
   CreateAccountPayload,
   UpdateAccountPasswordPayload,
@@ -45,9 +45,12 @@ type PendingCreateAccountDraft = Omit<CreateAccountPayload, 'masterPassword' | '
 interface AccountsManagerPanelProps {
   accounts: UserAccount[];
   referrers?: ReferralPartner[];
+  userRole?: UserRole;
   currentUserId?: string;
   currentUsername?: string;
   currentDisplayName?: string;
+  openCreateAdminSignal?: number;
+  onGoToAiControl?: () => void;
   onCreateAccount: (payload: CreateAccountPayload) => Promise<void>;
   onUpdateAccount: (id: string, payload: UpdateAccountPayload) => Promise<void>;
   onUpdateAccountPassword: (id: string, payload: UpdateAccountPasswordPayload) => Promise<string>;
@@ -70,27 +73,22 @@ function formatDate(iso?: string | null): string {
   }).format(d);
 }
 
-function formatLockoutDuration(totalSeconds: number): string {
-  const safe = Math.max(0, Math.ceil(totalSeconds));
-  const mins = Math.floor(safe / 60);
-  const secs = safe % 60;
-  if (mins <= 0) return `${secs}s`;
-  return `${mins}m ${String(secs).padStart(2, '0')}s`;
-}
-
 export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
   accounts,
   referrers = [],
+  userRole = 'admin',
   currentUserId,
   currentUsername,
   currentDisplayName,
+  openCreateAdminSignal = 0,
+  onGoToAiControl,
   onCreateAccount,
   onUpdateAccount,
   onUpdateAccountPassword,
-  onUpdateAdminAccountPassword,
   onDeleteAccount,
   onBusyChange,
 }) => {
+  const isAiManager = userRole === 'ai_manager';
   const [roleFilter, setRoleFilter] = useState<'all' | 'vendedor' | 'telemarketing' | 'admin'>('all');
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -98,12 +96,13 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
   const [createOpen, setCreateOpen] = useState(false);
   const [cDisplayName, setCDisplayName] = useState('');
   const [cUsername, setCUsername] = useState('');
-  const [cRole, setCRole] = useState<'vendedor' | 'telemarketing'>('vendedor');
+  const [cRole, setCRole] = useState<'vendedor' | 'telemarketing' | 'admin'>('vendedor');
   const [cTag, setCTag] = useState('');
   const [cTagTouched, setCTagTouched] = useState(false);
   const [cAvatarUrl, setCAvatarUrl] = useState('');
   const [cPassword, setCPassword] = useState('');
   const [cConfirmPassword, setCConfirmPassword] = useState('');
+  const [cPin, setCPin] = useState('');
   const [cShowPasswords, setCShowPasswords] = useState(false);
   const [cSubmitting, setCSubmitting] = useState(false);
   const [cError, setCError] = useState<string | null>(null);
@@ -117,8 +116,9 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
   const editBackdropDownRef = useRef(false);
   const passBackdropDownRef = useRef(false);
   const secretBackdropDownRef = useRef(false);
+  const lastCreateAdminSignalRef = useRef(openCreateAdminSignal);
 
-  // Edit Modal (displayName, tag, active, avatarUrl — requires logged-in Admin password)
+  // Edit Modal (displayName, tag, active, avatarUrl)
   const [editingAccount, setEditingAccount] = useState<UserAccount | null>(null);
   const [eDisplayName, setEDisplayName] = useState('');
   const [eTag, setETag] = useState('');
@@ -138,7 +138,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
   const [pSubmitting, setPSubmitting] = useState(false);
   const [pError, setPError] = useState<string | null>(null);
 
-  // Delete / Toggle Active Secret Key Modal
+  // Delete / Toggle Active Modal
   const [secretActionModal, setSecretActionModal] = useState<{
     kind: 'delete' | 'toggle';
     account: UserAccount;
@@ -148,49 +148,30 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
   const [sSubmitting, setSSubmitting] = useState(false);
   const [sError, setSError] = useState<string | null>(null);
 
-  // Dedicated Self-Only Admin Password Change Section State
-  const [adminPwExpanded, setAdminPwExpanded] = useState(true);
-  const [adminSecurityKey, setAdminSecurityKey] = useState('');
-  const [adminConfirmationPin, setAdminConfirmationPin] = useState('');
-  const [adminNewPassword, setAdminNewPassword] = useState('');
-  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
-  const [showAdminSecKey, setShowAdminSecKey] = useState(false);
-  const [showAdminPin, setShowAdminPin] = useState(false);
-  const [showAdminNewPw, setShowAdminNewPw] = useState(false);
-  const [showAdminConfirmPw, setShowAdminConfirmPw] = useState(false);
-  const [adminPwFocused, setAdminPwFocused] = useState(false);
-  const [adminPwSubmitting, setAdminPwSubmitting] = useState(false);
-  const [adminPwError, setAdminPwError] = useState<string | null>(null);
-  const [adminPwSuccess, setAdminPwSuccess] = useState<string | null>(null);
-  const [adminPwLockoutSeconds, setAdminPwLockoutSeconds] = useState(0);
-
-  const adminPwSectionRef = useRef<HTMLElement | null>(null);
-  const adminSecKeyInputRef = useRef<HTMLInputElement | null>(null);
-  const adminPwErrorRef = useRef<HTMLDivElement | null>(null);
-
-  // Strict Self-Only Admin Isolation: never expose other Admin accounts in directory or counts
+  // AI Manager sees ALL accounts (including all Admins); regular Admin sees strict self-only Admin + team
   const scopedAccounts = useMemo(
     () =>
-      accounts.filter((acc) => {
-        if (acc.role !== 'admin') return true;
-        if (currentUserId) return acc.id === currentUserId;
-        if (currentUsername) {
-          return acc.username.toLowerCase() === currentUsername.trim().toLowerCase();
-        }
-        return false;
-      }),
-    [accounts, currentUserId, currentUsername]
+      isAiManager
+        ? accounts
+        : accounts.filter((acc) => {
+            if (acc.role === 'ai_manager') return false;
+            if (acc.role !== 'admin') return true;
+            if (currentUserId) return acc.id === currentUserId;
+            if (currentUsername) {
+              return acc.username.toLowerCase() === currentUsername.trim().toLowerCase();
+            }
+            return false;
+          }),
+    [accounts, isAiManager, currentUserId, currentUsername]
   );
 
   const currentAdminAccount = useMemo(
     () =>
       currentUserId
-        ? scopedAccounts.find((a) => a.id === currentUserId && a.role === 'admin')
-        : scopedAccounts.find((a) => a.role === 'admin'),
+        ? scopedAccounts.find((a) => a.id === currentUserId)
+        : scopedAccounts.find((a) => a.role === 'admin' || a.role === 'ai_manager'),
     [scopedAccounts, currentUserId]
   );
-
-  const selfAdminTargetId = currentAdminAccount?.id || currentUserId || '';
 
   const adminLabel = useMemo(() => {
     const display = (currentDisplayName || currentAdminAccount?.displayName || '').trim();
@@ -202,29 +183,13 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
     return display || 'tu cuenta actual';
   }, [currentDisplayName, currentUsername, currentAdminAccount]);
 
-  const isAdminPwLockedOut = adminPwLockoutSeconds > 0;
-  useEffect(() => {
-    if (!isAdminPwLockedOut) return;
-    const timer = window.setInterval(() => {
-      setAdminPwLockoutSeconds((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [isAdminPwLockedOut]);
-
-  const adminPwDirty = Boolean(
-    adminSecurityKey || adminConfirmationPin || adminNewPassword || adminConfirmPassword
-  );
-
   useEffect(() => {
     const busy =
       createOpen ||
       Boolean(pendingCreateDraft) ||
       Boolean(editingAccount) ||
       Boolean(passwordModalAccount) ||
-      Boolean(secretActionModal) ||
-      adminPwSubmitting ||
-      adminPwFocused ||
-      adminPwDirty;
+      Boolean(secretActionModal);
     onBusyChange?.(busy);
     return () => onBusyChange?.(false);
   }, [
@@ -233,17 +198,8 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
     editingAccount,
     passwordModalAccount,
     secretActionModal,
-    adminPwSubmitting,
-    adminPwFocused,
-    adminPwDirty,
     onBusyChange,
   ]);
-
-  useEffect(() => {
-    if (adminPwError) {
-      adminPwErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [adminPwError]);
 
   useEffect(() => {
     if (cError) {
@@ -294,22 +250,30 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
     return scopedAccounts.filter((a) => a.role === roleFilter);
   }, [scopedAccounts, roleFilter]);
 
-  const openCreateModal = () => {
+  const openCreateModal = (initialRole: 'vendedor' | 'telemarketing' | 'admin' = 'vendedor') => {
     setCDisplayName('');
     setCUsername('');
-    setCRole('vendedor');
+    setCRole(initialRole === 'admin' && !isAiManager ? 'vendedor' : initialRole);
     setCTag('');
     setCTagTouched(false);
     setCAvatarUrl('');
     setCPassword('');
     setCConfirmPassword('');
+    setCPin('');
     setCShowPasswords(false);
     setCError(null);
     setPendingCreateDraft(null);
     setCreateOpen(true);
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (isAiManager && openCreateAdminSignal > lastCreateAdminSignalRef.current) {
+      lastCreateAdminSignalRef.current = openCreateAdminSignal;
+      openCreateModal('admin');
+    }
+  }, [isAiManager, openCreateAdminSignal]);
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cSubmitting || pendingCreateDraft) return;
     setCError(null);
@@ -346,8 +310,13 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
       setCError('Las contraseñas no coinciden.');
       return;
     }
+    const cleanPin = cPin.trim();
+    if (cRole === 'admin' && !/^\d{4,8}$/.test(cleanPin)) {
+      setCError('El PIN 2FA de Administrador es obligatorio y debe tener entre 4 y 8 dígitos.');
+      return;
+    }
 
-    setPendingCreateDraft({
+    const draft: PendingCreateAccountDraft = {
       username: cleanUser,
       displayName: cleanDisplay,
       role: cRole,
@@ -355,7 +324,41 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
       ...(cRole === 'vendedor' && avatarCheck.value ? { avatarUrl: avatarCheck.value } : {}),
       password: cPassword,
       confirmPassword: cConfirmPassword,
-    });
+      ...(cRole === 'admin' ? { pin: cleanPin } : {}),
+    };
+
+    if (isAiManager) {
+      setCSubmitting(true);
+      try {
+        await onCreateAccount({
+          ...draft,
+          masterPassword: '',
+          adminPassword: '',
+        });
+        setCreateOpen(false);
+        const roleLabel =
+          draft.role === 'admin'
+            ? 'Administrador'
+            : draft.role === 'vendedor'
+              ? 'Vendedor / Embajador'
+              : 'Telemarketing';
+        setBanner({
+          type: 'success',
+          text: `Cuenta "${draft.displayName}" (${roleLabel}) creada con tag ${draft.tag}.`,
+        });
+      } catch (err) {
+        setCError(
+          err instanceof DsbAuthError || err instanceof Error
+            ? err.message
+            : 'No se pudo crear la cuenta.'
+        );
+      } finally {
+        setCSubmitting(false);
+      }
+      return;
+    }
+
+    setPendingCreateDraft(draft);
   };
 
   const handleAuthorizeCreateAccount = async (authSecret: string) => {
@@ -370,9 +373,15 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
       });
       setPendingCreateDraft(null);
       setCreateOpen(false);
+      const roleLabel =
+        draft.role === 'admin'
+          ? 'Administrador'
+          : draft.role === 'vendedor'
+            ? 'Vendedor / Embajador'
+            : 'Telemarketing';
       setBanner({
         type: 'success',
-        text: `Cuenta "${draft.displayName}" (${draft.role === 'vendedor' ? 'Vendedor / Embajador' : 'Telemarketing'}) creada con tag ${draft.tag}.`,
+        text: `Cuenta "${draft.displayName}" (${roleLabel}) creada con tag ${draft.tag}.`,
       });
     } finally {
       setCSubmitting(false);
@@ -414,7 +423,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
       setEError(avatarCheck.error || 'La foto de perfil no es válida.');
       return;
     }
-    if (!eMasterPassword) {
+    if (!isAiManager && !eMasterPassword) {
       setEError('Ingresa tu contraseña de Administrador para guardar los cambios.');
       return;
     }
@@ -422,7 +431,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
     setESubmitting(true);
     try {
       await onUpdateAccount(editingAccount.id, {
-        masterPassword: eMasterPassword,
+        masterPassword: isAiManager ? '' : eMasterPassword,
         displayName: cleanDisplay,
         tag: cleanTag,
         ...(editingAccount.role === 'vendedor' ? { avatarUrl: avatarCheck.value } : {}),
@@ -505,23 +514,24 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
     e.preventDefault();
     if (!secretActionModal || sSubmitting) return;
     setSError(null);
-    if (!sMasterPassword) {
+    if (!isAiManager && !sMasterPassword) {
       setSError('Ingresa tu contraseña de Administrador.');
       return;
     }
 
     const { kind, account } = secretActionModal;
+    const effectiveSecret = isAiManager ? '' : sMasterPassword;
     setSSubmitting(true);
     try {
       if (kind === 'delete') {
-        await onDeleteAccount(account.id, sMasterPassword);
+        await onDeleteAccount(account.id, effectiveSecret);
         setBanner({
           type: 'success',
           text: `Cuenta "${account.displayName}" eliminada.`,
         });
       } else {
         await onUpdateAccount(account.id, {
-          masterPassword: sMasterPassword,
+          masterPassword: effectiveSecret,
           active: !account.active,
         });
         setBanner({
@@ -543,146 +553,55 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
     }
   };
 
-  const handleFocusSelfAdminPassword = () => {
-    setAdminPwExpanded(true);
-    setAdminPwError(null);
-    setAdminPwSuccess(null);
-    window.requestAnimationFrame(() => {
-      adminPwSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      window.setTimeout(() => {
-        adminSecKeyInputRef.current?.focus({ preventScroll: true });
-      }, 280);
-    });
-  };
-
-  const handleResetAdminPasswordFields = () => {
-    setAdminSecurityKey('');
-    setAdminConfirmationPin('');
-    setAdminNewPassword('');
-    setAdminConfirmPassword('');
-    setShowAdminSecKey(false);
-    setShowAdminPin(false);
-    setShowAdminNewPw(false);
-    setShowAdminConfirmPw(false);
-    setAdminPwError(null);
-  };
-
-  const handleAdminPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!onUpdateAdminAccountPassword || adminPwSubmitting || adminPwLockoutSeconds > 0) return;
-
-    setAdminPwError(null);
-    setAdminPwSuccess(null);
-
-    if (!selfAdminTargetId) {
-      setAdminPwError('No se identificó tu cuenta de Administrador activa para actualizar.');
-      return;
-    }
-
-    if (!adminSecurityKey.trim()) {
-      setAdminPwError('Ingresa la clave de seguridad para autorizar el cambio.');
-      return;
-    }
-
-    const cleanPin = adminConfirmationPin.trim();
-    if (!cleanPin) {
-      setAdminPwError('Ingresa el PIN de confirmación.');
-      return;
-    }
-    if (cleanPin.length < 4) {
-      setAdminPwError('El PIN de confirmación debe tener al menos 4 dígitos.');
-      return;
-    }
-
-    if (adminNewPassword.length < 8) {
-      setAdminPwError('La nueva contraseña debe tener al menos 8 caracteres.');
-      return;
-    }
-
-    if (adminNewPassword !== adminConfirmPassword) {
-      setAdminPwError('La nueva contraseña y su confirmación (2da vez) no coinciden.');
-      return;
-    }
-
-    setAdminPwSubmitting(true);
-    try {
-      const msg = await onUpdateAdminAccountPassword(selfAdminTargetId, {
-        securityKey: adminSecurityKey,
-        confirmationPin: cleanPin,
-        newPassword: adminNewPassword,
-        confirmNewPassword: adminConfirmPassword,
-      });
-
-      setAdminSecurityKey('');
-      setAdminConfirmationPin('');
-      setAdminNewPassword('');
-      setAdminConfirmPassword('');
-      setShowAdminSecKey(false);
-      setShowAdminPin(false);
-      setShowAdminNewPw(false);
-      setShowAdminConfirmPw(false);
-      setAdminPwError(null);
-      setAdminPwLockoutSeconds(0);
-      setAdminPwSuccess(`${msg} (${adminLabel})`);
-    } catch (err) {
-      if (err instanceof DsbAuthError) {
-        setAdminPwError(err.message);
-        if (err.locked && err.retryAfterSeconds > 0) {
-          setAdminPwLockoutSeconds(err.retryAfterSeconds);
-        }
-      } else if (err instanceof Error && err.message) {
-        setAdminPwError(err.message);
-      } else {
-        setAdminPwError('No se pudo actualizar la contraseña de Administrador.');
-      }
-    } finally {
-      setAdminPwSubmitting(false);
-    }
-  };
-
-  const adminTheme = getRoleTheme('admin');
+  const adminTheme = getRoleTheme(userRole);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Header */}
       <motion.section
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-        className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-6"
+        className="relative overflow-hidden dsb-glass rounded-[22px] sm:rounded-[26px] p-3.5 sm:p-5"
       >
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 h-1"
           style={{ background: adminTheme.headerStrip }}
         />
-        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
-          <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div
-              className="flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl shadow-md border border-white/25"
+              className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl shadow-md border border-white/25"
               style={{ background: adminTheme.heroGradient }}
             >
-              <RoleSymbolSvg role="admin" className="h-6 w-6 sm:h-8 sm:w-8" />
+              <RoleSymbolSvg role={userRole} className="h-6 w-6 sm:h-7 sm:w-7" animated={false} />
             </div>
             <div className="min-w-0">
-              <span className="inline-flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.15em] text-[#8B0018]">
+              <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#8B0018]">
                 <ShieldCheck className="h-3.5 w-3.5 text-[#B91C1C] shrink-0" />
-                Gestión de Cuentas y Tags Únicos
+                {isAiManager
+                  ? 'Directorio Global · Autoridad AI Manager'
+                  : 'Gestión de Cuentas y Tags Únicos'}
               </span>
-              <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E] mt-0.5 leading-snug">
-                Cuentas de Telemarketing y Vendedores
+              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#22150E] leading-snug">
+                {isAiManager
+                  ? 'Todas las Cuentas (Administradores, Vendedores y Telemarketing)'
+                  : 'Cuentas de Telemarketing y Vendedores'}
               </h2>
-              <p className="text-xs sm:text-sm text-[#594133] mt-1 max-w-2xl">
-                Cada Vendedor / Embajador tiene su propio Tag único sincronizado automáticamente con Estudio QR y Métricas. Crear, editar, activar/desactivar o eliminar cuentas de equipo se autoriza con tu contraseña de Administrador ({adminLabel}).
+              <p className="text-xs text-[#594133] mt-0.5 max-w-2xl">
+                {isAiManager
+                  ? 'Crea, edita, activa/desactiva o elimina cualquier cuenta (incluyendo Administradores) en 1 clic sin contraseñas. Para rotar contraseñas o PIN 2FA de Administradores usa Centro AI.'
+                  : `Cada Vendedor / Embajador tiene su Tag único sincronizado con Estudio QR y Métricas. Crear, editar o eliminar cuentas de equipo se autoriza con tu contraseña (${adminLabel}).`}
               </p>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={openCreateModal}
+            onClick={() => openCreateModal('vendedor')}
             style={{ background: adminTheme.heroGradient }}
-            className="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-full px-5 py-2.5 text-xs font-bold text-white shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer shrink-0"
+            className="inline-flex min-h-[42px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-full px-5 py-2 text-xs font-bold text-white shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer shrink-0"
           >
             <UserPlus className="h-4 w-4 shrink-0" />
             Crear cuenta nueva
@@ -724,14 +643,20 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
       </AnimatePresence>
 
       {/* Filter Pills + Directory */}
-      <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-3.5 sm:p-6 space-y-4">
+      <section className="dsb-glass rounded-[22px] sm:rounded-[26px] p-3.5 sm:p-5 space-y-3.5">
         <div className="flex items-center gap-1.5 overflow-x-auto sm:flex-wrap border-b border-slate-900/10 pb-3 -mx-0.5 px-0.5">
           {(
             [
-              { id: 'all', label: `Todas (${counts.all})`, roleKey: 'admin' as const },
+              { id: 'all', label: `Todas (${counts.all})`, roleKey: userRole },
               { id: 'vendedor', label: `Vendedores / Embajadores (${counts.vendedor})`, roleKey: 'vendedor' as const },
               { id: 'telemarketing', label: `Telemarketing (${counts.telemarketing})`, roleKey: 'telemarketing' as const },
-              { id: 'admin', label: `Mi cuenta Admin (${counts.admin})`, roleKey: 'admin' as const },
+              {
+                id: 'admin',
+                label: isAiManager
+                  ? `Administradores (${counts.admin})`
+                  : `Mi cuenta Admin (${counts.admin})`,
+                roleKey: 'admin' as const,
+              },
             ] as const
           ).map((tab) => {
             const active = roleFilter === tab.id;
@@ -741,7 +666,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setRoleFilter(tab.id)}
-                className={`inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap min-h-[38px] sm:min-h-[34px] rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap min-h-[36px] rounded-full px-3.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
                   active
                     ? tabTheme.activePillClass
                     : 'dsb-glass-subtle text-[#594133] hover:bg-white/80'
@@ -766,18 +691,19 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
             </p>
             <button
               type="button"
-              onClick={openCreateModal}
+              onClick={() => openCreateModal(roleFilter === 'admin' && isAiManager ? 'admin' : 'vendedor')}
               style={{ background: adminTheme.heroGradient }}
-              className="inline-flex min-h-[42px] items-center gap-1.5 rounded-full px-5 py-2 text-xs font-bold text-white hover:brightness-110 cursor-pointer shadow-sm"
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-full px-5 py-2 text-xs font-bold text-white hover:brightness-110 cursor-pointer shadow-sm"
             >
               <Plus className="h-4 w-4" />
               Crear cuenta nueva
             </button>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {visibleAccounts.map((acc) => {
               const isAdminAcc = acc.role === 'admin';
+              const isAiMgrAcc = acc.role === 'ai_manager';
               const isSelf = Boolean(
                 (currentUserId && acc.id === currentUserId) ||
                   (!currentUserId &&
@@ -793,10 +719,10 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                   style={{
                     borderColor: acc.active ? accTheme.borderTint : undefined,
                   }}
-                  className={`relative overflow-hidden rounded-2xl border p-3.5 sm:p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 transition-all duration-200 ${
+                  className={`relative overflow-hidden rounded-2xl border p-3 sm:p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 transition-all duration-200 ${
                     !acc.active
                       ? 'border-stone-300/80 bg-stone-100/65 backdrop-blur-md opacity-80'
-                      : 'dsb-glass-subtle bg-white/70 hover:bg-white/85 hover:-translate-y-0.5 hover:shadow-md'
+                      : 'dsb-glass-subtle bg-white/70 hover:bg-white/85 hover:shadow-sm'
                   }`}
                 >
                   {/* Signature role side-bar */}
@@ -824,16 +750,16 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                       </div>
                     ) : (
                       <div
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border shadow-xs backdrop-blur-md bg-white/80"
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-xs backdrop-blur-md bg-white/80"
                         style={{ borderColor: accTheme.borderTint }}
                       >
-                        <RoleSymbolSvg role={acc.role} className="h-8 w-8" animated={false} />
+                        <RoleSymbolSvg role={acc.role} className="h-7 w-7" animated={false} />
                       </div>
                     )}
 
-                    <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                        <h3 className="text-[15px] font-bold text-[#22150E] break-words">
+                        <h3 className="text-[14.5px] font-bold text-[#22150E] break-words">
                           {acc.displayName}
                         </h3>
                         <span className="font-mono text-xs text-[#594133] bg-white/80 border border-slate-900/10 rounded-md px-2 py-0.5 max-w-full truncate">
@@ -854,19 +780,40 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
 
                       <p className="text-[11px] text-[#6E5341]">
                         Creada: {formatDate(acc.createdAt)} · Acceso:{' '}
-                        {isAdminAcc ? 'Usuario + Contraseña + PIN' : 'Usuario + Contraseña (sin PIN)'}
+                        {isAiMgrAcc
+                          ? '1FA Directo · Autoridad Suprema'
+                          : isAdminAcc
+                            ? 'Usuario + Contraseña + PIN 2FA'
+                            : 'Usuario + Contraseña (sin PIN)'}
                       </p>
                     </div>
                   </div>
 
                   {/* Per-account actions */}
-                  <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto lg:shrink-0 pt-2.5 border-t border-slate-900/10 lg:pt-0 lg:border-t-0">
-                    {!isAdminAcc ? (
+                  <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto lg:shrink-0 pt-2 border-t border-slate-900/10 lg:pt-0 lg:border-t-0">
+                    {isAiMgrAcc ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-xl border border-amber-300/80 bg-amber-50/90 px-3 py-1.5 text-[11px] font-bold text-amber-900">
+                          <Crown className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                          Cuenta Suprema
+                        </span>
+                        {onGoToAiControl && (
+                          <button
+                            type="button"
+                            onClick={onGoToAiControl}
+                            className="inline-flex min-h-[36px] items-center gap-1 rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-xs font-bold text-[#594133] hover:bg-[#FAF1E4] cursor-pointer"
+                          >
+                            Centro AI
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ) : !isAdminAcc ? (
                       <>
                         <button
                           type="button"
                           onClick={() => openPasswordModal(acc)}
-                          className="inline-flex min-h-[38px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-xl border border-[#DFCBB3] bg-[#FAF3E8] px-2.5 sm:px-3 py-1.5 text-xs font-bold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer whitespace-nowrap"
+                          className="inline-flex min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-xl border border-[#DFCBB3] bg-[#FAF3E8] px-2.5 sm:px-3 py-1.5 text-xs font-bold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer whitespace-nowrap"
                         >
                           <KeyRound className="h-3.5 w-3.5 text-[#B84A27] shrink-0" />
                           Cambiar contraseña
@@ -875,7 +822,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                         <button
                           type="button"
                           onClick={() => openEditModal(acc)}
-                          className="inline-flex min-h-[38px] flex-1 sm:flex-none items-center justify-center gap-1 rounded-xl border border-[#DFCBB3] bg-white px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer"
+                          className="inline-flex min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1 rounded-xl border border-[#DFCBB3] bg-white px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer"
                         >
                           <Edit3 className="h-3.5 w-3.5 shrink-0" />
                           Editar
@@ -884,7 +831,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                         <button
                           type="button"
                           onClick={() => openSecretAction('toggle', acc)}
-                          className={`inline-flex min-h-[38px] flex-1 sm:flex-none items-center justify-center gap-1 rounded-xl border px-2.5 sm:px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                          className={`inline-flex min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1 rounded-xl border px-2.5 sm:px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
                             acc.active
                               ? 'border-emerald-200 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100'
                               : 'border-stone-300 bg-stone-100 text-stone-700 hover:bg-stone-200'
@@ -900,30 +847,60 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                             onClick={() => openSecretAction('delete', acc)}
                             title="Eliminar cuenta"
                             aria-label={`Eliminar cuenta ${acc.displayName}`}
-                            className="inline-flex min-h-[38px] min-w-[38px] shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer"
+                            className="inline-flex min-h-[36px] min-w-[36px] shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </>
+                    ) : isAiManager ? (
+                      <>
+                        {onGoToAiControl && (
+                          <button
+                            type="button"
+                            onClick={onGoToAiControl}
+                            className="inline-flex min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100 transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            <Crown className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                            Clave / PIN en Centro AI
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(acc)}
+                          className="inline-flex min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1 rounded-xl border border-[#DFCBB3] bg-white px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer"
+                        >
+                          <Edit3 className="h-3.5 w-3.5 shrink-0" />
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openSecretAction('toggle', acc)}
+                          className={`inline-flex min-h-[36px] flex-1 sm:flex-none items-center justify-center gap-1 rounded-xl border px-2.5 sm:px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                            acc.active
+                              ? 'border-emerald-200 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100'
+                              : 'border-stone-300 bg-stone-100 text-stone-700 hover:bg-stone-200'
+                          }`}
+                        >
+                          <Power className="h-3.5 w-3.5 shrink-0" />
+                          {acc.active ? 'Desactivar' : 'Activar'}
+                        </button>
+                        {!isSelf && (
+                          <button
+                            type="button"
+                            onClick={() => openSecretAction('delete', acc)}
+                            title="Eliminar cuenta Admin"
+                            aria-label={`Eliminar cuenta ${acc.displayName}`}
+                            className="inline-flex min-h-[36px] min-w-[36px] shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         )}
                       </>
                     ) : (
-                      <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-                        {isSelf && onUpdateAdminAccountPassword ? (
-                          <button
-                            type="button"
-                            onClick={handleFocusSelfAdminPassword}
-                            style={{ background: adminTheme.heroGradient }}
-                            className="inline-flex min-h-[44px] sm:min-h-[38px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-xl border border-white/20 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer"
-                          >
-                            <KeyRound className="h-3.5 w-3.5 shrink-0" />
-                            Cambiar mi clave
-                          </button>
-                        ) : (
-                          <span className="rounded-xl border border-[#E6D5BF] bg-[#FAF3E8]/80 px-3 py-1.5 text-[11px] font-semibold text-[#7B5D4A]">
-                            Tu cuenta de Administrador
-                          </span>
-                        )}
-                      </div>
+                      <span className="rounded-xl border border-[#E6D5BF] bg-[#FAF3E8]/80 px-3 py-1.5 text-[11px] font-semibold text-[#7B5D4A]">
+                        Tu cuenta de Administrador
+                      </span>
                     )}
                   </div>
                 </div>
@@ -933,397 +910,45 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
         )}
       </section>
 
-      {/* Dedicated Section: Self-Only Change Admin Password */}
-      {onUpdateAdminAccountPassword && (
-        <section
-          ref={adminPwSectionRef}
-          aria-labelledby="admin-password-section-title"
-          className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-6 scroll-mt-6"
-        >
+      {/* Compact Single-Card Policy Banner (Opción A for Admin, Centro AI shortcut for AI Manager) */}
+      <section
+        aria-label="Política de credenciales Administradoras"
+        className="relative overflow-hidden dsb-glass rounded-[20px] sm:rounded-[22px] p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        style={{ borderColor: adminTheme.borderTint }}
+      >
+        <div className="flex items-start sm:items-center gap-3 min-w-0">
           <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-1"
-            style={{ background: adminTheme.headerStrip }}
-          />
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-3.5 min-w-0">
-              <div
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-md border border-white/25"
-                style={{ background: adminTheme.heroGradient }}
-              >
-                <KeyRound className="h-5 w-5 text-white" />
-              </div>
-              <div className="min-w-0">
-                <span className="inline-flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.15em] text-[#8B0018]">
-                  <ShieldCheck className="h-3.5 w-3.5 text-[#B91C1C] shrink-0" />
-                  Seguridad de Administrador · Solo Tu Propia Cuenta
-                </span>
-                <h3
-                  id="admin-password-section-title"
-                  className="font-serif text-lg sm:text-xl font-bold text-[#22150E] mt-0.5 leading-snug"
-                >
-                  Cambiar mi contraseña de Administrador
-                </h3>
-                <p className="text-xs sm:text-sm text-[#594133] mt-1 max-w-2xl">
-                  Única función que requiere la Clave de Seguridad especial y el PIN de confirmación. Por seguridad, solo puedes cambiar la contraseña de tu propia cuenta.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setAdminPwExpanded((prev) => !prev)}
-              aria-expanded={adminPwExpanded}
-              className="inline-flex min-h-[44px] sm:min-h-[40px] w-full sm:w-auto shrink-0 items-center justify-center gap-1.5 self-start sm:self-center rounded-full border border-[#8B0018]/25 bg-white/75 px-3.5 py-1.5 text-xs font-bold text-[#8B0018] hover:bg-white transition-colors cursor-pointer"
-            >
-              <span>{adminPwExpanded ? 'Ocultar formulario' : 'Abrir formulario'}</span>
-              <ChevronDown
-                className={`h-4 w-4 transition-transform duration-200 ${
-                  adminPwExpanded ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
+            data-preserve-surface="true"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[#FDE68A] shadow-sm border border-white/20"
+            style={{ background: adminTheme.heroGradient }}
+          >
+            {isAiManager ? <Crown className="h-4.5 w-4.5" /> : <Lock className="h-4.5 w-4.5" />}
           </div>
-
-          <AnimatePresence initial={false}>
-            {adminPwExpanded && (
-              <motion.div
-                key="admin-pw-body"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                className="overflow-hidden"
-              >
-                <form
-                  onSubmit={handleAdminPasswordSubmit}
-                  onFocus={() => setAdminPwFocused(true)}
-                  onBlur={(e) => {
-                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                      setAdminPwFocused(false);
-                    }
-                  }}
-                  noValidate
-                  autoComplete="off"
-                  className="mt-4 pt-4 sm:mt-5 sm:pt-5 border-t border-slate-900/10 space-y-3.5 sm:space-y-4"
-                >
-                  {!selfAdminTargetId ? (
-                    <div className="dsb-glass-subtle rounded-2xl border border-[#DEC9AE] px-4 py-5 text-center text-xs font-semibold text-[#6E5341]">
-                      No se identificó tu cuenta de Administrador activa para actualizar.
-                    </div>
-                  ) : (
-                    <>
-                      {/* Read-Only Self Admin Identity Card (strictly locked to logged-in Admin) */}
-                      <div className="dsb-glass-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-2xl border border-[#8B0018]/25 px-3.5 sm:px-4 py-3 min-w-0">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border bg-white/80 shadow-xs"
-                            style={{ borderColor: adminTheme.borderTint }}
-                          >
-                            <RoleSymbolSvg role="admin" className="h-5 w-5" animated={false} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs sm:text-sm font-bold text-[#22150E] break-words">
-                              Tu cuenta: <span className="text-[#8B0018]">{adminLabel}</span>
-                            </p>
-                            <p className="text-[11px] font-medium text-[#6E5341]">
-                              Tu sesión permanecerá activa
-                            </p>
-                          </div>
-                        </div>
-                        <span className="inline-flex shrink-0 items-center gap-1.5 self-start sm:self-center rounded-full border border-emerald-200 bg-emerald-50/85 px-2.5 py-1 text-[10.5px] font-bold text-emerald-800">
-                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                          Cuenta bloqueada a tu sesión
-                        </span>
-                      </div>
-
-                      {/* Authorization Block: Security Key + Confirmation PIN */}
-                      <div className="dsb-glass-subtle rounded-2xl border border-[#8B0018]/25 p-3.5 sm:p-4 space-y-3">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-[#8B0018]">
-                          <ShieldAlert className="h-4 w-4 shrink-0 text-[#B91C1C]" />
-                          <span>Autorización de seguridad (requerida)</span>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                          <div>
-                            <label
-                              htmlFor="admin-pw-security-key"
-                              className="block text-xs font-semibold text-[#594133] mb-1.5"
-                            >
-                              Clave de seguridad *
-                            </label>
-                            <div className="relative">
-                              <input
-                                ref={adminSecKeyInputRef}
-                                id="admin-pw-security-key"
-                                type={showAdminSecKey ? 'text' : 'password'}
-                                autoComplete="new-password"
-                                disabled={adminPwSubmitting}
-                                value={adminSecurityKey}
-                                onChange={(e) => {
-                                  setAdminSecurityKey(e.target.value);
-                                  setAdminPwError(null);
-                                  setAdminPwSuccess(null);
-                                }}
-                                placeholder="Ingresa la clave de seguridad"
-                                className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3]/90 bg-white/85 pl-3.5 pr-11 py-2.5 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#8B0018] focus:outline-none transition-colors disabled:opacity-60"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowAdminSecKey((prev) => !prev)}
-                                aria-label={
-                                  showAdminSecKey
-                                    ? 'Ocultar clave de seguridad'
-                                    : 'Mostrar clave de seguridad'
-                                }
-                                className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg text-[#7B5D4A] hover:text-[#22150E] cursor-pointer"
-                              >
-                                {showAdminSecKey ? (
-                                  <EyeOff className="h-4 w-4" />
-                                ) : (
-                                  <Eye className="h-4 w-4" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label
-                              htmlFor="admin-pw-confirmation-pin"
-                              className="block text-xs font-semibold text-[#594133] mb-1.5"
-                            >
-                              PIN de confirmación *
-                            </label>
-                            <div className="relative">
-                              <Lock className="pointer-events-none h-4 w-4 text-[#7B5D4A] absolute left-3.5 top-1/2 -translate-y-1/2" />
-                              <input
-                                id="admin-pw-confirmation-pin"
-                                type={showAdminPin ? 'text' : 'password'}
-                                inputMode="numeric"
-                                autoComplete="one-time-code"
-                                maxLength={12}
-                                disabled={adminPwSubmitting}
-                                value={adminConfirmationPin}
-                                onChange={(e) => {
-                                  setAdminConfirmationPin(e.target.value.replace(/\D/g, ''));
-                                  setAdminPwError(null);
-                                  setAdminPwSuccess(null);
-                                }}
-                                placeholder="Ingresa el PIN de seguridad"
-                                className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3]/90 bg-white/85 pl-10 pr-11 py-2.5 text-base sm:text-sm font-mono tracking-widest text-[#22150E] placeholder:font-sans placeholder:tracking-normal focus:bg-white focus:border-[#8B0018] focus:outline-none transition-colors disabled:opacity-60"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowAdminPin((prev) => !prev)}
-                                aria-label={
-                                  showAdminPin
-                                    ? 'Ocultar PIN de confirmación'
-                                    : 'Mostrar PIN de confirmación'
-                                }
-                                className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg text-[#7B5D4A] hover:text-[#22150E] cursor-pointer"
-                              >
-                                {showAdminPin ? (
-                                  <EyeOff className="h-4 w-4" />
-                                ) : (
-                                  <Eye className="h-4 w-4" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* New Password + Confirm New Password (2nd time) */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                        <div>
-                          <label
-                            htmlFor="admin-pw-new"
-                            className="block text-xs font-semibold text-[#594133] mb-1.5"
-                          >
-                            Nueva contraseña *
-                          </label>
-                          <div className="relative">
-                            <input
-                              id="admin-pw-new"
-                              type={showAdminNewPw ? 'text' : 'password'}
-                              autoComplete="new-password"
-                              disabled={adminPwSubmitting}
-                              value={adminNewPassword}
-                              onChange={(e) => {
-                                setAdminNewPassword(e.target.value);
-                                setAdminPwError(null);
-                                setAdminPwSuccess(null);
-                              }}
-                              placeholder="Mínimo 8 caracteres"
-                              className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3]/90 bg-white/85 pl-3.5 pr-11 py-2.5 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#8B0018] focus:outline-none transition-colors disabled:opacity-60"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowAdminNewPw((prev) => !prev)}
-                              aria-label={
-                                showAdminNewPw
-                                  ? 'Ocultar nueva contraseña'
-                                  : 'Mostrar nueva contraseña'
-                              }
-                              className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg text-[#7B5D4A] hover:text-[#22150E] cursor-pointer"
-                            >
-                              {showAdminNewPw ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
-                                <Eye className="h-4 w-4" />
-                              )}
-                            </button>
-                          </div>
-                          <p
-                            className={`mt-1 text-[11px] font-medium ${
-                              adminNewPassword.length >= 8
-                                ? 'text-emerald-700'
-                                : 'text-[#7B5D4A]'
-                            }`}
-                          >
-                            {adminNewPassword.length >= 8
-                              ? 'Longitud válida (8+ caracteres)'
-                              : 'Debe tener al menos 8 caracteres'}
-                          </p>
-                        </div>
-
-                        <div>
-                          <label
-                            htmlFor="admin-pw-confirm"
-                            className="block text-xs font-semibold text-[#594133] mb-1.5"
-                          >
-                            Confirmar nueva contraseña (2da vez) *
-                          </label>
-                          <div className="relative">
-                            <input
-                              id="admin-pw-confirm"
-                              type={showAdminConfirmPw ? 'text' : 'password'}
-                              autoComplete="new-password"
-                              disabled={adminPwSubmitting}
-                              value={adminConfirmPassword}
-                              onChange={(e) => {
-                                setAdminConfirmPassword(e.target.value);
-                                setAdminPwError(null);
-                                setAdminPwSuccess(null);
-                              }}
-                              placeholder="Repite la nueva contraseña"
-                              className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3]/90 bg-white/85 pl-3.5 pr-11 py-2.5 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#8B0018] focus:outline-none transition-colors disabled:opacity-60"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowAdminConfirmPw((prev) => !prev)}
-                              aria-label={
-                                showAdminConfirmPw
-                                  ? 'Ocultar confirmación de contraseña'
-                                  : 'Mostrar confirmación de contraseña'
-                              }
-                              className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-lg text-[#7B5D4A] hover:text-[#22150E] cursor-pointer"
-                            >
-                              {showAdminConfirmPw ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
-                                <Eye className="h-4 w-4" />
-                              )}
-                            </button>
-                          </div>
-                          {adminConfirmPassword.length > 0 && (
-                            <p
-                              className={`mt-1 text-[11px] font-medium ${
-                                adminNewPassword === adminConfirmPassword
-                                  ? 'text-emerald-700'
-                                  : 'text-rose-700'
-                              }`}
-                            >
-                              {adminNewPassword === adminConfirmPassword
-                                ? 'Las contraseñas coinciden'
-                                : 'Las contraseñas aún no coinciden'}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Lockout Countdown Notice */}
-                      {adminPwLockoutSeconds > 0 && (
-                        <div
-                          role="status"
-                          className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/85 px-3.5 py-2.5 text-xs font-semibold text-amber-900"
-                        >
-                          <Clock className="h-4 w-4 shrink-0 text-amber-700" />
-                          <span className="tabular-nums">
-                            Demasiados intentos fallidos. Podrás reintentar en{' '}
-                            <strong>{formatLockoutDuration(adminPwLockoutSeconds)}</strong>.
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Inline Error Alert */}
-                      {adminPwError && (
-                        <div
-                          ref={adminPwErrorRef}
-                          role="alert"
-                          className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50/90 px-3.5 py-2.5 text-xs font-semibold text-rose-900"
-                        >
-                          <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
-                          <span>{adminPwError}</span>
-                        </div>
-                      )}
-
-                      {/* Inline Success Banner */}
-                      {adminPwSuccess && (
-                        <div
-                          role="status"
-                          className="flex items-start justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/90 px-3.5 py-3 text-xs font-semibold text-emerald-900"
-                        >
-                          <div className="flex items-start gap-2">
-                            <Check className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
-                            <span>{adminPwSuccess}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setAdminPwSuccess(null)}
-                            aria-label="Cerrar mensaje de éxito"
-                            className="text-current opacity-70 hover:opacity-100 cursor-pointer shrink-0"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Submit & Reset Actions */}
-                      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 pt-1">
-                        {adminPwDirty && (
-                          <button
-                            type="button"
-                            disabled={adminPwSubmitting}
-                            onClick={handleResetAdminPasswordFields}
-                            className="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center rounded-full border border-[#DFCBB3] bg-white/70 px-4 py-2 text-xs font-semibold text-[#594133] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
-                          >
-                            Limpiar campos
-                          </button>
-                        )}
-                        <button
-                          type="submit"
-                          disabled={adminPwSubmitting || adminPwLockoutSeconds > 0}
-                          style={{ background: adminTheme.heroGradient }}
-                          className="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-full border border-white/20 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer disabled:opacity-60"
-                        >
-                          <KeyRound className="h-4 w-4 shrink-0" />
-                          {adminPwSubmitting
-                            ? 'Actualizando contraseña...'
-                            : adminPwLockoutSeconds > 0
-                              ? `Bloqueado (${formatLockoutDuration(adminPwLockoutSeconds)})`
-                              : 'Actualizar mi contraseña de Administrador'}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </form>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </section>
-      )}
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm font-bold text-[#22150E] leading-snug">
+              {isAiManager
+                ? 'Cambio de contraseña y PIN 2FA de cuentas Administradoras'
+                : 'El cambio de contraseña o PIN de cuentas Administradoras es gestionado exclusivamente por el AI Manager.'}
+            </p>
+            <p className="text-[11px] sm:text-xs text-[#6E5341] mt-0.5">
+              {isAiManager
+                ? 'Usa Centro AI para rotar contraseñas, PINs 2FA y revocar sesiones activas de cualquier Administrador en 1 clic.'
+                : 'Por política de seguridad institucional, solo el AI Manager puede modificar credenciales de Administrador.'}
+            </p>
+          </div>
+        </div>
+        {isAiManager && onGoToAiControl && (
+          <button
+            type="button"
+            onClick={onGoToAiControl}
+            style={{ background: adminTheme.heroGradient }}
+            className="inline-flex min-h-[38px] w-full sm:w-auto shrink-0 items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:brightness-110 cursor-pointer"
+          >
+            <span>Ir a Centro AI</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </section>
 
       {/* Modal 1: Create Account */}
       <AnimatePresence>
@@ -1377,8 +1002,11 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
-                {(['vendedor', 'telemarketing'] as const).map((roleOption) => {
+              <div className={`grid grid-cols-1 ${isAiManager ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2`}>
+                {(isAiManager
+                  ? (['vendedor', 'telemarketing', 'admin'] as const)
+                  : (['vendedor', 'telemarketing'] as const)
+                ).map((roleOption) => {
                   const optTheme = getRoleTheme(roleOption);
                   const selected = cRole === roleOption;
                   return (
@@ -1390,28 +1018,32 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                         borderColor: selected ? optTheme.primary : optTheme.borderTint,
                         boxShadow: selected ? `0 8px 22px -10px ${optTheme.glowRgba}` : undefined,
                       }}
-                      className={`flex items-center gap-2.5 rounded-2xl border p-2.5 sm:p-3 text-left transition-all cursor-pointer min-w-0 ${
+                      className={`flex items-center gap-2 rounded-2xl border p-2.5 text-left transition-all cursor-pointer min-w-0 ${
                         selected
                           ? 'bg-white ring-2 ring-offset-1'
                           : 'bg-white/60 hover:bg-white/85 opacity-85 hover:opacity-100'
                       }`}
                     >
-                      <RoleSymbolSvg role={roleOption} className="h-8 w-8 sm:h-9 sm:w-9 shrink-0" animated={selected} />
+                      <RoleSymbolSvg role={roleOption} className="h-7 w-7 sm:h-8 sm:w-8 shrink-0" animated={selected} />
                       <div className="min-w-0 flex-1">
                         <span
                           data-dsb-role-label={roleOption}
                           className="block text-xs font-bold leading-tight truncate"
                           style={{ color: optTheme.primary }}
                         >
-                          {roleOption === 'vendedor' ? 'Vendedor / Embajador' : 'Telemarketing'}
+                          {roleOption === 'admin'
+                            ? 'Administrador'
+                            : roleOption === 'vendedor'
+                              ? 'Vendedor'
+                              : 'Telemarketing'}
                         </span>
-                        <span className="block text-[10.5px] font-medium text-[#6E5341] truncate mt-0.5">
+                        <span className="block text-[10px] font-medium text-[#6E5341] truncate mt-0.5">
                           {optTheme.codename}
                         </span>
                       </div>
                       {selected && (
                         <span
-                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white"
+                          className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full text-white"
                           style={{ backgroundColor: optTheme.primary }}
                         >
                           <Check className="h-3 w-3" />
@@ -1471,7 +1103,9 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                 <p className="mt-1 text-[11px] text-[#7B5D4A]">
                   {cRole === 'vendedor'
                     ? 'Se vinculará automáticamente a su perfil Embajador y a todos los códigos QR que generes para este vendedor.'
-                    : 'Identificador único interno del operador de Telemarketing.'}
+                    : cRole === 'admin'
+                      ? 'Identificador único de la nueva cuenta Administradora (acceso con contraseña + PIN 2FA).'
+                      : 'Identificador único interno del operador de Telemarketing.'}
                 </p>
               </div>
 
@@ -1483,6 +1117,25 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                   disabled={cSubmitting}
                   label="Foto de perfil del Vendedor / Embajador (opcional)"
                 />
+              )}
+
+              {cRole === 'admin' && isAiManager && (
+                <div>
+                  <label className="block text-xs font-semibold text-[#594133] mb-1">
+                    PIN 2FA de Administrador (4 a 8 dígitos) *
+                  </label>
+                  <input
+                    type={cShowPasswords ? 'text' : 'password'}
+                    required
+                    inputMode="numeric"
+                    maxLength={8}
+                    disabled={cSubmitting}
+                    value={cPin}
+                    onChange={(e) => setCPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    placeholder="Ej. 2025 (obligatorio, 4 a 8 dígitos)"
+                    className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 font-mono text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none disabled:opacity-60"
+                  />
+                </div>
               )}
 
               <div className="space-y-2">
@@ -1528,18 +1181,20 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-[#C88A2B]/45 bg-[#23140D] p-3.5 text-[#FFFDF9] flex items-start gap-2.5">
-                <ShieldAlert className="h-4 w-4 shrink-0 text-[#F4CA73] mt-0.5" />
-                <div className="text-xs leading-relaxed">
-                  <p className="font-bold text-[#F4CA73]">
-                    Autorización con contraseña de Administrador
-                  </p>
-                  <p className="text-[#E8D5BE] mt-0.5">
-                    Al continuar, te pediremos la contraseña de tu cuenta de administrador ({adminLabel}) para crear esta cuenta de{' '}
-                    {cRole === 'vendedor' ? 'Vendedor / Embajador' : 'Telemarketing'}.
-                  </p>
+              {!isAiManager && (
+                <div className="rounded-2xl border border-[#C88A2B]/45 bg-[#23140D] p-3.5 text-[#FFFDF9] flex items-start gap-2.5">
+                  <ShieldAlert className="h-4 w-4 shrink-0 text-[#F4CA73] mt-0.5" />
+                  <div className="text-xs leading-relaxed">
+                    <p className="font-bold text-[#F4CA73]">
+                      Autorización con contraseña de Administrador
+                    </p>
+                    <p className="text-[#E8D5BE] mt-0.5">
+                      Al continuar, te pediremos la contraseña de tu cuenta de administrador ({adminLabel}) para crear esta cuenta de{' '}
+                      {cRole === 'vendedor' ? 'Vendedor / Embajador' : 'Telemarketing'}.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {cError && (
                 <div
@@ -1567,7 +1222,11 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                   className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full border border-[#C88A2B]/45 bg-[#22150E] px-5 py-2 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
                 >
                   <UserPlus className="h-4 w-4" />
-                  {cSubmitting ? 'Creando cuenta...' : 'Continuar y autorizar'}
+                  {cSubmitting
+                    ? 'Creando cuenta...'
+                    : isAiManager
+                      ? 'Crear cuenta'
+                      : 'Continuar y autorizar'}
                 </button>
               </div>
             </motion.form>
@@ -1575,7 +1234,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Modal 2: Edit Account (displayName, tag, active + Admin password) */}
+      {/* Modal 2: Edit Account */}
       <AnimatePresence>
         {editingAccount && (
           <motion.div
@@ -1679,29 +1338,31 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                   />
                 </label>
 
-                <div className="rounded-2xl border border-[#C88A2B]/45 bg-[#23140D] p-3.5 text-[#FFFDF9] space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-1.5 text-xs font-bold text-[#F4CA73]">
-                      <ShieldAlert className="h-3.5 w-3.5" />
-                      Tu contraseña de Administrador *
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setEShowMaster((p) => !p)}
-                      className="text-[11px] text-[#E8D5BE] hover:text-white cursor-pointer"
-                    >
-                      {eShowMaster ? 'Ocultar' : 'Mostrar'}
-                    </button>
+                {!isAiManager && (
+                  <div className="rounded-2xl border border-[#C88A2B]/45 bg-[#23140D] p-3.5 text-[#FFFDF9] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-1.5 text-xs font-bold text-[#F4CA73]">
+                        <ShieldAlert className="h-3.5 w-3.5" />
+                        Tu contraseña de Administrador *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setEShowMaster((p) => !p)}
+                        className="text-[11px] text-[#E8D5BE] hover:text-white cursor-pointer"
+                      >
+                        {eShowMaster ? 'Ocultar' : 'Mostrar'}
+                      </button>
+                    </div>
+                    <input
+                      type={eShowMaster ? 'text' : 'password'}
+                      required
+                      value={eMasterPassword}
+                      onChange={(e) => setEMasterPassword(e.target.value)}
+                      placeholder={`Ingresa tu contraseña de administrador (${adminLabel})`}
+                      className="w-full min-h-[44px] rounded-xl border border-[#F4CA73]/40 bg-[#110804] px-3.5 py-2 text-base sm:text-sm text-white placeholder:text-white/35 focus:border-[#F4CA73] focus:outline-none"
+                    />
                   </div>
-                  <input
-                    type={eShowMaster ? 'text' : 'password'}
-                    required
-                    value={eMasterPassword}
-                    onChange={(e) => setEMasterPassword(e.target.value)}
-                    placeholder={`Ingresa tu contraseña de administrador (${adminLabel})`}
-                    className="w-full min-h-[44px] rounded-xl border border-[#F4CA73]/40 bg-[#110804] px-3.5 py-2 text-base sm:text-sm text-white placeholder:text-white/35 focus:border-[#F4CA73] focus:outline-none"
-                  />
-                </div>
+                )}
               </div>
 
               {eError && (
@@ -1729,7 +1390,11 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                   disabled={eSubmitting}
                   className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full border border-[#C88A2B]/45 bg-[#22150E] px-5 py-2 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
                 >
-                  {eSubmitting ? 'Guardando...' : 'Autorizar y guardar'}
+                  {eSubmitting
+                    ? 'Guardando...'
+                    : isAiManager
+                      ? 'Guardar cambios'
+                      : 'Autorizar y guardar'}
                 </button>
               </div>
             </motion.form>
@@ -1737,7 +1402,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Modal 3: Change Password for Telemarketing / Vendedor (strictly 3 fields: old + 2x new) */}
+      {/* Modal 3: Change Password for Telemarketing / Vendedor */}
       <AnimatePresence>
         {passwordModalAccount && (
           <motion.div
@@ -1905,7 +1570,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Modal 4: Admin Password Confirmation for Toggle Active / Delete */}
+      {/* Modal 4: Confirmation for Toggle Active / Delete (Zero-Password for AI Manager) */}
       <AnimatePresence>
         {secretActionModal && (
           <motion.div
@@ -1939,7 +1604,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
               <div className="flex items-start justify-between gap-2.5 sm:gap-3">
                 <div className="min-w-0">
                   <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#F4CA73]">
-                    Autorización de Administrador
+                    {isAiManager ? 'Autoridad AI Manager · Sin Contraseña' : 'Autorización de Administrador'}
                   </span>
                   <h3 className="font-serif text-base sm:text-lg font-bold text-white break-words leading-snug">
                     {secretActionModal.kind === 'delete'
@@ -1967,34 +1632,36 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                     : 'La cuenta volverá a poder iniciar sesión y recibir atribución en QRs.'}
               </p>
 
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-[#F4CA73]">
-                  <ShieldAlert className="h-3.5 w-3.5" />
-                  Tu contraseña de Administrador
-                </label>
-                <div className="relative">
-                  <input
-                    type={sShowMaster ? 'text' : 'password'}
-                    autoFocus
-                    required
-                    disabled={sSubmitting}
-                    value={sMasterPassword}
-                    onChange={(e) => {
-                      setSMasterPassword(e.target.value);
-                      setSError(null);
-                    }}
-                    placeholder={`Ingresa tu contraseña de administrador (${adminLabel})`}
-                    className="w-full min-h-[44px] rounded-xl border border-[#F4CA73]/40 bg-[#110804] pl-3.5 pr-12 py-2.5 text-base sm:text-sm text-white placeholder:text-white/35 focus:border-[#F4CA73] focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setSShowMaster((p) => !p)}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center text-white/60 hover:text-[#F4CA73] cursor-pointer"
-                  >
-                    {sShowMaster ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+              {!isAiManager && (
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-[#F4CA73]">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Tu contraseña de Administrador
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={sShowMaster ? 'text' : 'password'}
+                      autoFocus
+                      required
+                      disabled={sSubmitting}
+                      value={sMasterPassword}
+                      onChange={(e) => {
+                        setSMasterPassword(e.target.value);
+                        setSError(null);
+                      }}
+                      placeholder={`Ingresa tu contraseña de administrador (${adminLabel})`}
+                      className="w-full min-h-[44px] rounded-xl border border-[#F4CA73]/40 bg-[#110804] pl-3.5 pr-12 py-2.5 text-base sm:text-sm text-white placeholder:text-white/35 focus:border-[#F4CA73] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSShowMaster((p) => !p)}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center text-white/60 hover:text-[#F4CA73] cursor-pointer"
+                    >
+                      {sShowMaster ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {sError && (
                 <div className="flex items-start gap-2 rounded-xl border border-rose-400/40 bg-rose-950/65 px-3.5 py-2.5 text-xs font-semibold text-rose-200">
@@ -2023,7 +1690,7 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
                   }`}
                 >
                   {sSubmitting
-                    ? 'Verificando...'
+                    ? 'Aplicando...'
                     : secretActionModal.kind === 'delete'
                       ? 'Confirmar eliminación'
                       : 'Confirmar cambio'}
@@ -2033,15 +1700,21 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
+
       {/* Modal 5: Per-Admin Password Authorization for Create Account */}
       <SecretKeyModal
         open={Boolean(pendingCreateDraft)}
+        bypassPassword={isAiManager}
         badgeLabel="Autorización de Administrador"
         title="Confirmar con tu contraseña de Administrador"
         description={
           pendingCreateDraft
             ? `Ingresa tu contraseña de administrador (${adminLabel}) para crear esta cuenta de ${
-                pendingCreateDraft.role === 'vendedor' ? 'Vendedor / Embajador' : 'Telemarketing'
+                pendingCreateDraft.role === 'admin'
+                  ? 'Administrador'
+                  : pendingCreateDraft.role === 'vendedor'
+                    ? 'Vendedor / Embajador'
+                    : 'Telemarketing'
               }.`
             : undefined
         }
@@ -2057,3 +1730,4 @@ export const AccountsManagerPanel: React.FC<AccountsManagerPanelProps> = ({
     </div>
   );
 };
+

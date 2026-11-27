@@ -11,6 +11,7 @@ import type {
   Lead,
   LeadCategory,
   LeadQualification,
+  ProcessControls,
   QrCodeRecord,
   QrDotShape,
   QrStyleId,
@@ -24,6 +25,7 @@ import type {
   SecurityAlertSeverity,
   SecurityAlertStatus,
   ShowcaseStyleId,
+  SystemHealthReport,
   UserAccount,
   UserRole,
 } from '../types/app';
@@ -57,12 +59,18 @@ function getDsbSessionToken(): string | null {
   }
 }
 
+function isElevatedAdminRole(role?: UserRole | null): boolean {
+  return role === 'admin' || role === 'ai_manager';
+}
+
 function getDsbRole(): UserRole | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.sessionStorage.getItem(DSB_ROLE_KEY);
     if (raw === 'caller') return 'telemarketing';
-    if (raw === 'admin' || raw === 'telemarketing' || raw === 'vendedor') return raw;
+    if (raw === 'ai_manager' || raw === 'admin' || raw === 'telemarketing' || raw === 'vendedor') {
+      return raw;
+    }
     return null;
   } catch {
     return null;
@@ -181,6 +189,7 @@ export function verifySessionStorageIntegrity(): boolean {
 
     const tokenRoleRaw = payload.role === 'caller' ? 'telemarketing' : payload.role;
     if (
+      tokenRoleRaw !== 'ai_manager' &&
       tokenRoleRaw !== 'admin' &&
       tokenRoleRaw !== 'telemarketing' &&
       tokenRoleRaw !== 'vendedor'
@@ -228,6 +237,55 @@ export function verifySessionStorageIntegrity(): boolean {
 }
 
 export const DEFAULT_GIFT_PROBABILITY = 10;
+
+export const DEFAULT_PROCESS_CONTROLS: ProcessControls = {
+  publicFormEnabled: true,
+  publicFormDisabledTitle: 'Experiencia en Pausa Temporal',
+  publicFormDisabledMessage:
+    'Estamos preparando una nueva edición del Show de Cocina Royal Prestige. Vuelve muy pronto.',
+  welcomeVideoEnabled: true,
+  qualificationQuizEnabled: true,
+  giftRevealEnabled: true,
+  clientGuardEnabled: true,
+};
+
+export function normalizeProcessControls(
+  controls?: Partial<ProcessControls> | null
+): ProcessControls {
+  const src = controls && typeof controls === 'object' ? controls : {};
+  const publicFormDisabledTitle =
+    typeof src.publicFormDisabledTitle === 'string' && src.publicFormDisabledTitle.trim()
+      ? src.publicFormDisabledTitle.trim().slice(0, 140)
+      : DEFAULT_PROCESS_CONTROLS.publicFormDisabledTitle;
+  const publicFormDisabledMessage =
+    typeof src.publicFormDisabledMessage === 'string' && src.publicFormDisabledMessage.trim()
+      ? src.publicFormDisabledMessage.trim().slice(0, 500)
+      : DEFAULT_PROCESS_CONTROLS.publicFormDisabledMessage;
+  return {
+    publicFormEnabled:
+      typeof src.publicFormEnabled === 'boolean'
+        ? src.publicFormEnabled
+        : DEFAULT_PROCESS_CONTROLS.publicFormEnabled,
+    publicFormDisabledTitle,
+    publicFormDisabledMessage,
+    welcomeVideoEnabled:
+      typeof src.welcomeVideoEnabled === 'boolean'
+        ? src.welcomeVideoEnabled
+        : DEFAULT_PROCESS_CONTROLS.welcomeVideoEnabled,
+    qualificationQuizEnabled:
+      typeof src.qualificationQuizEnabled === 'boolean'
+        ? src.qualificationQuizEnabled
+        : DEFAULT_PROCESS_CONTROLS.qualificationQuizEnabled,
+    giftRevealEnabled:
+      typeof src.giftRevealEnabled === 'boolean'
+        ? src.giftRevealEnabled
+        : DEFAULT_PROCESS_CONTROLS.giftRevealEnabled,
+    clientGuardEnabled:
+      typeof src.clientGuardEnabled === 'boolean'
+        ? src.clientGuardEnabled
+        : DEFAULT_PROCESS_CONTROLS.clientGuardEnabled,
+  };
+}
 
 export const DEFAULT_REFERRAL_PRIZE_RULE: ReferralPrizeRule = {
   prizeName: 'Premio Embajador Royal Prestige',
@@ -280,6 +338,7 @@ const VALID_ACTIVITY_CATEGORIES = new Set<ActivityLogCategory>([
 ]);
 
 const VALID_ACTIVITY_ACTOR_ROLES = new Set<ActivityLogEntry['actorRole']>([
+  'ai_manager',
   'admin',
   'telemarketing',
   'vendedor',
@@ -610,7 +669,8 @@ function normalizeAppState(state: AppState): AppState {
   const hasDsbSession = Boolean(getDsbSessionToken());
   const role = state.role;
   const effectiveRole = role ?? getDsbRole();
-  const isAdmin = hasDsbSession && effectiveRole === 'admin';
+  const isAdmin = hasDsbSession && isElevatedAdminRole(effectiveRole);
+  const processControls = normalizeProcessControls(state.settings?.processControls);
   if (role === 'telemarketing') {
     return {
       ...state,
@@ -618,6 +678,7 @@ function normalizeAppState(state: AppState): AppState {
         ...state.settings,
         pinCode: '',
         referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
+        processControls,
       },
       gifts: [],
       leads: Array.isArray(state.leads) ? state.leads.map(normalizeLead) : [],
@@ -642,6 +703,7 @@ function normalizeAppState(state: AppState): AppState {
           ? state.settings.randomizeGifts
           : true,
       referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
+      processControls,
     },
     gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
     leads: Array.isArray(state.leads) ? state.leads.map(normalizeLead) : [],
@@ -699,6 +761,7 @@ function cloneDefaults(): AppState {
           ? defaults.settings.randomizeGifts
           : true,
       referralPrizeRule: normalizeReferralPrizeRule(defaults.settings?.referralPrizeRule),
+      processControls: normalizeProcessControls(defaults.settings?.processControls),
     },
     gifts: Array.isArray(defaults.gifts) ? defaults.gifts.map(normalizeGift) : [],
     leads: [],
@@ -738,6 +801,9 @@ function buildPublicCatalogSnapshot(
     pinCode: '',
     referralPrizeRule: normalizeReferralPrizeRule(
       source?.settings?.referralPrizeRule ?? defaults.settings.referralPrizeRule
+    ),
+    processControls: normalizeProcessControls(
+      source?.settings?.processControls ?? defaults.settings.processControls
     ),
   };
   if (typeof mergedSettings.randomizeGifts !== 'boolean') {
@@ -797,8 +863,8 @@ function readLocalState(): AppState {
   if (typeof window === 'undefined') return cloneDefaults();
   const hasDsbSession = Boolean(getDsbSessionToken());
   const role = getDsbRole();
-  const isAdmin = hasDsbSession && role === 'admin';
-  const canSeeQr = hasDsbSession && (role === 'admin' || role === 'vendedor');
+  const isAdmin = hasDsbSession && isElevatedAdminRole(role);
+  const canSeeQr = hasDsbSession && (isElevatedAdminRole(role) || role === 'vendedor');
   const inMemory = latestCommittedState;
 
   let catalog: PublicCatalogStorage;
@@ -853,14 +919,15 @@ function writeLocalState(state: AppState, broadcast = true): void {
   if (typeof window === 'undefined') return;
   const hasDsbSession = Boolean(getDsbSessionToken());
   const role = state.role ?? getDsbRole();
-  const isAdmin = hasDsbSession && role === 'admin';
-  const canSeeQr = hasDsbSession && (role === 'admin' || role === 'vendedor');
+  const isAdmin = hasDsbSession && isElevatedAdminRole(role);
+  const canSeeQr = hasDsbSession && (isElevatedAdminRole(role) || role === 'vendedor');
 
   const sanitizedState: AppState = {
     settings: {
       ...state.settings,
       pinCode: '',
       referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
+      processControls: normalizeProcessControls(state.settings?.processControls),
       ...(role === 'telemarketing'
         ? {}
         : {
@@ -1043,6 +1110,13 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
       const errCode = typeof data.code === 'string' ? data.code : undefined;
       throw new ApiValidationError(data.error || 'Solicitud inválida.', res.status, errCode);
     }
+    if (res.status === 503 && data.code === 'PUBLIC_FORM_DISABLED') {
+      throw new ApiValidationError(
+        data.error || 'El formulario público está temporalmente en pausa.',
+        503,
+        data.code
+      );
+    }
     throw new Error(data.error || `Error del servidor (HTTP ${res.status}). Intenta de nuevo.`);
   }
 
@@ -1216,6 +1290,8 @@ export interface UpdateLeadPayload {
   promoCodeInvalidatedAt?: string | null;
   sellerLocked?: boolean;
   confirmLock?: boolean;
+  referrerId?: string | null;
+  referralCode?: string | null;
   adminPassword?: string;
 }
 
@@ -1814,7 +1890,7 @@ export async function updateEmbajadorRemote(
 
 export async function deleteEmbajadorRemote(
   id: string,
-  adminPassword: string
+  adminPassword = ''
 ): Promise<{ state: AppState }> {
   beginMutation();
   try {
@@ -1844,19 +1920,20 @@ export const updateLeadRemote = updateLead;
 // ----------------------------------------------------------------------------
 
 export interface CreateAccountPayload {
-  masterPassword: string;
+  masterPassword?: string;
   adminPassword?: string;
   username: string;
   displayName: string;
-  role: 'telemarketing' | 'vendedor';
+  role: 'admin' | 'telemarketing' | 'vendedor';
   tag: string;
   avatarUrl?: string | null;
   password: string;
   confirmPassword: string;
+  pin?: string;
 }
 
 export interface UpdateAccountPayload {
-  masterPassword: string;
+  masterPassword?: string;
   adminPassword?: string;
   displayName?: string;
   tag?: string;
@@ -2016,7 +2093,7 @@ export async function updateAdminAccountPassword(
         existing?.displayName ||
         updatedAccount?.username ||
         'Administrador',
-      role: 'admin',
+      role: updatedAccount?.role || existing?.role || 'admin',
       tag: updatedAccount?.tag || existing?.tag || 'ADMIN-CIPRIAN',
       avatarUrl: updatedAccount?.avatarUrl ?? existing?.avatarUrl ?? null,
     });
@@ -2032,7 +2109,7 @@ export async function updateAdminAccountPassword(
 
 export async function deleteAccount(
   id: string,
-  adminPassword: string
+  adminPassword = ''
 ): Promise<{ ok: boolean; accounts: UserAccount[]; state: AppState }> {
   beginMutation();
   try {
@@ -2223,6 +2300,9 @@ export function subscribeStoreSync(onSync: (state: AppState) => void): () => voi
           referralPrizeRule: normalizeReferralPrizeRule(
             parsed.settings?.referralPrizeRule ?? base.settings.referralPrizeRule
           ),
+          processControls: normalizeProcessControls(
+            parsed.settings?.processControls ?? base.settings.processControls
+          ),
         },
         gifts:
           base.role === 'telemarketing'
@@ -2278,6 +2358,13 @@ export class DsbAuthError extends Error {
 
 export interface LoginStep1Result {
   requiresPin: boolean;
+  requiresSecurityQuestion?: boolean;
+  securityChallenge?: {
+    questionId: string;
+    type: 'personal' | 'fecha' | 'clave' | 'codigo' | 'gusto' | 'custom';
+    typeLabel: string;
+    prompt: string;
+  };
   preAuthToken?: string;
   sessionToken?: string;
   userId: string;
@@ -2312,6 +2399,13 @@ export async function loginStep1(username: string, password: string): Promise<Lo
     | ({
         ok?: boolean;
         requiresPin?: boolean;
+        requiresSecurityQuestion?: boolean;
+        securityChallenge?: {
+          questionId: string;
+          type: 'personal' | 'fecha' | 'clave' | 'codigo' | 'gusto' | 'custom';
+          typeLabel: string;
+          prompt: string;
+        };
         preAuthToken?: string;
         sessionToken?: string;
         userId?: string;
@@ -2335,9 +2429,12 @@ export async function loginStep1(username: string, password: string): Promise<Lo
   const resolvedTag = data.tag || '';
   const resolvedAvatarUrl =
     typeof data.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl.trim() : null;
-  const requiresPin = data.requiresPin !== undefined ? Boolean(data.requiresPin) : resolvedRole === 'admin';
+  const requiresSecurityQuestion = Boolean(data.requiresSecurityQuestion);
+  const requiresPin =
+    !requiresSecurityQuestion &&
+    (data.requiresPin !== undefined ? Boolean(data.requiresPin) : resolvedRole === 'admin');
 
-  if (!requiresPin) {
+  if (!requiresPin && !requiresSecurityQuestion) {
     if (!data.sessionToken) {
       throw new DsbAuthError({ error: 'Respuesta de sesión inválida.' });
     }
@@ -2353,6 +2450,7 @@ export async function loginStep1(username: string, password: string): Promise<Lo
     latestCommittedState = null;
     return {
       requiresPin: false,
+      requiresSecurityQuestion: false,
       sessionToken: data.sessionToken,
       userId: resolvedUserId,
       username: resolvedUsername,
@@ -2368,7 +2466,9 @@ export async function loginStep1(username: string, password: string): Promise<Lo
   }
 
   return {
-    requiresPin: true,
+    requiresPin,
+    requiresSecurityQuestion,
+    securityChallenge: data.securityChallenge,
     preAuthToken: data.preAuthToken,
     userId: resolvedUserId,
     username: resolvedUsername,
@@ -2377,6 +2477,120 @@ export async function loginStep1(username: string, password: string): Promise<Lo
     tag: resolvedTag,
     avatarUrl: resolvedAvatarUrl,
   };
+}
+
+export async function verifySecurityQuestionStep2(
+  preAuthToken: string,
+  answer: string
+): Promise<{
+  sessionToken: string;
+  userId: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  tag: string;
+  avatarUrl?: string | null;
+}> {
+  let res: Response;
+  try {
+    res = await fetch('/api/auth/verify-security-question', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preAuthToken, answer }),
+    });
+  } catch {
+    throw new DsbAuthError({
+      error: 'No se pudo conectar con el servidor para verificar tu respuesta.',
+    });
+  }
+
+  const data = (await res.json().catch(() => null)) as
+    | ({
+        ok?: boolean;
+        sessionToken?: string;
+        userId?: string;
+        username?: string;
+        user?: string;
+        displayName?: string;
+        role?: UserRole;
+        tag?: string;
+        avatarUrl?: string | null;
+      } & AuthErrorResponse)
+    | null;
+
+  if (!data || !res.ok || !data.sessionToken) {
+    throw new DsbAuthError(data || { error: 'Respuesta de seguridad incorrecta.' });
+  }
+
+  const user: StoredSessionUser = {
+    userId: data.userId || '',
+    username: data.username || data.user || 'JuanOrozco',
+    displayName: data.displayName || data.username || data.user || 'Juan Orozco',
+    role: data.role || 'ai_manager',
+    tag: data.tag || 'AI-MANAGER',
+    avatarUrl:
+      typeof data.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl.trim() : null,
+  };
+
+  saveSessionStorage(data.sessionToken, user);
+  stateMutationEpoch += 1;
+  latestCommittedState = null;
+
+  return {
+    sessionToken: data.sessionToken,
+    ...user,
+  };
+}
+
+export async function fetchAiSecurityQuestions(): Promise<
+  Array<{
+    id: string;
+    type: 'personal' | 'fecha' | 'clave' | 'codigo' | 'gusto' | 'custom';
+    typeLabel: string;
+    prompt: string;
+    hasAnswer: boolean;
+  }>
+> {
+  const res = await requestJson<{
+    ok: boolean;
+    questions: Array<{
+      id: string;
+      type: 'personal' | 'fecha' | 'clave' | 'codigo' | 'gusto' | 'custom';
+      typeLabel: string;
+      prompt: string;
+      hasAnswer: boolean;
+    }>;
+  }>('/api/ai-manager/security-questions', {
+    method: 'GET',
+    cache: 'no-store',
+  });
+  return Array.isArray(res.questions) ? res.questions : [];
+}
+
+export async function updateAiSecurityQuestions(
+  questions: Array<{
+    id?: string;
+    type: 'personal' | 'fecha' | 'clave' | 'codigo' | 'gusto' | 'custom';
+    typeLabel?: string;
+    prompt: string;
+    answer?: string;
+  }>
+): Promise<{
+  ok: boolean;
+  questions: Array<{
+    id: string;
+    type: 'personal' | 'fecha' | 'clave' | 'codigo' | 'gusto' | 'custom';
+    typeLabel: string;
+    prompt: string;
+    hasAnswer: boolean;
+  }>;
+  message: string;
+}> {
+  return requestJson('/api/ai-manager/security-questions', {
+    method: 'PUT',
+    body: JSON.stringify({ questions }),
+  });
 }
 
 export async function verifyPinStep2(
@@ -2563,7 +2777,7 @@ export async function updateDsbCredentials(
       userId: existing?.userId || 'default',
       username: data.username || existing?.username || 'AdminCiprian',
       displayName: existing?.displayName || data.username || 'Administrador Ciprian',
-      role: 'admin',
+      role: existing?.role || 'admin',
       tag: existing?.tag || 'ADMIN-CIPRIAN',
       avatarUrl: existing?.avatarUrl ?? null,
     });
@@ -2578,7 +2792,7 @@ export async function updateDsbCredentials(
 }
 
 export async function resetAllWorkspaceData(
-  adminPassword: string,
+  adminPassword = '',
   resetCatalogAndSettings = true
 ): Promise<{ ok: boolean; state: AppState; message: string }> {
   const token = getDsbSessionToken();
@@ -2622,6 +2836,229 @@ export async function resetAllWorkspaceData(
       ok: true,
       state: normalizedState,
       message: data.message || 'Todas las métricas y datos fueron reiniciados a 0.',
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+// ----------------------------------------------------------------------------
+// AI Manager Supreme Control API (Exclusive to role === 'ai_manager')
+// ----------------------------------------------------------------------------
+
+export async function updateProcessControlsRemote(
+  updates: Partial<ProcessControls>
+): Promise<{ state: AppState; processControls: ProcessControls }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      processControls: ProcessControls;
+      state: AppState;
+    }>('/api/ai-manager/process-controls', {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    const processControls = normalizeProcessControls(
+      res.processControls ?? normalizedState.settings?.processControls
+    );
+    return { state: normalizedState, processControls };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function aiManagerUpdateAccountCredentials(
+  id: string,
+  payload: {
+    username?: string;
+    displayName?: string;
+    tag?: string;
+    newPassword?: string;
+    newPin?: string | null;
+    active?: boolean;
+    role?: UserRole;
+  }
+): Promise<{
+  ok: boolean;
+  account: UserAccount;
+  state: AppState;
+  sessionToken?: string;
+  message: string;
+}> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      account: UserAccount;
+      state: AppState;
+      sessionToken?: string;
+      message?: string;
+    }>(`/api/ai-manager/accounts/${encodeURIComponent(id)}/credentials`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (res.sessionToken && res.account) {
+      const existing = getStoredSessionUser();
+      saveSessionStorage(res.sessionToken, {
+        userId: res.account.id || existing?.userId || id,
+        username: res.account.username || existing?.username || 'JuanOrozco',
+        displayName: res.account.displayName || existing?.displayName || 'Juan Orozco',
+        role: res.account.role || existing?.role || 'ai_manager',
+        tag: res.account.tag || existing?.tag || 'AI-MANAGER',
+        avatarUrl: res.account.avatarUrl ?? existing?.avatarUrl ?? null,
+      });
+    }
+
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      ok: true,
+      account: res.account,
+      state: normalizedState,
+      ...(res.sessionToken ? { sessionToken: res.sessionToken } : {}),
+      message: res.message || 'Credenciales de cuenta actualizadas correctamente.',
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function aiManagerRevokeSessions(
+  id: string
+): Promise<{ ok: boolean; account: UserAccount; state: AppState; message: string }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      account: UserAccount;
+      state: AppState;
+      message?: string;
+    }>(`/api/ai-manager/accounts/${encodeURIComponent(id)}/revoke-sessions`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      ok: true,
+      account: res.account,
+      state: normalizedState,
+      message: res.message || 'Sesiones activas revocadas correctamente.',
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function fetchSystemHealth(): Promise<SystemHealthReport> {
+  const res = await requestJson<SystemHealthReport & { ok?: boolean }>(
+    '/api/ai-manager/system-health',
+    { cache: 'no-store' }
+  );
+  return {
+    storage: res.storage,
+    timestamp: res.timestamp,
+    uptimeSeconds: res.uptimeSeconds,
+    counts: res.counts,
+    processControls: normalizeProcessControls(res.processControls),
+  };
+}
+
+export async function downloadSystemBackup(): Promise<Record<string, unknown>> {
+  return requestJson<Record<string, unknown>>('/api/ai-manager/export-backup', {
+    cache: 'no-store',
+  });
+}
+
+export async function aiManagerPurgeAlerts(
+  scope: 'resolved' | 'all' = 'resolved'
+): Promise<{ ok: boolean; removed: number; state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      removed?: number;
+      state: AppState;
+    }>('/api/ai-manager/alerts/purge', {
+      method: 'POST',
+      body: JSON.stringify({ scope }),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      ok: true,
+      removed: typeof res.removed === 'number' ? res.removed : 0,
+      state: normalizedState,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function aiManagerClearActivity(): Promise<{
+  ok: boolean;
+  removed: number;
+  state: AppState;
+}> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      removed?: number;
+      state: AppState;
+    }>('/api/ai-manager/activity/clear', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      ok: true,
+      removed: typeof res.removed === 'number' ? res.removed : 0,
+      state: normalizedState,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function aiManagerReassignEmbajador(
+  id: string,
+  targetVendedorAccountId: string | null
+): Promise<{
+  ok: boolean;
+  referrer: ReferralPartner;
+  movedLeadsCount: number;
+  movedQrsCount: number;
+  previousOwnerName: string;
+  newOwnerName: string;
+  message: string;
+  state: AppState;
+}> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      referrer: ReferralPartner;
+      movedLeadsCount?: number;
+      movedQrsCount?: number;
+      previousOwnerName?: string;
+      newOwnerName?: string;
+      message?: string;
+      state: AppState;
+    }>(`/api/ai-manager/embajadores/${encodeURIComponent(id)}/reassign`, {
+      method: 'POST',
+      body: JSON.stringify({ targetVendedorAccountId }),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      ok: true,
+      referrer: normalizeReferralPartner(res.referrer),
+      movedLeadsCount: typeof res.movedLeadsCount === 'number' ? res.movedLeadsCount : 0,
+      movedQrsCount: typeof res.movedQrsCount === 'number' ? res.movedQrsCount : 0,
+      previousOwnerName: res.previousOwnerName || 'Ciprian Directo',
+      newOwnerName: res.newOwnerName || 'Ciprian Directo',
+      message: res.message || 'Embajador reasignado correctamente.',
+      state: normalizedState,
     };
   } finally {
     endMutation();

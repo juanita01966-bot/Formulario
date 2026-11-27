@@ -31,6 +31,38 @@ export interface RoleThemeConfig {
 }
 
 export const ROLE_THEMES: Record<UserRole, RoleThemeConfig> = {
+  ai_manager: {
+    role: 'ai_manager',
+    label: 'AI MANAGER',
+    codename: 'Control Supremo',
+    primary: '#9A6B16',
+    mid: '#C8962E',
+    bright: '#E8BD55',
+    brass: '#F5D67B',
+    light: '#FDF6E2',
+    accentMetallic: '#F7DC88',
+    headerStrip: 'linear-gradient(90deg, #3D2806 0%, #8A5E11 32%, #D4A437 68%, #F7DC88 100%)',
+    heroGradient: 'linear-gradient(135deg, #241705 0%, #5C3E0B 46%, #A67619 82%, #D9A93B 100%)',
+    progressGradient: 'linear-gradient(90deg, #5A3B08 0%, #B3801D 58%, #F5D67B 100%)',
+    activePillClass:
+      'bg-gradient-to-r from-[#5A3B08] via-[#9E6F16] to-[#C8962E] text-white shadow-[0_6px_20px_-4px_rgba(184,134,30,0.58),inset_0_1px_0_rgba(255,244,200,0.45)] border border-[#F5D67B]/55',
+    badgeClass:
+      'bg-[#C8962E]/14 text-[#8A5610] border border-[#C8962E]/35 shadow-[inset_0_1px_0_rgba(255,248,220,0.65)]',
+    ringClass: 'ring-1 ring-[#C8962E]/45 border-[#D4A437]/50',
+    spotlightRgba: 'rgba(200, 150, 46, 0.13)',
+    spotlightBorderRgba: 'rgba(212, 164, 55, 0.42)',
+    borderTint: 'rgba(184, 134, 30, 0.28)',
+    borderTintClass: 'border-[#C8962E]/30',
+    textAccent: 'text-[#8A5610]',
+    softBgClass: 'bg-[#FDF6E2]/70',
+    backdropWash:
+      'radial-gradient(ellipse 85% 65% at 15% 12%, rgba(200, 150, 46, 0.17) 0%, transparent 58%), radial-gradient(ellipse 75% 60% at 86% 82%, rgba(154, 107, 22, 0.13) 0%, transparent 60%), radial-gradient(ellipse 55% 45% at 72% 16%, rgba(245, 214, 123, 0.20) 0%, transparent 55%), linear-gradient(155deg, #FEFCF6 0%, #FAF3E3 48%, #F4E9CF 100%)',
+    orbPrimary: 'rgba(200, 150, 46, 0.20)',
+    orbSecondary: 'rgba(154, 107, 22, 0.16)',
+    orbTertiary: 'rgba(245, 214, 123, 0.22)',
+    ringStroke: 'rgba(184, 134, 30, 0.26)',
+    glowRgba: 'rgba(184, 134, 30, 0.28)',
+  },
   admin: {
     role: 'admin',
     label: 'Administrador',

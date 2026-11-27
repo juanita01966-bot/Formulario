@@ -1,12 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
   CalendarClock,
-  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Clock,
   Cpu,
+  Crown,
   ExternalLink,
+  EyeOff,
   Filter,
   Gift,
   GitCompareArrows,
@@ -33,13 +36,14 @@ import { RoleSymbolSvg } from './RoleEmblem';
 interface ActivityLogPanelProps {
   logs: ActivityLogEntry[];
   accounts?: UserAccount[];
+  userRole?: UserRole;
   onJumpToLead?: (leadId: string) => void;
 }
 
-type RoleFilter = 'all' | 'vendedor' | 'telemarketing' | 'admin' | 'public';
+type RoleFilter = 'all' | 'ai_manager' | 'vendedor' | 'telemarketing' | 'admin' | 'public';
 type CategoryFilter = 'all' | ActivityLogCategory;
 
-const PAGE_SIZE = 40;
+const PAGE_SIZE = 15;
 
 const CATEGORY_LABELS: Record<ActivityLogCategory, string> = {
   status: 'Cambios de estado',
@@ -78,6 +82,11 @@ const ROLE_META: Record<
   UserRole | 'public' | 'system',
   { label: string; chipClass: string }
 > = {
+  ai_manager: {
+    label: 'AI MANAGER',
+    chipClass:
+      'border-[#F5D67B]/60 bg-gradient-to-r from-[#5A3B08] via-[#9E6F16] to-[#C8962E] text-white uppercase tracking-[0.08em] shadow-xs',
+  },
   admin: {
     label: 'Administrador',
     chipClass: 'border-rose-200 bg-rose-50 text-rose-800',
@@ -238,22 +247,27 @@ function renderTargetIcon(targetType?: ActivityLogEntry['targetType']) {
 export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
   logs,
   accounts = [],
+  userRole = 'admin',
   onJumpToLead,
 }) => {
+  const isAiManager = userRole === 'ai_manager';
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [actorFilter, setActorFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // Sort newest first once
+  // Defensively strip ai_manager entries for non-ai_manager viewers, then sort newest first
   const sortedLogs = useMemo(() => {
-    return [...logs].sort((a, b) => {
+    const base = isAiManager
+      ? logs
+      : logs.filter((entry) => entry.actorRole !== 'ai_manager');
+    return [...base].sort((a, b) => {
       const timeA = Date.parse(a.createdAt) || 0;
       const timeB = Date.parse(b.createdAt) || 0;
       return timeB - timeA;
     });
-  }, [logs]);
+  }, [logs, isAiManager]);
 
   // KPI Metrics & Role Counts
   const stats = useMemo(() => {
@@ -263,6 +277,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
     let todayCount = 0;
     const roleCounts: Record<RoleFilter, number> = {
       all: sortedLogs.length,
+      ai_manager: 0,
       vendedor: 0,
       telemarketing: 0,
       admin: 0,
@@ -274,6 +289,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
       if (entry.category === 'telemarketing') telemarketingCalls += 1;
       if (isSameLocalDay(entry.createdAt, now)) todayCount += 1;
       if (
+        entry.actorRole === 'ai_manager' ||
         entry.actorRole === 'vendedor' ||
         entry.actorRole === 'telemarketing' ||
         entry.actorRole === 'admin' ||
@@ -306,6 +322,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
     };
 
     for (const acc of accounts) {
+      if (!isAiManager && acc.role === 'ai_manager') continue;
       register(acc.displayName || acc.username);
     }
     for (const entry of sortedLogs) {
@@ -315,7 +332,14 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
     return Array.from(seen.values()).sort((a, b) =>
       a.localeCompare(b, 'es', { sensitivity: 'base' })
     );
-  }, [accounts, sortedLogs]);
+  }, [accounts, sortedLogs, isAiManager]);
+
+  // Ensure regular Admins can never hold an active ai_manager role filter
+  useEffect(() => {
+    if (!isAiManager && roleFilter === 'ai_manager') {
+      setRoleFilter('all');
+    }
+  }, [isAiManager, roleFilter]);
 
   // Filtered activity entries
   const filteredLogs = useMemo(() => {
@@ -323,6 +347,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
     const actorNeedle = actorFilter === 'all' ? '' : actorFilter.trim().toLowerCase();
 
     return sortedLogs.filter((entry) => {
+      if (!isAiManager && entry.actorRole === 'ai_manager') return false;
       if (roleFilter !== 'all' && entry.actorRole !== roleFilter) return false;
       if (categoryFilter !== 'all' && entry.category !== categoryFilter) return false;
       if (actorNeedle) {
@@ -350,7 +375,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
       }
       return true;
     });
-  }, [sortedLogs, roleFilter, categoryFilter, actorFilter, searchQuery]);
+  }, [sortedLogs, roleFilter, categoryFilter, actorFilter, searchQuery, isAiManager]);
 
   const hasActiveFilters =
     roleFilter !== 'all' ||
@@ -363,20 +388,26 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
     setCategoryFilter('all');
     setActorFilter('all');
     setSearchQuery('');
-    setVisibleCount(PAGE_SIZE);
+    setCurrentPage(1);
   };
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [roleFilter, categoryFilter, actorFilter, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStartIdx = (safePage - 1) * PAGE_SIZE;
+
   const visibleLogs = useMemo(
-    () => filteredLogs.slice(0, visibleCount),
-    [filteredLogs, visibleCount]
+    () => filteredLogs.slice(pageStartIdx, pageStartIdx + PAGE_SIZE),
+    [filteredLogs, pageStartIdx]
   );
 
-  const remainingCount = Math.max(0, filteredLogs.length - visibleLogs.length);
-
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-3.5 sm:space-y-4">
       {/* a) Header */}
-      <section className="dsb-glass rounded-[24px] sm:rounded-[28px] border border-slate-200/80 p-3.5 sm:p-6 shadow-sm">
+      <section className="dsb-glass rounded-[22px] sm:rounded-[24px] border border-slate-200/80 p-3.5 sm:p-5 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 sm:gap-4">
           <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
             <div
@@ -526,6 +557,9 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
             {(
               [
                 { id: 'all', label: 'Todos', count: stats.roleCounts.all },
+                ...(isAiManager
+                  ? [{ id: 'ai_manager' as const, label: 'AI Manager', count: stats.roleCounts.ai_manager }]
+                  : []),
                 { id: 'vendedor', label: 'Vendedor', count: stats.roleCounts.vendedor },
                 { id: 'telemarketing', label: 'Telemarketing', count: stats.roleCounts.telemarketing },
                 { id: 'admin', label: 'Administrador', count: stats.roleCounts.admin },
@@ -533,6 +567,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
               ] as Array<{ id: RoleFilter; label: string; count: number }>
             ).map((pill) => {
               const active = roleFilter === pill.id;
+              const isAiPill = pill.id === 'ai_manager';
               return (
                 <button
                   key={pill.id}
@@ -540,18 +575,27 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
                   data-preserve-surface={active ? 'true' : undefined}
                   onClick={() => {
                     setRoleFilter(pill.id);
-                    setVisibleCount(PAGE_SIZE);
+                    setCurrentPage(1);
                   }}
                   className={`inline-flex min-h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
                     active
-                      ? 'bg-gradient-to-r from-[#8B0018] to-[#B91C1C] text-white border-white/25 shadow-sm'
-                      : 'border-slate-200 bg-white/65 text-slate-700 hover:bg-white'
+                      ? isAiPill
+                        ? 'bg-gradient-to-r from-[#5A3B08] via-[#9E6F16] to-[#C8962E] text-white border-[#F5D67B]/60 shadow-sm'
+                        : 'bg-gradient-to-r from-[#8B0018] to-[#B91C1C] text-white border-white/25 shadow-sm'
+                      : isAiPill
+                        ? 'border-[#C8962E]/35 bg-amber-50 text-[#8A5610] hover:bg-amber-100'
+                        : 'border-slate-200 bg-white/65 text-slate-700 hover:bg-white'
                   }`}
                 >
+                  {isAiPill && <Crown className="h-3 w-3 shrink-0" />}
                   <span className="whitespace-nowrap">{pill.label}</span>
                   <span
                     className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                      active ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                      active
+                        ? 'bg-white/20 text-white'
+                        : isAiPill
+                          ? 'bg-[#C8962E]/20 text-[#8A5610]'
+                          : 'bg-slate-200 text-slate-700'
                     }`}
                   >
                     {pill.count}
@@ -570,7 +614,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
-                  setVisibleCount(PAGE_SIZE);
+                  setCurrentPage(1);
                 }}
                 placeholder="Buscar resumen, persona, tag, prospecto o estado..."
                 className="w-full min-h-[42px] rounded-xl border border-slate-200 bg-white/80 pl-9 pr-9 py-2 text-base sm:text-xs text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
@@ -580,7 +624,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
                   type="button"
                   onClick={() => {
                     setSearchQuery('');
-                    setVisibleCount(PAGE_SIZE);
+                    setCurrentPage(1);
                   }}
                   aria-label="Limpiar búsqueda"
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-200/70 transition-colors cursor-pointer"
@@ -597,7 +641,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
                 value={categoryFilter}
                 onChange={(e) => {
                   setCategoryFilter(e.target.value as CategoryFilter);
-                  setVisibleCount(PAGE_SIZE);
+                  setCurrentPage(1);
                 }}
                 className="w-full min-h-[42px] rounded-xl border border-slate-200 bg-white/80 pl-8 pr-3 py-2 text-base sm:text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500/30 cursor-pointer"
               >
@@ -620,7 +664,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
                 value={actorFilter}
                 onChange={(e) => {
                   setActorFilter(e.target.value);
-                  setVisibleCount(PAGE_SIZE);
+                  setCurrentPage(1);
                 }}
                 className="w-full min-h-[42px] rounded-xl border border-slate-200 bg-white/80 pl-8 pr-3 py-2 text-base sm:text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500/30 cursor-pointer"
               >
@@ -683,8 +727,10 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
                   )
                 : null;
 
-              const railClass =
-                transitionTone === 'advance'
+              const isAiEntry = entry.actorRole === 'ai_manager';
+              const railClass = isAiEntry
+                ? 'bg-gradient-to-b from-[#6B440A] via-[#C8962E] to-[#E8C15A]'
+                : transitionTone === 'advance'
                   ? 'bg-emerald-600'
                   : transitionTone === 'revert'
                     ? 'bg-rose-600'
@@ -696,6 +742,7 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
 
               const { relative, formatted } = formatActivityTimestamp(entry.createdAt);
               const isRoleWithSvg =
+                entry.actorRole === 'ai_manager' ||
                 entry.actorRole === 'admin' ||
                 entry.actorRole === 'telemarketing' ||
                 entry.actorRole === 'vendedor';
@@ -738,10 +785,18 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
                               {entry.actorName || roleMeta.label}
                             </span>
                             <span
-                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${roleMeta.chipClass}`}
+                              data-preserve-surface={isAiEntry ? 'true' : undefined}
+                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${roleMeta.chipClass}`}
                             >
+                              {isAiEntry && <Crown className="h-2.5 w-2.5 shrink-0" />}
                               {roleMeta.label}
                             </span>
+                            {isAiManager && isAiEntry && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-[#C8962E]/40 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-[#8A5610]">
+                                <EyeOff className="h-2.5 w-2.5 shrink-0" />
+                                Solo visible para ti
+                              </span>
+                            )}
                             {entry.actorTag && (
                               <span className="rounded-md border border-slate-200 bg-white/70 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-700 break-all">
                                 {entry.actorTag}
@@ -833,18 +888,35 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
               );
             })}
 
-            {remainingCount > 0 && (
-              <div className="pt-2 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
-                  className="inline-flex min-h-[42px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-slate-300/80 bg-white/75 hover:bg-white px-5 py-2 text-xs font-bold text-slate-800 shadow-2xs transition-colors cursor-pointer tabular-nums"
-                >
-                  <ChevronDown className="h-4 w-4 shrink-0" />
-                  <span>
-                    Mostrar más ({Math.min(PAGE_SIZE, remainingCount)} de {remainingCount} restantes)
+            {totalPages > 1 && (
+              <div className="pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-600 tabular-nums">
+                  Mostrando {pageStartIdx + 1}–{Math.min(pageStartIdx + PAGE_SIZE, filteredLogs.length)} de{' '}
+                  {filteredLogs.length} movimientos
+                </span>
+                <div className="flex items-center justify-between sm:justify-end gap-1.5">
+                  <button
+                    type="button"
+                    disabled={safePage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-slate-300 bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-slate-700 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    <span>Anterior</span>
+                  </button>
+                  <span className="px-2.5 text-xs font-bold text-slate-900 tabular-nums">
+                    Página {safePage} de {totalPages}
                   </span>
-                </button>
+                  <button
+                    type="button"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1 rounded-xl border border-slate-300 bg-white/80 hover:bg-white px-3 py-1 text-xs font-bold text-slate-700 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    <span>Siguiente</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -11,9 +11,18 @@ const SESSION_CHECK_INTERVAL_MS = 2_500;
 const TOAST_DURATION_MS = 3_200;
 
 let guardInstalled = false;
+let guardEnabled = true;
 let tamperReloadTriggered = false;
 let toastTimerId: number | null = null;
 const lastReportAt = new Map<string, number>();
+
+export function setClientGuardEnabled(enabled: boolean): void {
+  guardEnabled = Boolean(enabled);
+}
+
+export function isClientGuardEnabled(): boolean {
+  return guardEnabled;
+}
 
 function isOnDashboardRoute(): boolean {
   if (typeof window === 'undefined') return false;
@@ -190,6 +199,7 @@ export function installClientSecurityGuard(): void {
   document.addEventListener(
     'contextmenu',
     (event) => {
+      if (!guardEnabled) return;
       if (isEditableContextTarget(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -204,6 +214,7 @@ export function installClientSecurityGuard(): void {
   window.addEventListener(
     'keydown',
     (event) => {
+      if (!guardEnabled) return;
       const combo = getBlockedDevToolsShortcut(event);
       if (!combo) return;
       event.preventDefault();

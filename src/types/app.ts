@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'telemarketing' | 'vendedor';
+export type UserRole = 'ai_manager' | 'admin' | 'telemarketing' | 'vendedor';
 
 export type LeadCategory = 'none' | 'cita' | 'demo' | 'orden';
 
@@ -82,6 +82,29 @@ export interface AuthSessionInfo {
   avatarUrl?: string | null;
 }
 
+export type SecurityQuestionType =
+  | 'personal'
+  | 'fecha'
+  | 'clave'
+  | 'codigo'
+  | 'gusto'
+  | 'custom';
+
+export interface AiSecurityQuestionChallenge {
+  questionId: string;
+  type: SecurityQuestionType;
+  typeLabel: string;
+  prompt: string;
+}
+
+export interface AiSecurityQuestionPublic {
+  id: string;
+  type: SecurityQuestionType;
+  typeLabel: string;
+  prompt: string;
+  hasAnswer: boolean;
+}
+
 export interface Lead {
   id: string;
   name: string;
@@ -156,6 +179,40 @@ export interface ReferralVisitEvent {
   visitedAt: string;
 }
 
+export interface ProcessControls {
+  publicFormEnabled: boolean;
+  publicFormDisabledTitle: string;
+  publicFormDisabledMessage: string;
+  welcomeVideoEnabled: boolean;
+  qualificationQuizEnabled: boolean;
+  giftRevealEnabled: boolean;
+  clientGuardEnabled: boolean;
+}
+
+export interface SystemHealthReport {
+  storage: 'supabase' | 'local';
+  timestamp: string;
+  uptimeSeconds: number;
+  counts: {
+    accounts: number;
+    aiManagers: number;
+    admins: number;
+    vendedores: number;
+    telemarketing: number;
+    leads: number;
+    referrers: number;
+    embajadores: number;
+    qrCodes: number;
+    visits: number;
+    openAlerts: number;
+    totalAlerts: number;
+    activityLogs: number;
+    activeGifts: number;
+    totalGifts: number;
+  };
+  processControls: ProcessControls;
+}
+
 export interface AppSettings {
   advisorName: string;
   hostTitle: string;
@@ -168,6 +225,7 @@ export interface AppSettings {
   showcaseStyle?: ShowcaseStyleId;
   randomizeGifts?: boolean;
   referralPrizeRule?: ReferralPrizeRule;
+  processControls?: ProcessControls;
 }
 
 export type QrStyleId =

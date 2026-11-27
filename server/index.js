@@ -25,6 +25,16 @@ const BUNDLED_DEFAULT_STORE = {
       pointsPerDemo: 5,
       pointsPerOrden: 10,
     },
+    processControls: {
+      publicFormEnabled: true,
+      publicFormDisabledTitle: 'Experiencia en Pausa Temporal',
+      publicFormDisabledMessage:
+        'Estamos preparando una nueva edición del Show de Cocina Royal Prestige. Vuelve muy pronto.',
+      welcomeVideoEnabled: true,
+      qualificationQuizEnabled: true,
+      giftRevealEnabled: true,
+      clientGuardEnabled: true,
+    },
   },
   gifts: [
     {
@@ -209,7 +219,17 @@ const SUPABASE_SECRET_KEY = (
 const IS_TESTING = process.env.NODE_ENV === 'test' || process.execArgv.includes('--test');
 const USE_SUPABASE = !IS_TESTING && Boolean(SUPABASE_URL && SUPABASE_SECRET_KEY);
 
-const VALID_ROLES = new Set(['admin', 'telemarketing', 'vendedor']);
+const VALID_ROLES = new Set(['ai_manager', 'admin', 'telemarketing', 'vendedor']);
+const DEFAULT_PROCESS_CONTROLS = {
+  publicFormEnabled: true,
+  publicFormDisabledTitle: 'Experiencia en Pausa Temporal',
+  publicFormDisabledMessage:
+    'Estamos preparando una nueva edición del Show de Cocina Royal Prestige. Vuelve muy pronto.',
+  welcomeVideoEnabled: true,
+  qualificationQuizEnabled: true,
+  giftRevealEnabled: true,
+  clientGuardEnabled: true,
+};
 const VALID_CATEGORIES = new Set(['none', 'cita', 'demo', 'orden']);
 const VALID_CALL_OUTCOMES = new Set(['pending', 'scheduled', 'not_scheduled']);
 const VALID_GIFT_THEMES = new Set([
@@ -282,6 +302,7 @@ const VALID_SECURITY_ALERT_CATEGORIES = new Set([
 ]);
 const VALID_SECURITY_ALERT_STATUSES = new Set(['open', 'reviewed', 'dismissed']);
 const VALID_SECURITY_ACTOR_ROLES = new Set([
+  'ai_manager',
   'admin',
   'telemarketing',
   'vendedor',
@@ -308,11 +329,18 @@ const VALID_ACTIVITY_ACTIONS = new Set([
   'referrer_deleted',
   'embajador_created',
   'embajador_updated',
+  'embajador_reassigned',
+  'security_questions_updated',
   'embajador_deleted',
   'gift_changed',
   'settings_updated',
   'security_alert_updated',
   'master_reset',
+  'process_controls_updated',
+  'ai_manager_credentials_updated',
+  'sessions_revoked',
+  'alerts_purged',
+  'activity_cleared',
 ]);
 const VALID_ACTIVITY_CATEGORIES = new Set([
   'leads',
@@ -843,6 +871,10 @@ function verifyAdminPasswordChangePin(candidate) {
   );
 }
 
+function isElevatedAdminRole(role) {
+  return role === 'admin' || role === 'ai_manager';
+}
+
 function normalizeUserRole(rawRole) {
   if (rawRole === 'caller') return 'telemarketing';
   if (VALID_ROLES.has(rawRole)) return rawRole;
@@ -860,6 +892,23 @@ function getSigningSecret(auth) {
 }
 
 function buildDefaultAuthRecord() {
+  const aiManagerUser = {
+    id: 'ai-manager-juan',
+    username: 'JuanOrozco',
+    displayName: 'Juan Orozco',
+    role: 'ai_manager',
+    tag: 'AI-MANAGER',
+    active: true,
+    passwordSalt: 'e88f194072404c534399cdcd8df5e8f8',
+    passwordHash:
+      'fce9062d41133a1197b221f33d932d145edbd660c2b3e6b8ed04d9b6a0399faf9c5796c926b7ebe83635d56341fbd981779555d762d34fdc9b140f97faccfd30',
+    pinSalt: null,
+    pinHash: null,
+    tokenVersion: 1,
+    createdAt: '2026-11-17T00:00:00.000Z',
+    updatedAt: '2026-11-27T00:00:00.000Z',
+  };
+
   const adminUser = {
     id: 'default',
     username: 'AdminCiprian',
@@ -903,8 +952,8 @@ function buildDefaultAuthRecord() {
     pinSalt: adminUser.pinSalt,
     pinHash: adminUser.pinHash,
     tokenSecret: '930f2c9f007c19dababc724db5cf85b2f711681ab22dadb364aa0884e05ad15a',
-    updatedAt: '2026-11-24T00:00:00.000Z',
-    users: [adminUser, telemarketingUser],
+    updatedAt: '2026-11-27T00:00:00.000Z',
+    users: [aiManagerUser, adminUser, telemarketingUser],
   };
 }
 
@@ -925,19 +974,23 @@ function normalizeAccountRecord(raw) {
       ? 'telemarketing'
       : typeof raw.id === 'string' && raw.id.trim()
         ? raw.id.trim()
-        : role === 'admin'
-          ? 'default'
-          : generateId('usr');
+        : role === 'ai_manager'
+          ? 'ai-manager-juan'
+          : role === 'admin'
+            ? 'default'
+            : generateId('usr');
   const displayName =
     typeof raw.displayName === 'string' && raw.displayName.trim()
       ? raw.displayName.trim()
-      : role === 'admin' && username === 'AdminCiprian'
-        ? 'Administrador Ciprian'
-        : username;
+      : role === 'ai_manager' && username.toLowerCase().replace(/\s+/g, '') === 'juanorozco'
+        ? 'Juan Orozco'
+        : role === 'admin' && username === 'AdminCiprian'
+          ? 'Administrador Ciprian'
+          : username;
   const tag =
     normalizeReferralCode(raw.tag) ||
     normalizeReferralCode(username) ||
-    (role === 'admin' ? 'ADMIN-CIPRIAN' : 'USER');
+    (role === 'ai_manager' ? 'AI-MANAGER' : role === 'admin' ? 'ADMIN-CIPRIAN' : 'USER');
   const tokenVersion =
     Number.isInteger(Number(raw.tokenVersion)) && Number(raw.tokenVersion) >= 1
       ? Math.round(Number(raw.tokenVersion))
@@ -957,8 +1010,9 @@ function normalizeAccountRecord(raw) {
     active: raw.active !== false,
     passwordSalt: typeof raw.passwordSalt === 'string' && raw.passwordSalt ? raw.passwordSalt : null,
     passwordHash: typeof raw.passwordHash === 'string' ? raw.passwordHash : '',
-    pinSalt: role === 'admin' && typeof raw.pinSalt === 'string' && raw.pinSalt ? raw.pinSalt : null,
-    pinHash: role === 'admin' && typeof raw.pinHash === 'string' && raw.pinHash ? raw.pinHash : null,
+    pinSalt: isElevatedAdminRole(role) && typeof raw.pinSalt === 'string' && raw.pinSalt ? raw.pinSalt : null,
+    pinHash: isElevatedAdminRole(role) && typeof raw.pinHash === 'string' && raw.pinHash ? raw.pinHash : null,
+    ...(Array.isArray(raw.securityQuestions) ? { securityQuestions: raw.securityQuestions } : {}),
     tokenVersion,
     createdAt: typeof raw.createdAt === 'string' && raw.createdAt ? raw.createdAt : nowIso,
     updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : nowIso,
@@ -997,8 +1051,17 @@ function findUserRecord(authStore, username) {
   if (clean === 'admincripian') {
     return null;
   }
+  const collapsed = clean.replace(/\s+/g, '');
   const users = getUsersList(authStore);
-  return users.find((u) => u.username.toLowerCase() === clean) || null;
+  const exact = users.find((u) => u.username.toLowerCase() === clean);
+  if (exact) return exact;
+  return (
+    users.find(
+      (u) =>
+        u.role === 'ai_manager' &&
+        u.username.toLowerCase().replace(/\s+/g, '') === collapsed
+    ) || null
+  );
 }
 
 function ensureAuthStore() {
@@ -1037,8 +1100,21 @@ function ensureAuthStore() {
       return updated;
     }
 
+    let seededAiManager = false;
+    const hasAiManager = users.some(
+      (u) => u.role === 'ai_manager' || u.id === 'ai-manager-juan'
+    );
+    if (!hasAiManager) {
+      const defaultAiManager = defaults.users.find((u) => u.role === 'ai_manager');
+      if (defaultAiManager) {
+        users = [defaultAiManager, ...users];
+        seededAiManager = true;
+      }
+    }
+
     const needsMigration =
       hadLegacyCaller ||
+      seededAiManager ||
       rawUsers.some((u) => !u?.id || !u?.tag || !u?.displayName || typeof u?.tokenVersion !== 'number');
 
     const adminRec = users.find((u) => u.role === 'admin');
@@ -1314,6 +1390,41 @@ function sanitizeReferralPrizeRule(input, fallback = DEFAULT_REFERRAL_PRIZE_RULE
       input.pointsPerOrden,
       base.pointsPerOrden ?? DEFAULT_REFERRAL_PRIZE_RULE.pointsPerOrden
     ),
+  };
+}
+
+function sanitizeProcessControls(raw, fallback = DEFAULT_PROCESS_CONTROLS) {
+  const base =
+    fallback && typeof fallback === 'object'
+      ? { ...DEFAULT_PROCESS_CONTROLS, ...fallback }
+      : { ...DEFAULT_PROCESS_CONTROLS };
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+
+  const pickBool = (key) =>
+    typeof input[key] === 'boolean'
+      ? input[key]
+      : typeof base[key] === 'boolean'
+        ? base[key]
+        : DEFAULT_PROCESS_CONTROLS[key];
+
+  const pickText = (key, maxLen) => {
+    if (typeof input[key] === 'string' && input[key].trim()) {
+      return input[key].trim().slice(0, maxLen);
+    }
+    if (typeof base[key] === 'string' && base[key].trim()) {
+      return base[key].trim().slice(0, maxLen);
+    }
+    return DEFAULT_PROCESS_CONTROLS[key];
+  };
+
+  return {
+    publicFormEnabled: pickBool('publicFormEnabled'),
+    publicFormDisabledTitle: pickText('publicFormDisabledTitle', 140),
+    publicFormDisabledMessage: pickText('publicFormDisabledMessage', 500),
+    welcomeVideoEnabled: pickBool('welcomeVideoEnabled'),
+    qualificationQuizEnabled: pickBool('qualificationQuizEnabled'),
+    giftRevealEnabled: pickBool('giftRevealEnabled'),
+    clientGuardEnabled: pickBool('clientGuardEnabled'),
   };
 }
 
@@ -1695,6 +1806,7 @@ function mapAuthAccountRow(row) {
     passwordHash: row.password_hash || '',
     pinSalt: null,
     pinHash: row.pin_hash || null,
+    ...(Array.isArray(row.security_questions) ? { securityQuestions: row.security_questions } : {}),
     tokenVersion: resolvedTokenVersion,
     createdAt: resolvedCreatedAt,
     updatedAt: row.updated_at || resolvedCreatedAt,
@@ -1717,7 +1829,7 @@ async function fetchAllAuthAccounts() {
       } else {
         try {
           rows = await supabaseRest(
-            'dsb_auth?select=id,username,display_name,role,tag,avatar_url,active,password_hash,pin_hash,token_version,created_at,updated_at&order=created_at.asc'
+            'dsb_auth?select=id,username,display_name,role,tag,avatar_url,active,password_hash,pin_hash,security_questions,token_version,created_at,updated_at&order=created_at.asc'
           );
         } catch (err) {
           if (!isMissingColumnError(err)) throw err;
@@ -1727,9 +1839,10 @@ async function fetchAllAuthAccounts() {
       }
       if (Array.isArray(rows) && rows.length > 0) {
         const mapped = rows.map(mapAuthAccountRow).filter(Boolean);
+        const roleRank = (r) => (r === 'ai_manager' ? 0 : r === 'admin' ? 1 : 2);
         mapped.sort((a, b) => {
-          if (a.role === 'admin' && b.role !== 'admin') return -1;
-          if (a.role !== 'admin' && b.role === 'admin') return 1;
+          const diff = roleRank(a.role) - roleRank(b.role);
+          if (diff !== 0) return diff;
           return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
         });
         return mapped;
@@ -1746,8 +1859,17 @@ async function findAuthAccountByUsername(username) {
   if (!username || typeof username !== 'string') return null;
   const clean = username.trim().toLowerCase();
   if (!clean || clean === 'admincripian') return null;
+  const collapsed = clean.replace(/\s+/g, '');
   const accounts = await fetchAllAuthAccounts();
-  return accounts.find((a) => a.username.toLowerCase() === clean) || null;
+  const exact = accounts.find((a) => a.username.toLowerCase() === clean);
+  if (exact) return exact;
+  return (
+    accounts.find(
+      (a) =>
+        a.role === 'ai_manager' &&
+        a.username.toLowerCase().replace(/\s+/g, '') === collapsed
+    ) || null
+  );
 }
 
 async function findAuthAccountById(id) {
@@ -1814,7 +1936,7 @@ async function persistNewAuthAccount(account, restExecutor = supabaseRest) {
     // Empty string '' satisfies legacy dsb_auth schemas where pin_hash is NOT NULL,
     // while normalizeAccountRecord and dsb_verify_secret_hash treat '' identically to null (no PIN).
     const dbPinHash =
-      account.role === 'admin' && account.pinHash
+      isElevatedAdminRole(account.role) && account.pinHash
         ? account.pinHash.includes('$')
           ? account.pinHash
           : account.pinSalt
@@ -1896,7 +2018,7 @@ async function persistUpdatedAuthAccount(account, restExecutor = supabaseRest) {
         ? `scrypt$${account.passwordSalt}$${account.passwordHash}`
         : account.passwordHash;
     const dbPinHash =
-      account.role === 'admin' && account.pinHash
+      isElevatedAdminRole(account.role) && account.pinHash
         ? account.pinHash.includes('$')
           ? account.pinHash
           : account.pinSalt
@@ -2107,6 +2229,10 @@ function readDefaultStore() {
             parsed.settings?.referralPrizeRule,
             DEFAULT_REFERRAL_PRIZE_RULE
           ),
+          processControls: sanitizeProcessControls(
+            parsed.settings?.processControls,
+            DEFAULT_PROCESS_CONTROLS
+          ),
         },
         gifts: Array.isArray(parsed.gifts)
           ? parsed.gifts.map((g) => normalizeGiftRecord(g, DEFAULT_GIFT_PROBABILITY))
@@ -2158,6 +2284,10 @@ function ensureStore() {
       referralPrizeRule: sanitizeReferralPrizeRule(
         parsed.settings?.referralPrizeRule,
         defaults.settings.referralPrizeRule || DEFAULT_REFERRAL_PRIZE_RULE
+      ),
+      processControls: sanitizeProcessControls(
+        parsed.settings?.processControls,
+        defaults.settings.processControls || DEFAULT_PROCESS_CONTROLS
       ),
     };
     if (typeof mergedSettings.randomizeGifts !== 'boolean') {
@@ -2313,6 +2443,147 @@ const memoryReferrerAccountIds = new Map();
 const memoryReferrerMeta = new Map();
 const memoryQrAccountIds = new Map();
 const memorySettingsFallback = {};
+let memoryProcessControls = null;
+const memoryAiSecurityQuestions = new Map();
+const consumedAiChallengeJtis = new Map();
+
+const AI_SECURITY_QUESTION_TYPE_LABELS = {
+  personal: 'Origen / Personal',
+  fecha: 'Año / Fecha Clave',
+  clave: 'Palabra Secreta',
+  codigo: 'Código Personal',
+  gusto: 'Gusto Personal',
+  custom: 'Pregunta Personalizada',
+};
+
+const DEFAULT_AI_SECURITY_QUESTIONS = [
+  {
+    id: 'sq-mascota',
+    type: 'personal',
+    typeLabel: 'Origen / Personal',
+    prompt: '¿Cómo se llama tu mascota clave?',
+    answerHash:
+      'scrypt$69783ad91b1c0f8dfe2512c9f3b61d56$0b44a78c68cfd7e65f194230b5da76c6e8cc5c223a4169705c699ab402dbeb8b79d54880854f57009739f7b224ad760b3139c29139895054bcb97a9e78a13d0f',
+  },
+  {
+    id: 'sq-anio',
+    type: 'fecha',
+    typeLabel: 'Año Clave',
+    prompt: '¿Cuál es tu año clave especial?',
+    answerHash:
+      'scrypt$3a2e59d8ceead55e7fede7f893c693df$063c3e9149b0be8c70432dda5d80e6777b4ddb649e73434253bac08c7e9d1a3b8b3714cf72292801b464bdffa2ce0e6b7f8aa29b08dd5adbd6887be933505230',
+  },
+  {
+    id: 'sq-palabra',
+    type: 'clave',
+    typeLabel: 'Palabra Secreta',
+    prompt: '¿Cuál es tu palabra clave secreta?',
+    answerHash:
+      'scrypt$4c587e3f4b3d226eef9093e0b9476755$19d1187953d5f407eb28b8697472ce15f1d6b61b582b2dadf02086391e9990a03f833ee5ae271443b92b60afba762146dec974538481cfa86c9e56908b683de5',
+  },
+  {
+    id: 'sq-codigo',
+    type: 'codigo',
+    typeLabel: 'Código Personal',
+    prompt: '¿Cuál es tu código o proyecto clave?',
+    answerHash:
+      'scrypt$27b82cd35bb7c26c97165dfdd28e2426$599eb1902fe8084d2680cf30e3fec62bb040bc792d8dff1c9fe0e16440fd27ffc3ab0590db48d13788c61f82b4617a096b1998265ef13850df1f82d9d7754552',
+  },
+  {
+    id: 'sq-comida',
+    type: 'gusto',
+    typeLabel: 'Gusto Personal',
+    prompt: '¿Cuál es tu comida favorita?',
+    answerHash:
+      'scrypt$bae326f87ab318fcc5b63842fed978aa$a29a1bbf84ce3a436616ed30f41778c2b34b5cba8482ade3f64008017926a40987b3aada33c1496138379a53936f632788a02377e41933562f0730fb112cad45',
+  },
+];
+
+function normalizeSecurityAnswer(raw) {
+  return String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function hashSecurityAnswer(plainAnswer) {
+  const normalized = normalizeSecurityAnswer(plainAnswer);
+  const salt = crypto.randomBytes(16).toString('hex');
+  const dk = crypto.scryptSync(normalized, salt, 64).toString('hex');
+  return `scrypt$${salt}$${dk}`;
+}
+
+function sanitizeStoredSecurityQuestions(raw) {
+  if (!Array.isArray(raw)) return null;
+  const cleaned = [];
+  const seenIds = new Set();
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i];
+    if (!item || typeof item !== 'object') continue;
+    const prompt = typeof item.prompt === 'string' ? item.prompt.trim().slice(0, 180) : '';
+    const answerHash = typeof item.answerHash === 'string' ? item.answerHash.trim() : '';
+    if (prompt.length < 4 || !answerHash) continue;
+    const rawType = typeof item.type === 'string' ? item.type.trim().toLowerCase() : 'custom';
+    const type = Object.prototype.hasOwnProperty.call(AI_SECURITY_QUESTION_TYPE_LABELS, rawType)
+      ? rawType
+      : 'custom';
+    const typeLabel =
+      typeof item.typeLabel === 'string' && item.typeLabel.trim()
+        ? item.typeLabel.trim().slice(0, 48)
+        : AI_SECURITY_QUESTION_TYPE_LABELS[type];
+    let id =
+      typeof item.id === 'string' && item.id.trim()
+        ? item.id.trim().slice(0, 64)
+        : `sq-${i + 1}`;
+    while (seenIds.has(id)) {
+      id = `${id}-${i + 1}`;
+    }
+    seenIds.add(id);
+    cleaned.push({ id, type, typeLabel, prompt, answerHash });
+  }
+  return cleaned.length >= 1 ? cleaned : null;
+}
+
+const TEST_ONLY_AI_SECURITY_QUESTIONS = IS_TESTING
+  ? [
+      { id: 'sq-test-1', type: 'personal', typeLabel: 'Origen / Personal', prompt: 'Pregunta de prueba #1', answerHash: hashSecurityAnswer('resp-uno') },
+      { id: 'sq-test-2', type: 'fecha', typeLabel: 'Año Clave', prompt: 'Pregunta de prueba #2', answerHash: hashSecurityAnswer('2099') },
+      { id: 'sq-test-3', type: 'clave', typeLabel: 'Palabra Secreta', prompt: 'Pregunta de prueba #3', answerHash: hashSecurityAnswer('clave-tres') },
+      { id: 'sq-test-4', type: 'codigo', typeLabel: 'Código Personal', prompt: 'Pregunta de prueba #4', answerHash: hashSecurityAnswer('codigo-cuatro') },
+      { id: 'sq-test-5', type: 'gusto', typeLabel: 'Gusto Personal', prompt: 'Pregunta de prueba #5', answerHash: hashSecurityAnswer('gusto-cinco') },
+    ]
+  : null;
+
+function getSecurityQuestionsForAccount(account) {
+  const defaultPool =
+    IS_TESTING && TEST_ONLY_AI_SECURITY_QUESTIONS
+      ? TEST_ONLY_AI_SECURITY_QUESTIONS
+      : DEFAULT_AI_SECURITY_QUESTIONS;
+  if (!account) return defaultPool.map((q) => ({ ...q }));
+  const fromAccount = sanitizeStoredSecurityQuestions(account.securityQuestions);
+  if (fromAccount && fromAccount.length > 0) return fromAccount;
+  const fromMemory = sanitizeStoredSecurityQuestions(memoryAiSecurityQuestions.get(account.id));
+  if (fromMemory && fromMemory.length > 0) return fromMemory;
+  return defaultPool.map((q) => ({ ...q }));
+}
+
+function sanitizeSecurityQuestionsForClient(questions) {
+  return (Array.isArray(questions) ? questions : []).map((q) => ({
+    id: q.id,
+    type: q.type,
+    typeLabel: q.typeLabel || AI_SECURITY_QUESTION_TYPE_LABELS[q.type] || 'Personalizada',
+    prompt: q.prompt,
+    hasAnswer: Boolean(q.answerHash),
+  }));
+}
+
+function pruneConsumedChallengeJtis(nowMs = Date.now()) {
+  for (const [jti, exp] of consumedAiChallengeJtis.entries()) {
+    if (exp <= nowMs) consumedAiChallengeJtis.delete(jti);
+  }
+}
 const knownMissingColumnsByTable = new Map();
 
 function cacheReferrerMeta(partner) {
@@ -2399,6 +2670,21 @@ function loadSupabaseOverlay() {
     }
     if (raw.settings && typeof raw.settings === 'object') {
       Object.assign(memorySettingsFallback, raw.settings);
+      if (raw.settings.processControls && typeof raw.settings.processControls === 'object') {
+        memoryProcessControls = sanitizeProcessControls(raw.settings.processControls);
+      }
+    }
+    if (raw.processControls && typeof raw.processControls === 'object') {
+      memoryProcessControls = sanitizeProcessControls(raw.processControls);
+      memorySettingsFallback.processControls = memoryProcessControls;
+    }
+    if (raw.aiSecurityQuestions && typeof raw.aiSecurityQuestions === 'object') {
+      for (const [accId, list] of Object.entries(raw.aiSecurityQuestions)) {
+        const cleaned = sanitizeStoredSecurityQuestions(list);
+        if (accId && cleaned) {
+          memoryAiSecurityQuestions.set(accId, cleaned);
+        }
+      }
     }
     if (Array.isArray(raw.securityAlerts)) {
       memorySecurityAlertsFallback = raw.securityAlerts
@@ -2449,7 +2735,12 @@ function saveSupabaseOverlay() {
     leadWorkflow: Object.fromEntries(memoryLeadWorkflowStates.entries()),
     giftProbabilities: Object.fromEntries(memoryGiftProbabilities.entries()),
     giftUsageTips: Object.fromEntries(memoryGiftUsageTips.entries()),
-    settings: { ...memorySettingsFallback },
+    settings: {
+      ...memorySettingsFallback,
+      ...(memoryProcessControls ? { processControls: memoryProcessControls } : {}),
+    },
+    ...(memoryProcessControls ? { processControls: memoryProcessControls } : {}),
+    aiSecurityQuestions: Object.fromEntries(memoryAiSecurityQuestions.entries()),
     securityAlerts: Array.isArray(memorySecurityAlertsFallback)
       ? memorySecurityAlertsFallback.slice(0, MAX_SECURITY_ALERTS)
       : [],
@@ -2619,6 +2910,89 @@ function removeFallbackQrCode(id) {
     writeStore(local);
   }
   return next;
+}
+
+function updateFallbackQrAccountIds(qrIds, newOwnerAccountId) {
+  const idSet = qrIds instanceof Set ? qrIds : new Set(Array.isArray(qrIds) ? qrIds : []);
+  if (idSet.size === 0) return;
+  const normalizedOwner =
+    typeof newOwnerAccountId === 'string' && newOwnerAccountId.trim()
+      ? newOwnerAccountId.trim()
+      : null;
+  if (Array.isArray(memoryQrFallback)) {
+    memoryQrFallback = memoryQrFallback.map((item) =>
+      item && idSet.has(item.id) ? { ...item, accountId: normalizedOwner } : item
+    );
+    if (!IS_VERCEL) {
+      const local = ensureStore();
+      local.qrHistory = memoryQrFallback;
+      writeStore(local);
+    }
+  }
+}
+
+async function syncEmbajadorQrsOwner(store, embajador, newOwnerAccountId, extraCodes = []) {
+  if (!store || !embajador || !embajador.id) {
+    return { movedQrsCount: 0, matchedQrIds: [] };
+  }
+  const normalizedOwner =
+    typeof newOwnerAccountId === 'string' && newOwnerAccountId.trim()
+      ? newOwnerAccountId.trim()
+      : null;
+  const targetCodes = new Set();
+  const primaryCode = normalizeReferralCode(embajador.code);
+  if (primaryCode) targetCodes.add(primaryCode);
+  for (const code of Array.isArray(extraCodes) ? extraCodes : []) {
+    const norm = normalizeReferralCode(code);
+    if (norm) targetCodes.add(norm);
+  }
+
+  const currentQrs = Array.isArray(store.qrHistory) ? store.qrHistory : [];
+  const matchingQrs = currentQrs.filter((qr) => {
+    if (!qr || !qr.id) return false;
+    if (qr.referrerId && qr.referrerId === embajador.id) return true;
+    const qrCodeNorm = normalizeReferralCode(qr.referralCode);
+    return Boolean(qrCodeNorm && targetCodes.has(qrCodeNorm));
+  });
+
+  if (matchingQrs.length === 0) {
+    return { movedQrsCount: 0, matchedQrIds: [] };
+  }
+
+  const matchedIds = matchingQrs.map((qr) => qr.id);
+  const matchedIdSet = new Set(matchedIds);
+
+  if (USE_SUPABASE) {
+    for (const qr of matchingQrs) {
+      if (normalizedOwner) {
+        memoryQrAccountIds.set(qr.id, normalizedOwner);
+      } else {
+        memoryQrAccountIds.delete(qr.id);
+      }
+    }
+    saveSupabaseOverlay();
+    updateFallbackQrAccountIds(matchedIdSet, normalizedOwner);
+
+    for (const qr of matchingQrs) {
+      try {
+        await supabaseWriteWithOptionalColumns(
+          `qr_codes?id=eq.${encodeURIComponent(qr.id)}`,
+          'PATCH',
+          { Prefer: 'return=minimal' },
+          { account_id: normalizedOwner },
+          ['account_id']
+        );
+      } catch (err) {
+        if (!isMissingQrTableError(err)) throw err;
+      }
+    }
+    return { movedQrsCount: matchingQrs.length, matchedQrIds: matchedIds };
+  }
+
+  store.qrHistory = currentQrs.map((qr) =>
+    qr && matchedIdSet.has(qr.id) ? { ...qr, accountId: normalizedOwner } : qr
+  );
+  return { movedQrsCount: matchingQrs.length, matchedQrIds: matchedIds };
 }
 
 function getFallbackReferrers() {
@@ -2920,6 +3294,39 @@ function getActiveActivityLogs(store) {
   return getFallbackActivityLogs();
 }
 
+function isAiManagerHiddenLog(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  const role = String(entry.actorRole || entry.actor_role || '').trim().toLowerCase();
+  const actorId = String(entry.actorId || entry.actor_id || '').trim().toLowerCase();
+  const actorTag = String(entry.actorTag || entry.actor_tag || '').trim().toUpperCase();
+  return role === 'ai_manager' || actorId === 'ai-manager-juan' || actorTag === 'AI-MANAGER';
+}
+
+function filterActivityLogsForRole(logs, role) {
+  const list = Array.isArray(logs) ? logs : [];
+  const normalizedRole = role ? normalizeUserRole(role) : null;
+  if (normalizedRole === 'ai_manager') {
+    return list;
+  }
+  return list.filter((entry) => !isAiManagerHiddenLog(entry));
+}
+
+function isAiManagerHiddenSecurityAlert(alert) {
+  if (!alert || typeof alert !== 'object') return false;
+  const role = String(alert.actorRole || alert.actor_role || '').trim().toLowerCase();
+  const actorTag = String(alert.actorTag || alert.actor_tag || '').trim().toUpperCase();
+  return role === 'ai_manager' || actorTag === 'AI-MANAGER';
+}
+
+function filterSecurityAlertsForRole(alerts, role) {
+  const list = Array.isArray(alerts) ? alerts : [];
+  const normalizedRole = role ? normalizeUserRole(role) : null;
+  if (normalizedRole === 'ai_manager') {
+    return list;
+  }
+  return list.filter((alert) => !isAiManagerHiddenSecurityAlert(alert));
+}
+
 async function recordActivityLog(input, options = {}) {
   try {
     const entry = normalizeActivityLogRecord({
@@ -3044,6 +3451,10 @@ function mapSettingsRow(row) {
     referralPrizeRule: sanitizeReferralPrizeRule(
       row.referral_prize_rule ?? memorySettingsFallback.referralPrizeRule,
       defaults.referralPrizeRule || DEFAULT_REFERRAL_PRIZE_RULE
+    ),
+    processControls: sanitizeProcessControls(
+      row.process_controls ?? memoryProcessControls ?? memorySettingsFallback.processControls,
+      defaults.processControls || DEFAULT_PROCESS_CONTROLS
     ),
   };
 }
@@ -3417,7 +3828,7 @@ async function requireAdminRole(req, res, next) {
     if (!session) {
       return res.status(401).json({ error: 'Acceso no autorizado. Inicia sesión en el panel administrativo.' });
     }
-    if (session.role !== 'admin') {
+    if (!isElevatedAdminRole(session.role)) {
       await recordSecurityAlert({
         code: 'rbac_unauthorized_attempt',
         severity: 'high',
@@ -3442,6 +3853,49 @@ async function requireAdminRole(req, res, next) {
     return res.status(503).json({ error: 'No se pudo verificar los permisos administrativos.' });
   }
 }
+
+function createRequireAiManagerRole(
+  deniedMessage = 'Acceso denegado. Esta operación es exclusiva del AI Manager.'
+) {
+  return async function requireAiManagerRoleMiddleware(req, res, next) {
+    try {
+      const session = req.dsbSession || (await getAuthenticatedSession(req));
+      if (!session) {
+        return res.status(401).json({
+          error: 'Acceso no autorizado. Inicia sesión como AI Manager.',
+        });
+      }
+      if (session.role !== 'ai_manager') {
+        await recordSecurityAlert({
+          code: 'rbac_unauthorized_attempt',
+          severity: 'critical',
+          category: 'access',
+          title: 'Intento de acceso no autorizado a ruta exclusiva de AI Manager',
+          description: `${session.displayName || session.user} (${session.role}) intentó acceder a ${req.method} ${req.originalUrl || req.path} sin privilegios de AI Manager.`,
+          actorRole: session.role,
+          actorName: session.displayName || session.user,
+          actorTag: session.tag || null,
+          ipMasked: maskIp(getClientIp(req)),
+          metadata: {
+            method: req.method,
+            path: String(req.originalUrl || req.path || '').slice(0, 160),
+            reason: 'ai_manager_route_denied',
+          },
+        });
+        return res.status(403).json({ error: deniedMessage });
+      }
+      req.dsbSession = session;
+      return next();
+    } catch {
+      return res.status(503).json({ error: 'No se pudo verificar los permisos de AI Manager.' });
+    }
+  };
+}
+
+const requireAiManagerRole = createRequireAiManagerRole();
+const requireAiManagerForAdminCreds = createRequireAiManagerRole(
+  'Solo el AI Manager puede cambiar contraseñas o PINs de cuentas Administradoras.'
+);
 
 async function verifyMasterPasswordForMutation(req, res) {
   const bucketKey = getBucketKey(req, 'master');
@@ -3537,6 +3991,9 @@ async function verifyMasterPasswordForMutation(req, res) {
 }
 
 async function verifyCurrentAdminPasswordForMutation(req, res, candidateOverride) {
+  if (req.dsbSession?.role === 'ai_manager') {
+    return true;
+  }
   const bucketKey = getBucketKey(req, 'admin_action');
   const enforceRateLimit = shouldEnforceAuthRateLimit(req);
   const clientIp = getClientIp(req);
@@ -3680,9 +4137,15 @@ async function verifyAnyAdminPassword(candidate) {
 
 function filterVisibleAccountsForAdmin(accounts, session) {
   if (!Array.isArray(accounts)) return [];
+  if (session?.role === 'ai_manager') {
+    return accounts.filter(Boolean);
+  }
   const selfUserId = session && session.userId ? String(session.userId) : '';
   return accounts.filter(
-    (a) => a && (a.role !== 'admin' || (selfUserId && String(a.id) === selfUserId))
+    (a) =>
+      a &&
+      ((selfUserId && String(a.id) === selfUserId) ||
+        (a.role !== 'admin' && a.role !== 'ai_manager'))
   );
 }
 
@@ -3735,6 +4198,10 @@ function sanitizeStateForClient(store, sessionOrAuthed, roleArg, accounts = []) 
     store.settings?.referralPrizeRule,
     DEFAULT_REFERRAL_PRIZE_RULE
   );
+  const processControls = sanitizeProcessControls(
+    store.settings?.processControls,
+    DEFAULT_PROCESS_CONTROLS
+  );
 
   if (!isAuthed) {
     return {
@@ -3742,6 +4209,7 @@ function sanitizeStateForClient(store, sessionOrAuthed, roleArg, accounts = []) 
         ...store.settings,
         randomizeGifts: defaultRandomize,
         referralPrizeRule,
+        processControls,
         pinCode: '',
       },
       gifts: normalizedGifts,
@@ -3777,6 +4245,7 @@ function sanitizeStateForClient(store, sessionOrAuthed, roleArg, accounts = []) 
         defaultTicketAmount: 0,
         requirePin: false,
         pinCode: '',
+        processControls,
       },
       gifts: [],
       leads: pendingLeads,
@@ -3849,6 +4318,7 @@ function sanitizeStateForClient(store, sessionOrAuthed, roleArg, accounts = []) 
         requirePin: false,
         pinCode: '',
         referralPrizeRule,
+        processControls,
       },
       gifts: normalizedGifts.filter((g) => g.active),
       leads: ownLeads,
@@ -3860,11 +4330,20 @@ function sanitizeStateForClient(store, sessionOrAuthed, roleArg, accounts = []) 
     };
   }
 
+  const effectiveRole = role === 'ai_manager' ? 'ai_manager' : 'admin';
+  const rawSecurityAlerts = Array.isArray(store.securityAlerts)
+    ? store.securityAlerts
+        .map(normalizeSecurityAlertRecord)
+        .filter(Boolean)
+        .slice(0, MAX_SECURITY_ALERTS)
+    : [];
+
   return {
     settings: {
       ...store.settings,
       randomizeGifts: defaultRandomize,
       referralPrizeRule,
+      processControls,
       pinCode: '',
     },
     gifts: normalizedGifts,
@@ -3875,14 +4354,9 @@ function sanitizeStateForClient(store, sessionOrAuthed, roleArg, accounts = []) 
       sanitizeAccountForClient(a, normalizedReferrers)
     ),
     visitLog: normalizedVisitLog,
-    securityAlerts: Array.isArray(store.securityAlerts)
-      ? store.securityAlerts
-          .map(normalizeSecurityAlertRecord)
-          .filter(Boolean)
-          .slice(0, MAX_SECURITY_ALERTS)
-      : [],
-    activityLogs: getActiveActivityLogs(store),
-    role: 'admin',
+    securityAlerts: filterSecurityAlertsForRole(rawSecurityAlerts, effectiveRole),
+    activityLogs: filterActivityLogsForRole(getActiveActivityLogs(store), effectiveRole),
+    role: effectiveRole,
   };
 }
 
@@ -4255,7 +4729,7 @@ app.post('/api/auth/login', async (req, res) => {
 
   if (enforceRateLimit) clearAttempts(bucketKey);
 
-  // Non-admin roles (telemarketing / vendedor) complete login immediately without PIN (1FA)
+  // Non-admin operational roles (telemarketing / vendedor) complete login directly (1FA)
   if (account.role === 'telemarketing' || account.role === 'vendedor') {
     const sessionToken = signToken(
       {
@@ -4272,12 +4746,57 @@ app.post('/api/auth/login', async (req, res) => {
     return res.json({
       ok: true,
       requiresPin: false,
+      requiresSecurityQuestion: false,
       sessionToken,
       user: account.username,
       username: account.username,
       userId: account.id,
       displayName: account.displayName,
       role: account.role,
+      tag: account.tag,
+      avatarUrl: account.avatarUrl ?? null,
+    });
+  }
+
+  // AI Manager requires Step 2 Random Cognitive Security Question (2FA — stronger than PIN)
+  if (account.role === 'ai_manager') {
+    const pool = getSecurityQuestionsForAccount(account);
+    const chosenIndex = pool.length > 1 ? crypto.randomInt(0, pool.length) : 0;
+    const chosenQuestion = pool[chosenIndex];
+    const challengeJti = crypto.randomBytes(16).toString('hex');
+    const preAuthToken = signToken(
+      {
+        scope: 'ai_security_question',
+        userId: account.id,
+        user: account.username,
+        role: 'ai_manager',
+        questionId: chosenQuestion.id,
+        jti: challengeJti,
+        tokenVersion: account.tokenVersion || 1,
+        exp: Date.now() + 5 * 60 * 1000,
+      },
+      signingSecret
+    );
+
+    return res.json({
+      ok: true,
+      requiresPin: false,
+      requiresSecurityQuestion: true,
+      preAuthToken,
+      securityChallenge: {
+        questionId: chosenQuestion.id,
+        type: chosenQuestion.type,
+        typeLabel:
+          chosenQuestion.typeLabel ||
+          AI_SECURITY_QUESTION_TYPE_LABELS[chosenQuestion.type] ||
+          'Verificación Personal',
+        prompt: chosenQuestion.prompt,
+      },
+      user: account.username,
+      username: account.username,
+      userId: account.id,
+      displayName: account.displayName,
+      role: 'ai_manager',
       tag: account.tag,
       avatarUrl: account.avatarUrl ?? null,
     });
@@ -4444,6 +4963,167 @@ app.post('/api/auth/verify-pin', async (req, res) => {
   });
 });
 
+// Filter 2 (AI Manager): Random Cognitive Security Question Verification (single-use anti-replay, salted scrypt)
+app.post('/api/auth/verify-security-question', async (req, res) => {
+  const enforceRateLimit = shouldEnforceAuthRateLimit(req);
+  const bucketKey = getBucketKey(req, 'ai_security_question');
+  const clientIp = getClientIp(req);
+  if (enforceRateLimit) {
+    const status = checkRateLimit(bucketKey);
+    if (status.locked) {
+      await recordSecurityAlert(
+        {
+          code: 'auth_security_event',
+          severity: 'critical',
+          category: 'access',
+          title: 'Bóveda cognitiva AI Manager bloqueada por intentos fallidos',
+          description: `Intento de verificación de pregunta de seguridad rechazado por bloqueo activo (${status.retryAfterSeconds}s restantes).`,
+          actorRole: 'ai_manager',
+          ipMasked: maskIp(clientIp),
+          metadata: {
+            scope: 'ai_security_question',
+            locked: true,
+            retryAfterSeconds: status.retryAfterSeconds,
+          },
+        },
+        { dedupKey: `auth_lock:ai_sq:${clientIp}`, dedupWindowMs: 60 * 1000 }
+      );
+      return res.status(429).json({
+        error: `Verificación bloqueada por múltiples intentos fallidos (${status.retryAfterSeconds}s).`,
+        locked: true,
+        retryAfterSeconds: status.retryAfterSeconds,
+        remainingAttempts: 0,
+      });
+    }
+  }
+
+  const { preAuthToken, answer } = req.body || {};
+  const auth = ensureAuthStore();
+  const signingSecret = getSigningSecret(auth);
+  const preAuth = verifyToken(preAuthToken, signingSecret, 'ai_security_question');
+  if (!preAuth || !preAuth.user || !preAuth.questionId || !preAuth.jti) {
+    return res.status(401).json({
+      error: 'La sesión del primer filtro expiró. Vuelve a iniciar sesión con tu usuario y contraseña.',
+      expiredFirstFactor: true,
+    });
+  }
+
+  pruneConsumedChallengeJtis();
+  if (consumedAiChallengeJtis.has(preAuth.jti)) {
+    return res.status(401).json({
+      error: 'Este desafío de seguridad ya fue utilizado. Inicia sesión nuevamente.',
+      expiredFirstFactor: true,
+    });
+  }
+
+  const account =
+    (preAuth.userId && (await findAuthAccountById(preAuth.userId))) ||
+    (await findAuthAccountByUsername(preAuth.user));
+
+  if (!account || !account.active || account.role !== 'ai_manager') {
+    return res.status(401).json({
+      error: 'Cuenta de AI Manager no encontrada o desactivada.',
+      expiredFirstFactor: true,
+    });
+  }
+
+  if ((preAuth.tokenVersion ?? 1) !== (account.tokenVersion || 1)) {
+    return res.status(401).json({
+      error: 'La sesión del primer filtro expiró. Vuelve a iniciar sesión.',
+      expiredFirstFactor: true,
+    });
+  }
+
+  const pool = getSecurityQuestionsForAccount(account);
+  const targetQuestion = pool.find((q) => q.id === preAuth.questionId) || null;
+  if (!targetQuestion) {
+    return res.status(401).json({
+      error: 'La pregunta de seguridad ya no es válida. Vuelve a iniciar sesión.',
+      expiredFirstFactor: true,
+    });
+  }
+
+  const normalizedAnswer = normalizeSecurityAnswer(typeof answer === 'string' ? answer : '');
+  const answerMatches =
+    normalizedAnswer.length > 0 &&
+    (await verifyStoredSecret(normalizedAnswer, targetQuestion.answerHash, null));
+
+  if (!answerMatches) {
+    const fail = enforceRateLimit
+      ? recordFailedAttempt(bucketKey)
+      : { count: 1, locked: false, retryAfterSeconds: 0, remainingAttempts: 4 };
+    if (enforceRateLimit && (fail.locked || fail.count >= 3)) {
+      await recordSecurityAlert({
+        code: 'auth_security_event',
+        severity: 'critical',
+        category: 'access',
+        title: fail.locked
+          ? 'Bloqueo Anti-Hacking en pregunta de seguridad AI Manager'
+          : `Múltiples respuestas fallidas en pregunta de seguridad AI Manager (${fail.count})`,
+        description: fail.locked
+          ? `Verificación cognitiva bloqueada por 15 minutos tras ${MAX_AUTH_ATTEMPTS} respuestas fallidas en la cuenta ${account.username}.`
+          : `Se detectaron ${fail.count} respuestas fallidas consecutivas en la verificación cognitiva de ${account.username}.`,
+        actorRole: 'ai_manager',
+        actorName: account.displayName || account.username,
+        actorTag: account.tag || null,
+        ipMasked: maskIp(clientIp),
+        metadata: {
+          scope: 'ai_security_question',
+          username: account.username,
+          questionId: targetQuestion.id,
+          failedAttempts: fail.count,
+          locked: Boolean(fail.locked),
+        },
+      });
+    }
+    if (!IS_TESTING) await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 250)));
+    if (fail.locked) {
+      return res.status(429).json({
+        error: `Alerta Anti-Hacking: Verificación bloqueada por 15 minutos tras ${MAX_AUTH_ATTEMPTS} respuestas incorrectas.`,
+        locked: true,
+        retryAfterSeconds: fail.retryAfterSeconds,
+        remainingAttempts: 0,
+      });
+    }
+    return res.status(401).json({
+      error: `Respuesta incorrecta. Intentos restantes: ${fail.remainingAttempts}.`,
+      locked: false,
+      remainingAttempts: fail.remainingAttempts,
+    });
+  }
+
+  // Mark challenge single-use consumed (keep until token expiry + 1m)
+  consumedAiChallengeJtis.set(
+    preAuth.jti,
+    typeof preAuth.exp === 'number' ? preAuth.exp + 60 * 1000 : Date.now() + 6 * 60 * 1000
+  );
+  if (enforceRateLimit) clearAttempts(bucketKey);
+
+  const sessionToken = signToken(
+    {
+      scope: 'dsb_session',
+      userId: account.id,
+      user: account.username,
+      role: 'ai_manager',
+      tokenVersion: account.tokenVersion || 1,
+      exp: Date.now() + 8 * 60 * 60 * 1000,
+    },
+    signingSecret
+  );
+
+  return res.json({
+    ok: true,
+    sessionToken,
+    user: account.username,
+    username: account.username,
+    userId: account.id,
+    displayName: account.displayName,
+    role: 'ai_manager',
+    tag: account.tag,
+    avatarUrl: account.avatarUrl ?? null,
+  });
+});
+
 // Verify active DSB session (validates active status + live tokenVersion)
 app.get('/api/auth/session', async (req, res) => {
   const session = await getAuthenticatedSession(req);
@@ -4464,31 +5144,25 @@ app.get('/api/auth/session', async (req, res) => {
   });
 });
 
-// Update Admin Username, Password, or PIN — requires active Admin session + Master Key + Confirmation PIN + 2x newPassword
-app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
+// Update Admin / AI Manager Username, Password, or PIN — Opción A: exclusive to AI Manager (no securityKey/PIN check required)
+app.post('/api/auth/update-credentials', requireAiManagerForAdminCreds, async (req, res) => {
   const {
-    masterPassword,
-    confirmationPin,
+    targetAccountId,
     newUsername,
     newPassword,
     confirmNewPassword,
     newPin,
   } = req.body || {};
 
-  if (!(await verifyMasterPasswordForMutation(req, res))) return;
-
-  const pinCandidate = typeof confirmationPin === 'string' ? confirmationPin.trim() : '';
-  if (!verifyAdminPasswordChangePin(pinCandidate)) {
-    return res.status(403).json({
-      error: 'PIN de confirmación de administrador inválido o requerido.',
-    });
-  }
-
   return withStoreMutationLock(async () => {
     try {
       const accounts = await fetchAllAuthAccounts();
+      const cleanTargetId =
+        typeof targetAccountId === 'string' && targetAccountId.trim()
+          ? targetAccountId.trim()
+          : req.dsbSession.userId;
       const targetAdmin = accounts.find(
-        (a) => a.id === req.dsbSession.userId && a.role === 'admin'
+        (a) => a.id === cleanTargetId && isElevatedAdminRole(a.role)
       );
 
       if (!targetAdmin) {
@@ -4518,10 +5192,10 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
       if (typeof newPassword === 'string' && newPassword.length > 0) {
         if (newPassword.length < 8) {
           return res.status(400).json({
-            error: 'La nueva contraseña de administrador debe tener al menos 8 caracteres.',
+            error: 'La nueva contraseña debe tener al menos 8 caracteres.',
           });
         }
-        if (typeof confirmNewPassword !== 'string' || newPassword !== confirmNewPassword) {
+        if (confirmNewPassword !== undefined && confirmNewPassword !== newPassword) {
           return res.status(400).json({
             error: 'La confirmación de la nueva contraseña no coincide.',
           });
@@ -4532,7 +5206,11 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
         hasChange = true;
       }
 
-      if (typeof newPin === 'string' && newPin.trim().length > 0) {
+      if (newPin === null) {
+        nextAccount.pinSalt = null;
+        nextAccount.pinHash = null;
+        hasChange = true;
+      } else if (typeof newPin === 'string' && newPin.trim().length > 0) {
         const cleanNextPin = newPin.trim();
         if (!/^\d{4,12}$/.test(cleanNextPin)) {
           return res.status(400).json({
@@ -4556,12 +5234,12 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
 
       await persistUpdatedAuthAccount(nextAccount);
 
-      const credActor = buildActorFromSession(req.dsbSession, 'admin', 'Administrador');
+      const credActor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
       await recordActivityLog({
-        action: 'password_changed',
+        action: 'ai_manager_credentials_updated',
         category: 'accounts',
         ...credActor,
-        summary: `${credActor.actorName} actualizó las credenciales de administrador (@${nextAccount.username}).`,
+        summary: `${credActor.actorName} actualizó las credenciales de @${nextAccount.username}.`,
         fromState: null,
         toState: 'Credenciales actualizadas',
         targetType: 'account',
@@ -4571,30 +5249,34 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
           scope: 'update_credentials',
           changedUsername: Boolean(typeof newUsername === 'string' && newUsername.trim()),
           changedPassword: Boolean(typeof newPassword === 'string' && newPassword.length > 0),
-          changedPin: Boolean(typeof newPin === 'string' && newPin.trim().length > 0),
+          changedPin: newPin === null || Boolean(typeof newPin === 'string' && newPin.trim().length > 0),
         },
       });
 
-      const auth = ensureAuthStore();
-      const signingSecret = getSigningSecret(auth);
-      const refreshedToken = signToken(
-        {
-          scope: 'dsb_session',
-          userId: nextAccount.id,
-          user: nextAccount.username,
-          role: 'admin',
-          tokenVersion: nextAccount.tokenVersion,
-          exp: Date.now() + 8 * 60 * 60 * 1000,
-        },
-        signingSecret
-      );
+      const isSelf = String(nextAccount.id) === String(req.dsbSession.userId);
+      let refreshedToken;
+      if (isSelf) {
+        const auth = ensureAuthStore();
+        const signingSecret = getSigningSecret(auth);
+        refreshedToken = signToken(
+          {
+            scope: 'dsb_session',
+            userId: nextAccount.id,
+            user: nextAccount.username,
+            role: nextAccount.role,
+            tokenVersion: nextAccount.tokenVersion,
+            exp: Date.now() + 8 * 60 * 60 * 1000,
+          },
+          signingSecret
+        );
+      }
 
       return res.json({
         ok: true,
         username: nextAccount.username,
-        sessionToken: refreshedToken,
+        ...(refreshedToken ? { sessionToken: refreshedToken } : {}),
         tokenVersion: nextAccount.tokenVersion,
-        message: 'Credenciales de administrador actualizadas correctamente.',
+        message: 'Credenciales actualizadas correctamente.',
       });
     } catch (err) {
       logServerError('POST /api/auth/update-credentials', err);
@@ -4604,7 +5286,7 @@ app.post('/api/auth/update-credentials', requireAdminRole, async (req, res) => {
         });
       }
       return res.status(503).json({
-        error: 'No se pudieron actualizar las credenciales de administrador.',
+        error: 'No se pudieron actualizar las credenciales.',
       });
     }
   });
@@ -4635,6 +5317,28 @@ app.post('/api/accounts', requireAdminRole, async (req, res) => {
   const { username, displayName, role, tag, avatarUrl, password, confirmPassword, pin } =
     req.body || {};
   const cleanRole = typeof role === 'string' ? role.trim() : '';
+
+  if (cleanRole === 'ai_manager' && req.dsbSession.role !== 'ai_manager') {
+    await recordSecurityAlert({
+      code: 'rbac_unauthorized_attempt',
+      severity: 'critical',
+      category: 'access',
+      title: 'Intento bloqueado de crear cuenta AI Manager',
+      description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} (${req.dsbSession.role}) intentó crear una cuenta con rol "ai_manager".`,
+      actorRole: req.dsbSession.role,
+      actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
+      actorTag: req.dsbSession?.tag || null,
+      ipMasked: maskIp(getClientIp(req)),
+      metadata: {
+        reason: 'unauthorized_ai_manager_create_attempt',
+        method: req.method,
+        path: String(req.originalUrl || req.path || '').slice(0, 160),
+      },
+    });
+    return res.status(403).json({
+      error: 'Acceso denegado. No tienes permisos para crear cuentas de AI Manager.',
+    });
+  }
 
   if (!(await verifyCurrentAdminPasswordForMutation(req, res))) return;
 
@@ -4800,41 +5504,45 @@ app.patch('/api/accounts/:id', requireAdminRole, async (req, res) => {
 
   const { id } = req.params;
   const { displayName, tag, avatarUrl, active } = req.body || {};
+  const isAiManager = req.dsbSession.role === 'ai_manager';
 
-  // Strict self-only Admin isolation: reject attempts to modify another Admin account immediately
-  try {
-    const preCheckAccounts = await fetchAllAuthAccounts();
-    const preTarget = preCheckAccounts.find((a) => a.id === id);
-    if (
-      preTarget &&
-      preTarget.role === 'admin' &&
-      String(preTarget.id) !== String(req.dsbSession.userId)
-    ) {
-      await recordSecurityAlert({
-        code: 'rbac_unauthorized_attempt',
-        severity: 'critical',
-        category: 'access',
-        title: 'Intento bloqueado de modificar otra cuenta de administrador',
-        description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó modificar la cuenta de administrador "${preTarget.displayName || preTarget.username}" (@${preTarget.username}).`,
-        actorRole: 'admin',
-        actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
-        actorTag: req.dsbSession?.tag || null,
-        ipMasked: maskIp(getClientIp(req)),
-        metadata: {
-          reason: 'cross_admin_edit_attempt',
-          targetAccountId: preTarget.id,
-          targetUsername: preTarget.username,
-          method: req.method,
-          path: String(req.originalUrl || req.path || '').slice(0, 160),
-        },
-      });
-      return res.status(403).json({
-        error: 'Solo puedes modificar tu propia cuenta de Administrador.',
-      });
+  // Strict self-only Admin isolation: regular admin cannot modify ai_manager or another admin
+  if (!isAiManager) {
+    try {
+      const preCheckAccounts = await fetchAllAuthAccounts();
+      const preTarget = preCheckAccounts.find((a) => a.id === id);
+      if (
+        preTarget &&
+        isElevatedAdminRole(preTarget.role) &&
+        String(preTarget.id) !== String(req.dsbSession.userId)
+      ) {
+        await recordSecurityAlert({
+          code: 'rbac_unauthorized_attempt',
+          severity: 'critical',
+          category: 'access',
+          title: 'Intento bloqueado de modificar otra cuenta de administrador',
+          description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó modificar la cuenta "${preTarget.displayName || preTarget.username}" (@${preTarget.username}).`,
+          actorRole: req.dsbSession.role,
+          actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
+          actorTag: req.dsbSession?.tag || null,
+          ipMasked: maskIp(getClientIp(req)),
+          metadata: {
+            reason: 'cross_admin_edit_attempt',
+            targetAccountId: preTarget.id,
+            targetUsername: preTarget.username,
+            targetRole: preTarget.role,
+            method: req.method,
+            path: String(req.originalUrl || req.path || '').slice(0, 160),
+          },
+        });
+        return res.status(403).json({
+          error: 'Solo puedes modificar tu propia cuenta de Administrador.',
+        });
+      }
+    } catch (err) {
+      logServerError('PATCH /api/accounts/:id precheck', err);
+      return res.status(503).json({ error: 'No se pudo verificar la cuenta.' });
     }
-  } catch (err) {
-    logServerError('PATCH /api/accounts/:id precheck', err);
-    return res.status(503).json({ error: 'No se pudo verificar la cuenta.' });
   }
 
   if (!(await verifyCurrentAdminPasswordForMutation(req, res))) return;
@@ -4853,15 +5561,19 @@ app.patch('/api/accounts/:id', requireAdminRole, async (req, res) => {
       if (!current) {
         return res.status(404).json({ error: 'Cuenta no encontrada.' });
       }
-      if (current.role === 'admin' && String(current.id) !== String(req.dsbSession.userId)) {
+      if (
+        !isAiManager &&
+        isElevatedAdminRole(current.role) &&
+        String(current.id) !== String(req.dsbSession.userId)
+      ) {
         await recordSecurityAlert(
           {
             code: 'rbac_unauthorized_attempt',
             severity: 'critical',
             category: 'access',
             title: 'Intento bloqueado de modificar otra cuenta de administrador',
-            description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó modificar la cuenta de administrador "${current.displayName || current.username}" (@${current.username}).`,
-            actorRole: 'admin',
+            description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó modificar la cuenta "${current.displayName || current.username}" (@${current.username}).`,
+            actorRole: req.dsbSession.role,
             actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
             actorTag: req.dsbSession?.tag || null,
             ipMasked: maskIp(getClientIp(req)),
@@ -4869,6 +5581,7 @@ app.patch('/api/accounts/:id', requireAdminRole, async (req, res) => {
               reason: 'cross_admin_edit_attempt',
               targetAccountId: current.id,
               targetUsername: current.username,
+              targetRole: current.role,
               method: req.method,
               path: String(req.originalUrl || req.path || '').slice(0, 160),
             },
@@ -4919,11 +5632,16 @@ app.patch('/api/accounts/:id', requireAdminRole, async (req, res) => {
       }
 
       if (typeof active === 'boolean') {
-        if (!active && current.role === 'admin') {
+        if (!active && String(current.id) === String(req.dsbSession.userId)) {
+          return res.status(400).json({
+            error: 'No puedes desactivar tu propia cuenta.',
+          });
+        }
+        if (!active && !isAiManager && current.role === 'admin') {
           const otherActiveAdmins = accounts.filter(
             (a) => a.id !== current.id && a.role === 'admin' && a.active
           );
-          if (current.id === req.dsbSession.userId || otherActiveAdmins.length === 0) {
+          if (otherActiveAdmins.length === 0) {
             return res.status(400).json({
               error: 'No puedes desactivar tu propia cuenta ni la última cuenta de administrador.',
             });
@@ -5023,21 +5741,29 @@ app.patch('/api/accounts/:id', requireAdminRole, async (req, res) => {
 app.delete('/api/accounts/:id', requireAdminRole, async (req, res) => {
   applyNoStoreHeaders(res);
   const { id } = req.params;
+  const isAiManager = req.dsbSession.role === 'ai_manager';
 
-  // Reject any attempt to delete an Admin account (self or another Admin) with 403
+  // AI Manager can delete ANY account (including Admins), EXCEPT own ai_manager account (400)
+  // Regular admin cannot delete any Admin or AI Manager account (403 + critical alert)
   try {
     const preCheckAccounts = await fetchAllAuthAccounts();
     const preTarget = preCheckAccounts.find((a) => a.id === id);
-    if (preTarget && preTarget.role === 'admin') {
-      const isOtherAdmin = String(preTarget.id) !== String(req.dsbSession.userId);
-      if (isOtherAdmin) {
+    if (isAiManager) {
+      if (preTarget && String(preTarget.id) === String(req.dsbSession.userId)) {
+        return res.status(400).json({
+          error: 'No puedes eliminar tu propia cuenta de AI Manager.',
+        });
+      }
+    } else if (preTarget && isElevatedAdminRole(preTarget.role)) {
+      const isOtherElevated = String(preTarget.id) !== String(req.dsbSession.userId);
+      if (isOtherElevated) {
         await recordSecurityAlert({
           code: 'rbac_unauthorized_attempt',
           severity: 'critical',
           category: 'access',
           title: 'Intento bloqueado de eliminar otra cuenta de administrador',
-          description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó eliminar la cuenta de administrador "${preTarget.displayName || preTarget.username}" (@${preTarget.username}).`,
-          actorRole: 'admin',
+          description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó eliminar la cuenta "${preTarget.displayName || preTarget.username}" (@${preTarget.username}).`,
+          actorRole: req.dsbSession.role,
           actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
           actorTag: req.dsbSession?.tag || null,
           ipMasked: maskIp(getClientIp(req)),
@@ -5045,13 +5771,14 @@ app.delete('/api/accounts/:id', requireAdminRole, async (req, res) => {
             reason: 'cross_admin_delete_attempt',
             targetAccountId: preTarget.id,
             targetUsername: preTarget.username,
+            targetRole: preTarget.role,
             method: req.method,
             path: String(req.originalUrl || req.path || '').slice(0, 160),
           },
         });
       }
       return res.status(403).json({
-        error: isOtherAdmin
+        error: isOtherElevated
           ? 'No tienes permisos para eliminar otra cuenta de Administrador.'
           : 'No se pueden eliminar cuentas de Administrador.',
       });
@@ -5070,17 +5797,23 @@ app.delete('/api/accounts/:id', requireAdminRole, async (req, res) => {
       if (!target) {
         return res.status(404).json({ error: 'Cuenta no encontrada.' });
       }
-      if (target.role === 'admin') {
-        const isOtherAdmin = String(target.id) !== String(req.dsbSession.userId);
-        if (isOtherAdmin) {
+      if (isAiManager) {
+        if (String(target.id) === String(req.dsbSession.userId)) {
+          return res.status(400).json({
+            error: 'No puedes eliminar tu propia cuenta de AI Manager.',
+          });
+        }
+      } else if (isElevatedAdminRole(target.role)) {
+        const isOtherElevated = String(target.id) !== String(req.dsbSession.userId);
+        if (isOtherElevated) {
           await recordSecurityAlert(
             {
               code: 'rbac_unauthorized_attempt',
               severity: 'critical',
               category: 'access',
               title: 'Intento bloqueado de eliminar otra cuenta de administrador',
-              description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó eliminar la cuenta de administrador "${target.displayName || target.username}" (@${target.username}).`,
-              actorRole: 'admin',
+              description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó eliminar la cuenta "${target.displayName || target.username}" (@${target.username}).`,
+              actorRole: req.dsbSession.role,
               actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
               actorTag: req.dsbSession?.tag || null,
               ipMasked: maskIp(getClientIp(req)),
@@ -5088,6 +5821,7 @@ app.delete('/api/accounts/:id', requireAdminRole, async (req, res) => {
                 reason: 'cross_admin_delete_attempt',
                 targetAccountId: target.id,
                 targetUsername: target.username,
+                targetRole: target.role,
                 method: req.method,
                 path: String(req.originalUrl || req.path || '').slice(0, 160),
               },
@@ -5096,7 +5830,7 @@ app.delete('/api/accounts/:id', requireAdminRole, async (req, res) => {
           );
         }
         return res.status(403).json({
-          error: isOtherAdmin
+          error: isOtherElevated
             ? 'No tienes permisos para eliminar otra cuenta de Administrador.'
             : 'No se pueden eliminar cuentas de Administrador.',
         });
@@ -5147,13 +5881,14 @@ app.delete('/api/accounts/:id', requireAdminRole, async (req, res) => {
   });
 });
 
-// Change password for telemarketing / vendedor account ONLY (verifies target user's currentPassword + 2x newPassword)
+// Change password for telemarketing / vendedor account (regular admin requires target's currentPassword; ai_manager bypasses currentPassword and can update any role)
 app.post('/api/accounts/:id/password', requireAdminRole, async (req, res) => {
   applyNoStoreHeaders(res);
   const { id } = req.params;
   const { currentPassword, newPassword, confirmNewPassword } = req.body || {};
+  const isAiManager = req.dsbSession.role === 'ai_manager';
 
-  if (typeof currentPassword !== 'string' || !currentPassword) {
+  if (!isAiManager && (typeof currentPassword !== 'string' || !currentPassword)) {
     return res.status(400).json({ error: 'Debes ingresar la contraseña actual de la cuenta.' });
   }
   if (typeof newPassword !== 'string' || newPassword.length < 8) {
@@ -5170,22 +5905,45 @@ app.post('/api/accounts/:id/password', requireAdminRole, async (req, res) => {
       if (!target) {
         return res.status(404).json({ error: 'Cuenta no encontrada.' });
       }
-      if (target.role === 'admin') {
-        return res.status(400).json({
-          error:
-            'Las credenciales de administrador solo pueden cambiarse en el módulo de seguridad con llave maestra y PIN.',
+      if (!isAiManager && isElevatedAdminRole(target.role)) {
+        await recordSecurityAlert(
+          {
+            code: 'rbac_unauthorized_attempt',
+            severity: 'critical',
+            category: 'access',
+            title: 'Intento bloqueado de cambiar contraseña de cuenta privilegiada',
+            description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó cambiar la contraseña de "${target.displayName || target.username}" (@${target.username}, rol ${target.role}) vía /api/accounts/:id/password.`,
+            actorRole: req.dsbSession.role,
+            actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
+            actorTag: req.dsbSession?.tag || null,
+            ipMasked: maskIp(getClientIp(req)),
+            metadata: {
+              reason: 'unauthorized_admin_password_attempt',
+              targetAccountId: target.id,
+              targetUsername: target.username,
+              targetRole: target.role,
+              method: req.method,
+              path: String(req.originalUrl || req.path || '').slice(0, 160),
+            },
+          },
+          { store: USE_SUPABASE ? undefined : store }
+        );
+        return res.status(403).json({
+          error: 'Solo el AI Manager puede cambiar contraseñas o PINs de cuentas Administradoras.',
         });
       }
 
-      const currentMatches = await verifyStoredSecret(
-        currentPassword,
-        target.passwordHash,
-        target.passwordSalt
-      );
-      if (!currentMatches) {
-        return res.status(403).json({
-          error: 'La contraseña actual ingresada para esta cuenta es incorrecta.',
-        });
+      if (!isAiManager) {
+        const currentMatches = await verifyStoredSecret(
+          currentPassword,
+          target.passwordHash,
+          target.passwordSalt
+        );
+        if (!currentMatches) {
+          return res.status(403).json({
+            error: 'La contraseña actual ingresada para esta cuenta es incorrecta.',
+          });
+        }
       }
 
       const hashed = hashSecret(newPassword);
@@ -5231,144 +5989,19 @@ app.post('/api/accounts/:id/password', requireAdminRole, async (req, res) => {
   });
 });
 
-// Change password for OWN admin account ONLY (requires Admin session + Security Key + Confirmation PIN + 2x matching newPassword)
-app.post('/api/accounts/:id/admin-password', requireAdminRole, async (req, res) => {
+// Change password for Admin or AI Manager account — Opción A: ONLY AI Manager (no securityKey/PIN required)
+app.post('/api/accounts/:id/admin-password', requireAiManagerForAdminCreds, async (req, res) => {
   applyNoStoreHeaders(res);
   const { id } = req.params;
-  const { securityKey, masterPassword, confirmationPin, newPassword, confirmNewPassword } =
-    req.body || {};
-
-  // Strict self-only Admin isolation: reject before verifying keys or mutating
-  if (String(id) !== String(req.dsbSession.userId)) {
-    await recordSecurityAlert({
-      code: 'rbac_unauthorized_attempt',
-      severity: 'critical',
-      category: 'access',
-      title: 'Intento bloqueado de cambiar contraseña de otro administrador',
-      description: `${req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador'} intentó cambiar la contraseña de la cuenta de administrador "${String(id || '').slice(0, 80)}".`,
-      actorRole: 'admin',
-      actorName: req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador',
-      actorTag: req.dsbSession?.tag || null,
-      ipMasked: maskIp(getClientIp(req)),
-      metadata: {
-        reason: 'cross_admin_password_attempt',
-        targetAccountId: String(id || '').slice(0, 80),
-        method: req.method,
-        path: String(req.originalUrl || req.path || '').slice(0, 160),
-      },
-    });
-    return res.status(403).json({
-      error: 'Solo puedes cambiar la contraseña de tu propia cuenta de Administrador.',
-    });
-  }
-
-  const bucketKey = getBucketKey(req, 'admin_pw_change');
-  const enforceRateLimit = shouldEnforceAuthRateLimit(req);
+  const { newPassword, confirmNewPassword } = req.body || {};
   const clientIp = getClientIp(req);
-
-  if (enforceRateLimit) {
-    const status = checkRateLimit(bucketKey);
-    if (status.locked) {
-      await recordSecurityAlert(
-        {
-          code: 'auth_security_event',
-          severity: 'critical',
-          category: 'access',
-          title: 'Cambio de contraseña de administrador bloqueado por intentos fallidos',
-          description: `Se rechazó un intento bloqueado de cambio de contraseña de administrador en ${req.method} ${req.originalUrl || req.path} (${status.retryAfterSeconds}s restantes).`,
-          actorRole: req.dsbSession?.role || 'admin',
-          actorName: req.dsbSession?.displayName || req.dsbSession?.user || null,
-          actorTag: req.dsbSession?.tag || null,
-          ipMasked: maskIp(clientIp),
-          metadata: {
-            scope: 'admin_pw_change',
-            locked: true,
-            retryAfterSeconds: status.retryAfterSeconds,
-            targetAccountId: String(id || '').slice(0, 80),
-            path: String(req.originalUrl || req.path || '').slice(0, 120),
-          },
-        },
-        { dedupKey: `auth_lock:admin_pw_change:${clientIp}`, dedupWindowMs: 60 * 1000 }
-      );
-      return res.status(429).json({
-        error: `Cambio de contraseña bloqueado temporalmente (${status.retryAfterSeconds}s).`,
-        locked: true,
-        retryAfterSeconds: status.retryAfterSeconds,
-        remainingAttempts: 0,
-      });
-    }
-  }
-
-  const respondAuthFailure = async (failureKind, baseErrorMessage) => {
-    if (!enforceRateLimit) {
-      return res.status(401).json({
-        error: baseErrorMessage,
-        locked: false,
-        retryAfterSeconds: 0,
-        remainingAttempts: 4,
-      });
-    }
-    const fail = recordFailedAttempt(bucketKey);
-    if (fail.locked || fail.count >= 3) {
-      await recordSecurityAlert({
-        code: 'auth_security_event',
-        severity: 'critical',
-        category: 'access',
-        title: fail.locked
-          ? 'Bloqueo de seguridad por intentos fallidos al cambiar contraseña de administrador'
-          : `Múltiples intentos fallidos al cambiar contraseña de administrador (${fail.count})`,
-        description: fail.locked
-          ? `Se superó el límite de ${MAX_AUTH_ATTEMPTS} intentos fallidos (${failureKind}) al cambiar contraseña de administrador desde ${maskIp(clientIp) || 'IP desconocida'}. Acceso bloqueado por 15 minutos.`
-          : `Se registraron ${fail.count} intentos consecutivos fallidos (${failureKind}) en ${req.method} ${req.originalUrl || req.path}.`,
-        actorRole: req.dsbSession?.role || 'admin',
-        actorName: req.dsbSession?.displayName || req.dsbSession?.user || null,
-        actorTag: req.dsbSession?.tag || null,
-        ipMasked: maskIp(clientIp),
-        metadata: {
-          scope: 'admin_pw_change',
-          failureKind,
-          targetAccountId: String(id || '').slice(0, 80),
-          failedAttempts: fail.count,
-          locked: Boolean(fail.locked),
-          path: String(req.originalUrl || req.path || '').slice(0, 120),
-        },
-      });
-    }
-    if (!IS_TESTING) {
-      await new Promise((r) => setTimeout(r, Math.min(2000, fail.count * 300)));
-    }
-    return res.status(fail.locked ? 429 : 401).json({
-      error: fail.locked
-        ? `${baseErrorMessage} Bloqueo preventivo activado por 15 minutos.`
-        : baseErrorMessage,
-      locked: fail.locked,
-      retryAfterSeconds: fail.retryAfterSeconds,
-      remainingAttempts: fail.remainingAttempts,
-    });
-  };
-
-  const securityKeyCandidate =
-    typeof securityKey === 'string' && securityKey.length > 0
-      ? securityKey
-      : typeof masterPassword === 'string'
-        ? masterPassword
-        : '';
-
-  if (!verifyMasterKey(securityKeyCandidate)) {
-    return respondAuthFailure('security_key', 'Clave de seguridad incorrecta.');
-  }
-
-  const pinCandidate = typeof confirmationPin === 'string' ? confirmationPin.trim() : '';
-  if (!verifyAdminPasswordChangePin(pinCandidate)) {
-    return respondAuthFailure('confirmation_pin', 'PIN de confirmación incorrecto.');
-  }
 
   if (typeof newPassword !== 'string' || newPassword.length < 8) {
     return res.status(400).json({
       error: 'La nueva contraseña de administrador debe tener al menos 8 caracteres.',
     });
   }
-  if (typeof confirmNewPassword !== 'string' || confirmNewPassword !== newPassword) {
+  if (confirmNewPassword !== undefined && confirmNewPassword !== newPassword) {
     return res.status(400).json({
       error: 'La confirmación de la nueva contraseña no coincide.',
     });
@@ -5381,9 +6014,9 @@ app.post('/api/accounts/:id/admin-password', requireAdminRole, async (req, res) 
       if (!target) {
         return res.status(404).json({ error: 'Cuenta no encontrada.' });
       }
-      if (target.role !== 'admin') {
+      if (!isElevatedAdminRole(target.role)) {
         return res.status(400).json({
-          error: 'Esta operación solo está disponible para cuentas de administrador.',
+          error: 'Esta operación solo está disponible para cuentas de administrador o AI Manager.',
         });
       }
 
@@ -5399,17 +6032,17 @@ app.post('/api/accounts/:id/admin-password', requireAdminRole, async (req, res) 
       await persistUpdatedAuthAccount(nextAccount);
 
       const isSelf = target.id === req.dsbSession.userId;
-      const actorName = req.dsbSession?.displayName || req.dsbSession?.user || 'Administrador';
+      const actorName = req.dsbSession?.displayName || req.dsbSession?.user || 'Juan Orozco';
       await recordSecurityAlert(
         {
           code: 'admin_audit_event',
           severity: 'medium',
           category: 'audit',
-          title: 'Contraseña de administrador actualizada',
+          title: 'Contraseña de administrador actualizada por AI Manager',
           description: isSelf
-            ? `${actorName} actualizó su propia contraseña de administrador (${target.username}).`
-            : `${actorName} actualizó la contraseña del administrador ${target.displayName || target.username} (${target.username}).`,
-          actorRole: 'admin',
+            ? `${actorName} actualizó su propia contraseña (${target.username}).`
+            : `${actorName} actualizó la contraseña de ${target.displayName || target.username} (${target.username}).`,
+          actorRole: 'ai_manager',
           actorName,
           actorTag: req.dsbSession?.tag || null,
           ipMasked: maskIp(clientIp),
@@ -5424,14 +6057,14 @@ app.post('/api/accounts/:id/admin-password', requireAdminRole, async (req, res) 
         { store: USE_SUPABASE ? undefined : store }
       );
 
-      const admPwdActor = buildActorFromSession(req.dsbSession, 'admin', 'Administrador');
+      const admPwdActor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
       await recordActivityLog(
         {
-          action: 'password_changed',
+          action: 'ai_manager_credentials_updated',
           category: 'accounts',
           ...admPwdActor,
           summary: isSelf
-            ? `${actorName} actualizó su propia contraseña de administrador (@${target.username}).`
+            ? `${actorName} actualizó su propia contraseña (@${target.username}).`
             : `${actorName} actualizó la contraseña del administrador "${target.displayName || target.username}" (@${target.username}).`,
           fromState: null,
           toState: 'Contraseña actualizada',
@@ -5439,7 +6072,7 @@ app.post('/api/accounts/:id/admin-password', requireAdminRole, async (req, res) 
           targetId: target.id,
           targetLabel: `${target.displayName || target.username} (@${target.username})`,
           metadata: {
-            role: 'admin',
+            role: target.role,
             selfUpdate: isSelf,
             targetUsername: target.username,
           },
@@ -5456,15 +6089,13 @@ app.post('/api/accounts/:id/admin-password', requireAdminRole, async (req, res) 
             scope: 'dsb_session',
             userId: nextAccount.id,
             user: nextAccount.username,
-            role: 'admin',
+            role: nextAccount.role,
             tokenVersion: nextAccount.tokenVersion,
             exp: Date.now() + 8 * 60 * 60 * 1000,
           },
           signingSecret
         );
       }
-
-      clearAttempts(bucketKey);
 
       return res.json({
         ok: true,
@@ -5565,6 +6196,11 @@ async function handleMasterReset(req, res) {
             defaults.settings.referralPrizeRule,
             DEFAULT_REFERRAL_PRIZE_RULE
           );
+          const defaultProcessControls = sanitizeProcessControls(
+            defaults.settings.processControls,
+            DEFAULT_PROCESS_CONTROLS
+          );
+          memoryProcessControls = defaultProcessControls;
           Object.assign(memorySettingsFallback, {
             showcaseStyle: defaults.settings.showcaseStyle || 'luminous-gold',
             randomizeGifts:
@@ -5572,6 +6208,7 @@ async function handleMasterReset(req, res) {
                 ? defaults.settings.randomizeGifts
                 : true,
             referralPrizeRule: defaultPrizeRule,
+            processControls: defaultProcessControls,
           });
           await supabaseWriteWithOptionalColumns(
             'app_settings?id=eq.default',
@@ -5592,6 +6229,7 @@ async function handleMasterReset(req, res) {
                   ? defaults.settings.randomizeGifts
                   : true,
               referral_prize_rule: defaultPrizeRule,
+              process_controls: defaultProcessControls,
               updated_at: new Date().toISOString(),
             },
             [
@@ -5600,6 +6238,7 @@ async function handleMasterReset(req, res) {
               'showcase_style',
               'randomize_gifts',
               'referral_prize_rule',
+              'process_controls',
             ]
           );
         }
@@ -5737,7 +6376,8 @@ app.get('/api/state', async (req, res) => {
   try {
     const session = await getAuthenticatedSession(req);
     const store = await getActiveStore();
-    const accounts = session && session.role === 'admin' ? await fetchAllAuthAccounts() : [];
+    const accounts =
+      session && isElevatedAdminRole(session.role) ? await fetchAllAuthAccounts() : [];
     return res.json(sanitizeStateForClient(store, session, session?.role ?? null, accounts));
   } catch (err) {
     logServerError('GET /api/state', err);
@@ -5751,7 +6391,7 @@ app.post('/api/leads', async (req, res) => {
   const session = await getAuthenticatedSession(req);
   const clientIp = getClientIp(req);
   const ipMasked = maskIp(clientIp);
-  if (session && session.role !== 'admin' && session.role !== 'vendedor') {
+  if (session && !isElevatedAdminRole(session.role) && session.role !== 'vendedor') {
     await recordSecurityAlert({
       code: 'rbac_unauthorized_attempt',
       severity: 'high',
@@ -5860,6 +6500,17 @@ app.post('/api/leads', async (req, res) => {
       const isAuthed = Boolean(session);
       const actorRole = isAuthed ? session.role : 'public';
       const [store, accounts] = await Promise.all([getActiveStore(), fetchAllAuthAccounts()]);
+
+      if (!session) {
+        const controls = sanitizeProcessControls(store.settings?.processControls, DEFAULT_PROCESS_CONTROLS);
+        if (controls.publicFormEnabled === false) {
+          return res.status(503).json({
+            error: controls.publicFormDisabledMessage,
+            code: 'PUBLIC_FORM_DISABLED',
+          });
+        }
+      }
+
       const referrers = Array.isArray(store.referrers)
         ? store.referrers.map(normalizeReferrerRecord).filter(Boolean)
         : [];
@@ -6071,7 +6722,9 @@ app.post('/api/leads', async (req, res) => {
 
       const nowMs = Date.now();
       const nowIso = new Date(nowMs).toISOString();
-      const isManualAuthed = Boolean(session && (session.role === 'admin' || session.role === 'vendedor'));
+      const isManualAuthed = Boolean(
+        session && (isElevatedAdminRole(session.role) || session.role === 'vendedor')
+      );
       const manualCalledBy = isManualAuthed ? session.displayName || session.user : null;
 
       const newLead = {
@@ -6321,7 +6974,7 @@ app.post('/api/leads', async (req, res) => {
                 updatedStore,
                 session,
                 session.role,
-                session.role === 'admin' ? accounts : []
+                isElevatedAdminRole(session.role) ? accounts : []
               )
             : { ...sanitizeStateForClient(updatedStore, null, null), leads: [newLead] },
         });
@@ -6341,7 +6994,7 @@ app.post('/api/leads', async (req, res) => {
               store,
               session,
               session.role,
-              session.role === 'admin' ? accounts : []
+              isElevatedAdminRole(session.role) ? accounts : []
             )
           : { ...sanitizeStateForClient(store, null, null), leads: [newLead] },
       });
@@ -6376,7 +7029,7 @@ app.patch('/api/leads/:id', async (req, res) => {
     try {
       const [store, accounts] = await Promise.all([
         getActiveStore(),
-        role === 'admin' ? fetchAllAuthAccounts() : Promise.resolve([]),
+        isElevatedAdminRole(role) ? fetchAllAuthAccounts() : Promise.resolve([]),
       ]);
       const index = store.leads.findIndex((item) => item.id === id);
 
@@ -6936,7 +7589,8 @@ app.patch('/api/leads/:id', async (req, res) => {
             },
           };
         }
-      } else if (role === 'admin') {
+      } else if (isElevatedAdminRole(role)) {
+        const isAiManager = role === 'ai_manager';
         const currentCategory = current.category;
         const currentInvalidated = Boolean(current.promoCodeInvalidated);
         const currentLocked = Boolean(current.sellerLocked);
@@ -6965,6 +7619,7 @@ app.patch('/api/leads/:id', async (req, res) => {
           !explicitCalledFalse &&
           !isNotScheduledRevert;
         const requiresAdminPassword =
+          !isAiManager &&
           isExistingProtected &&
           !isForwardCategoryAdvance &&
           (isCategoryDowngradeOrRevert ||
@@ -7066,6 +7721,47 @@ app.patch('/api/leads/:id', async (req, res) => {
         if (typeof updates.claimCode === 'string' && updates.claimCode.trim()) {
           next.claimCode = updates.claimCode.trim();
         }
+        if (isAiManager) {
+          const allReferrers = Array.isArray(store.referrers)
+            ? store.referrers.map(normalizeReferrerRecord).filter(Boolean)
+            : [];
+          if (updates.referrerId !== undefined) {
+            if (updates.referrerId === null || String(updates.referrerId).trim() === '') {
+              next.referrerId = null;
+              next.referrerName = null;
+              if (updates.referralCode === undefined) {
+                next.referralCode = null;
+              }
+            } else {
+              const cleanRefId = String(updates.referrerId).trim();
+              const matchedRef = allReferrers.find((r) => r.id === cleanRefId) || null;
+              next.referrerId = matchedRef ? matchedRef.id : cleanRefId;
+              next.referrerName = matchedRef ? matchedRef.name : next.referrerName ?? null;
+              if (matchedRef && updates.referralCode === undefined) {
+                next.referralCode = matchedRef.code;
+              }
+            }
+          }
+          if (updates.referralCode !== undefined) {
+            if (updates.referralCode === null || String(updates.referralCode).trim() === '') {
+              next.referralCode = null;
+              if (updates.referrerId === undefined) {
+                next.referrerId = null;
+                next.referrerName = null;
+              }
+            } else {
+              const normRef =
+                normalizeReferralCode(updates.referralCode) ||
+                String(updates.referralCode).trim().toUpperCase().slice(0, 32);
+              next.referralCode = normRef;
+              if (updates.referrerId === undefined) {
+                const matchedRef = allReferrers.find((r) => r.code === normRef) || null;
+                next.referrerId = matchedRef ? matchedRef.id : null;
+                next.referrerName = matchedRef ? matchedRef.name : null;
+              }
+            }
+          }
+        }
 
         if (typeof updates.callOutcome === 'string' && VALID_CALL_OUTCOMES.has(updates.callOutcome)) {
           next.callOutcome = updates.callOutcome;
@@ -7124,9 +7820,13 @@ app.patch('/api/leads/:id', async (req, res) => {
           }
         }
 
-        if (
+        if (isAiManager && updates.sellerLocked === false && updates.category === undefined && updates.promoCodeInvalidated === undefined) {
+          next.sellerLocked = false;
+          next.sellerConfirmedAt = null;
+          next.sellerConfirmedBy = null;
+        } else if (
           updates.promoCodeInvalidated === false ||
-          updates.sellerLocked === false ||
+          (!isAiManager && updates.sellerLocked === false) ||
           updates.category === 'none'
         ) {
           next.category = 'none';
@@ -7138,16 +7838,30 @@ app.patch('/api/leads/:id', async (req, res) => {
           next.sellerConfirmedBy = null;
         } else if (typeof updates.category === 'string' && VALID_CATEGORIES.has(updates.category)) {
           if (updates.category !== 'none' && !next.called) {
-            return res
-              .status(400)
-              .json({ error: 'Debes marcar al prospecto como llamado antes de clasificarlo.' });
+            if (isAiManager) {
+              next.called = true;
+              next.callOutcome = 'scheduled';
+              next.calledAt = next.calledAt || nowIso;
+              next.calledBy = next.calledBy || session.user;
+              next.scheduledAt = next.scheduledAt || nowIso;
+            } else {
+              return res
+                .status(400)
+                .json({ error: 'Debes marcar al prospecto como llamado antes de clasificarlo.' });
+            }
           }
           next.category = updates.category;
           next.promoCodeInvalidated = true;
           next.promoCodeInvalidatedAt = current.promoCodeInvalidatedAt || nowIso;
-          next.sellerLocked = true;
-          next.sellerConfirmedAt = nowIso;
-          next.sellerConfirmedBy = session.user;
+          if (isAiManager && typeof updates.sellerLocked === 'boolean') {
+            next.sellerLocked = updates.sellerLocked;
+            next.sellerConfirmedAt = updates.sellerLocked ? nowIso : null;
+            next.sellerConfirmedBy = updates.sellerLocked ? session.user : null;
+          } else {
+            next.sellerLocked = true;
+            next.sellerConfirmedAt = nowIso;
+            next.sellerConfirmedBy = session.user;
+          }
           if (updates.category === 'orden') {
             const parsedAmount =
               typeof updates.orderAmount === 'number' &&
@@ -7159,14 +7873,23 @@ app.patch('/api/leads/:id', async (req, res) => {
           } else {
             next.orderAmount = null;
           }
-        } else if (updates.orderAmount !== undefined && next.category === 'orden') {
-          const parsedAmount = Number(updates.orderAmount);
-          if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
-            next.orderAmount = parsedAmount;
+        } else if (updates.orderAmount !== undefined && (next.category === 'orden' || isAiManager)) {
+          if (updates.orderAmount === null && isAiManager) {
+            next.orderAmount = null;
+          } else {
+            const parsedAmount = Number(updates.orderAmount);
+            if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
+              next.orderAmount = parsedAmount;
+            }
           }
         } else if (updates.promoCodeInvalidated === true) {
           next.promoCodeInvalidated = true;
           next.promoCodeInvalidatedAt = current.promoCodeInvalidatedAt || nowIso;
+        }
+        if (isAiManager && updates.sellerLocked === true && !next.sellerLocked) {
+          next.sellerLocked = true;
+          next.sellerConfirmedAt = nowIso;
+          next.sellerConfirmedBy = session.user;
         }
 
         if (requiresAdminPassword) {
@@ -7276,7 +7999,7 @@ app.patch('/api/leads/:id', async (req, res) => {
       }
 
       // Public + Admin fields (gift & qualification) — blocked for telemarketing/vendedor above
-      if (!role || role === 'admin') {
+      if (!role || isElevatedAdminRole(role)) {
         if (typeof updates.giftId === 'string') {
           next.giftId = updates.giftId;
         }
@@ -7292,7 +8015,7 @@ app.patch('/api/leads/:id', async (req, res) => {
       }
 
       const responseLead =
-        role === 'admin' || role === 'vendedor'
+        isElevatedAdminRole(role) || role === 'vendedor'
           ? next
           : role === 'telemarketing'
             ? {
@@ -7357,6 +8080,9 @@ app.patch('/api/leads/:id', async (req, res) => {
           seller_locked: Boolean(next.sellerLocked),
           seller_confirmed_at: next.sellerConfirmedAt ?? null,
           seller_confirmed_by: next.sellerConfirmedBy ?? null,
+          referral_code: next.referralCode ?? null,
+          referrer_id: next.referrerId ?? null,
+          referrer_name: next.referrerName ?? null,
         };
         await supabaseWriteWithOptionalColumns(
           `leads?id=eq.${encodeURIComponent(id)}`,
@@ -7372,6 +8098,9 @@ app.patch('/api/leads/:id', async (req, res) => {
             'seller_locked',
             'seller_confirmed_at',
             'seller_confirmed_by',
+            'referral_code',
+            'referrer_id',
+            'referrer_name',
           ]
         );
         for (const item of postMutationAlerts) {
@@ -7958,6 +8687,16 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
                 store.settings.referralPrizeRule,
                 DEFAULT_REFERRAL_PRIZE_RULE
               ),
+        processControls:
+          req.dsbSession.role === 'ai_manager' && updates.processControls !== undefined
+            ? sanitizeProcessControls(
+                updates.processControls,
+                store.settings.processControls || DEFAULT_PROCESS_CONTROLS
+              )
+            : sanitizeProcessControls(
+                store.settings.processControls,
+                DEFAULT_PROCESS_CONTROLS
+              ),
       };
 
       const settingsActivity = {
@@ -7981,6 +8720,10 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
         memorySettingsFallback.showcaseStyle = nextSettings.showcaseStyle;
         memorySettingsFallback.randomizeGifts = nextSettings.randomizeGifts;
         memorySettingsFallback.referralPrizeRule = nextSettings.referralPrizeRule;
+        if (req.dsbSession.role === 'ai_manager' && updates.processControls !== undefined) {
+          memoryProcessControls = nextSettings.processControls;
+          memorySettingsFallback.processControls = nextSettings.processControls;
+        }
         saveSupabaseOverlay();
         await supabaseWriteWithOptionalColumns(
           'app_settings?id=eq.default',
@@ -7997,14 +8740,16 @@ app.patch('/api/settings', requireAdminRole, async (req, res) => {
             showcase_style: nextSettings.showcaseStyle,
             randomize_gifts: nextSettings.randomizeGifts,
             referral_prize_rule: nextSettings.referralPrizeRule,
+            process_controls: nextSettings.processControls,
             updated_at: new Date().toISOString(),
           },
           [
-            'showcase_style',
-            'randomize_gifts',
             'gift_theme',
             'custom_box_color',
+            'showcase_style',
+            'randomize_gifts',
             'referral_prize_rule',
+            'process_controls',
           ]
         );
         await recordActivityLog(settingsActivity);
@@ -8084,7 +8829,7 @@ async function handleGetQrHistory(req, res) {
 
 async function handleCreateQrCode(req, res) {
   const session = req.dsbSession;
-  if (!session || (session.role !== 'admin' && session.role !== 'vendedor')) {
+  if (!session || (!isElevatedAdminRole(session.role) && session.role !== 'vendedor')) {
     if (session) {
       await recordSecurityAlert({
         code: 'rbac_unauthorized_attempt',
@@ -8314,7 +9059,7 @@ async function handleCreateQrCode(req, res) {
         },
       };
 
-      const stateAccounts = session.role === 'admin' ? accounts : [];
+      const stateAccounts = isElevatedAdminRole(session.role) ? accounts : [];
 
       if (USE_SUPABASE) {
         if (newQr.accountId) {
@@ -9142,7 +9887,7 @@ app.post('/api/embajadores', requireDsbAuth, async (req, res) => {
   const clientIp = getClientIp(req);
   const ipMasked = maskIp(clientIp);
 
-  if (!session || (session.role !== 'admin' && session.role !== 'vendedor')) {
+  if (!session || (!isElevatedAdminRole(session.role) && session.role !== 'vendedor')) {
     if (session) {
       await recordSecurityAlert({
         code: 'rbac_unauthorized_attempt',
@@ -9365,7 +10110,7 @@ app.post('/api/embajadores', requireDsbAuth, async (req, res) => {
         },
       };
 
-      const stateAccounts = session.role === 'admin' ? accounts : [];
+      const stateAccounts = isElevatedAdminRole(session.role) ? accounts : [];
 
       if (USE_SUPABASE) {
         cacheReferrerMeta(newEmbajador);
@@ -9479,7 +10224,7 @@ app.patch('/api/embajadores/:id', requireDsbAuth, async (req, res) => {
   const clientIp = getClientIp(req);
   const ipMasked = maskIp(clientIp);
 
-  if (!session || (session.role !== 'admin' && session.role !== 'vendedor')) {
+  if (!session || (!isElevatedAdminRole(session.role) && session.role !== 'vendedor')) {
     if (session) {
       await recordSecurityAlert({
         code: 'rbac_unauthorized_attempt',
@@ -9645,7 +10390,7 @@ app.patch('/api/embajadores/:id', requireDsbAuth, async (req, res) => {
       let nextOwnerId = current.ownerVendedorAccountId ?? null;
       let nextOwnerName = current.ownerVendedorName ?? null;
       let nextOwnerTag = current.ownerVendedorTag ?? null;
-      if (session.role === 'admin' && updates.ownerVendedorAccountId !== undefined) {
+      if (isElevatedAdminRole(session.role) && updates.ownerVendedorAccountId !== undefined) {
         const requestedOwner =
           typeof updates.ownerVendedorAccountId === 'string'
             ? updates.ownerVendedorAccountId.trim()
@@ -9718,7 +10463,9 @@ app.patch('/api/embajadores/:id', requireDsbAuth, async (req, res) => {
         },
       };
 
-      const stateAccounts = session.role === 'admin' ? accounts : [];
+      const stateAccounts = isElevatedAdminRole(session.role) ? accounts : [];
+      const ownerChanged =
+        (current.ownerVendedorAccountId ?? null) !== (nextEmbajador.ownerVendedorAccountId ?? null);
 
       if (USE_SUPABASE) {
         cacheReferrerMeta(nextEmbajador);
@@ -9757,6 +10504,12 @@ app.patch('/api/embajadores/:id', requireDsbAuth, async (req, res) => {
             saveFallbackReferrers(fallback);
           }
         }
+        if (ownerChanged) {
+          await syncEmbajadorQrsOwner(store, nextEmbajador, nextEmbajador.ownerVendedorAccountId ?? null, [
+            current.code,
+            nextEmbajador.code,
+          ]);
+        }
         await recordActivityLog(updateActivity);
         const updatedStore = await getActiveStore();
         return res.json({
@@ -9768,6 +10521,12 @@ app.patch('/api/embajadores/:id', requireDsbAuth, async (req, res) => {
 
       existing[index] = nextEmbajador;
       store.referrers = existing;
+      if (ownerChanged) {
+        await syncEmbajadorQrsOwner(store, nextEmbajador, nextEmbajador.ownerVendedorAccountId ?? null, [
+          current.code,
+          nextEmbajador.code,
+        ]);
+      }
       await recordActivityLog(updateActivity, { store });
       writeStore(store);
 
@@ -9928,12 +10687,55 @@ app.post('/api/security/client-tamper', requireDsbAuth, async (req, res) => {
 // Admin-Only Operational Activity Log Endpoint (/api/activity)
 // ----------------------------------------------------------------------------
 
-app.get('/api/activity', requireAdminRole, async (_req, res) => {
+app.get('/api/activity', requireAdminRole, async (req, res) => {
   applyNoStoreHeaders(res);
   try {
     const store = await getActiveStore();
-    const logs = getActiveActivityLogs(store);
-    return res.json({ ok: true, logs });
+    // Strict stealth isolation: filter by session role BEFORE applying any query params
+    let logs = filterActivityLogsForRole(getActiveActivityLogs(store), req.dsbSession?.role);
+
+    const actorRoleFilter =
+      typeof req.query?.actorRole === 'string' ? req.query.actorRole.trim().toLowerCase() : '';
+    if (actorRoleFilter && actorRoleFilter !== 'all') {
+      logs = logs.filter((entry) => String(entry.actorRole || '').toLowerCase() === actorRoleFilter);
+    }
+
+    const categoryFilter =
+      typeof req.query?.category === 'string' ? req.query.category.trim().toLowerCase() : '';
+    if (categoryFilter && categoryFilter !== 'all') {
+      logs = logs.filter((entry) => String(entry.category || '').toLowerCase() === categoryFilter);
+    }
+
+    const searchFilter =
+      typeof req.query?.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    if (searchFilter) {
+      logs = logs.filter((entry) => {
+        const haystack = [
+          entry.summary,
+          entry.actorName,
+          entry.actorUsername,
+          entry.actorTag,
+          entry.targetLabel,
+          entry.targetId,
+          entry.action,
+          entry.fromState,
+          entry.toState,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(searchFilter);
+      });
+    }
+
+    const total = logs.length;
+    const rawLimit = req.query?.limit !== undefined ? Number(req.query.limit) : NaN;
+    const pagedLogs =
+      Number.isFinite(rawLimit) && rawLimit > 0
+        ? logs.slice(0, Math.min(MAX_ACTIVITY_LOGS, Math.floor(rawLimit)))
+        : logs;
+
+    return res.json({ ok: true, logs: pagedLogs, entries: pagedLogs, total });
   } catch (err) {
     logServerError('GET /api/activity', err);
     return res.status(503).json({ error: 'No se pudo consultar el historial de actividad.' });
@@ -9944,16 +10746,17 @@ app.get('/api/activity', requireAdminRole, async (_req, res) => {
 // Admin-Only Security & Anti-Fraud Center Endpoints (/api/security/alerts)
 // ----------------------------------------------------------------------------
 
-app.get('/api/security/alerts', requireAdminRole, async (_req, res) => {
+app.get('/api/security/alerts', requireAdminRole, async (req, res) => {
   applyNoStoreHeaders(res);
   try {
     const store = await getActiveStore();
-    const alerts = Array.isArray(store.securityAlerts)
+    const rawAlerts = Array.isArray(store.securityAlerts)
       ? store.securityAlerts
           .map(normalizeSecurityAlertRecord)
           .filter(Boolean)
           .slice(0, MAX_SECURITY_ALERTS)
       : [];
+    const alerts = filterSecurityAlertsForRole(rawAlerts, req.dsbSession?.role);
     return res.json({ ok: true, alerts });
   } catch (err) {
     logServerError('GET /api/security/alerts', err);
@@ -9984,6 +10787,9 @@ app.patch('/api/security/alerts/:id', requireAdminRole, async (req, res) => {
       }
 
       const existing = currentAlerts[index];
+      if (req.dsbSession?.role !== 'ai_manager' && isAiManagerHiddenSecurityAlert(existing)) {
+        return res.status(404).json({ error: 'Alerta de seguridad no encontrada.' });
+      }
       const nowIso = new Date().toISOString();
       const reviewerName = req.dsbSession?.displayName || req.dsbSession?.user || 'Admin';
       const cleanedNote =
@@ -10173,6 +10979,922 @@ app.post('/api/security/alerts/bulk-status', requireAdminRole, async (req, res) 
   });
 });
 
+// ----------------------------------------------------------------------------
+// Exclusive AI Manager Control Endpoints (/api/ai-manager/*)
+// ----------------------------------------------------------------------------
+
+app.patch('/api/ai-manager/process-controls', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const updates = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+
+  return withStoreMutationLock(async () => {
+    try {
+      const [store, accounts] = await Promise.all([getActiveStore(), fetchAllAuthAccounts()]);
+      const prevControls = sanitizeProcessControls(
+        store.settings?.processControls,
+        DEFAULT_PROCESS_CONTROLS
+      );
+      const nextControls = sanitizeProcessControls(updates, prevControls);
+      const nowIso = new Date().toISOString();
+
+      const actor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
+      const changedKeys = Object.keys(DEFAULT_PROCESS_CONTROLS).filter(
+        (k) => prevControls[k] !== nextControls[k]
+      );
+      const activityEntry = {
+        action: 'process_controls_updated',
+        category: 'system',
+        ...actor,
+        summary: `${actor.actorName} actualizó los controles de proceso del sistema${changedKeys.length > 0 ? ` (${changedKeys.join(', ')})` : ''}.`,
+        fromState: prevControls.publicFormEnabled ? 'Formulario Activo' : 'Formulario Pausado',
+        toState: nextControls.publicFormEnabled ? 'Formulario Activo' : 'Formulario Pausado',
+        targetType: 'settings',
+        targetId: 'process_controls',
+        targetLabel: 'Controles de Proceso',
+        metadata: {
+          publicFormEnabled: nextControls.publicFormEnabled,
+          welcomeVideoEnabled: nextControls.welcomeVideoEnabled,
+          qualificationQuizEnabled: nextControls.qualificationQuizEnabled,
+          giftRevealEnabled: nextControls.giftRevealEnabled,
+          clientGuardEnabled: nextControls.clientGuardEnabled,
+        },
+      };
+
+      if (USE_SUPABASE) {
+        memoryProcessControls = nextControls;
+        memorySettingsFallback.processControls = nextControls;
+        saveSupabaseOverlay();
+        await supabaseWriteWithOptionalColumns(
+          'app_settings?id=eq.default',
+          'PATCH',
+          { Prefer: 'return=minimal' },
+          {
+            process_controls: nextControls,
+            updated_at: nowIso,
+          },
+          [
+            'gift_theme',
+            'custom_box_color',
+            'showcase_style',
+            'randomize_gifts',
+            'referral_prize_rule',
+            'process_controls',
+          ]
+        );
+        await recordActivityLog(activityEntry);
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(
+          updatedStore,
+          req.dsbSession,
+          'ai_manager',
+          accounts
+        );
+        return res.json({
+          ok: true,
+          processControls: nextControls,
+          state: sanitized,
+        });
+      }
+
+      store.settings = {
+        ...store.settings,
+        processControls: nextControls,
+      };
+      await recordActivityLog(activityEntry, { store });
+      writeStore(store);
+      const sanitized = sanitizeStateForClient(store, req.dsbSession, 'ai_manager', accounts);
+      return res.json({
+        ok: true,
+        processControls: nextControls,
+        state: sanitized,
+      });
+    } catch (err) {
+      logServerError('PATCH /api/ai-manager/process-controls', err);
+      return res.status(503).json({ error: 'No se pudieron actualizar los controles de proceso.' });
+    }
+  });
+});
+
+app.post('/api/ai-manager/accounts/:id/credentials', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { id } = req.params;
+  const { username, displayName, tag, newPassword, newPin, active, role } = req.body || {};
+
+  return withStoreMutationLock(async () => {
+    try {
+      const [accounts, store] = await Promise.all([fetchAllAuthAccounts(), getActiveStore()]);
+      const current = accounts.find((a) => a.id === id);
+      if (!current) {
+        return res.status(404).json({ error: 'Cuenta no encontrada.' });
+      }
+
+      const nextAccount = { ...current };
+      const previousTag = current.tag;
+      const isSelf = String(current.id) === String(req.dsbSession.userId);
+      let hasChange = false;
+
+      if (username !== undefined) {
+        const cleanUser = typeof username === 'string' ? username.trim() : '';
+        if (!USERNAME_RE.test(cleanUser) || cleanUser.toLowerCase() === 'admincripian') {
+          return res.status(400).json({
+            error: 'El usuario debe tener entre 3 y 40 caracteres válidos (letras, números, . _ -).',
+          });
+        }
+        const dup = accounts.some(
+          (a) => a.id !== current.id && a.username.toLowerCase() === cleanUser.toLowerCase()
+        );
+        if (dup) {
+          return res.status(409).json({ error: `El usuario "${cleanUser}" ya está en uso.` });
+        }
+        nextAccount.username = cleanUser;
+        hasChange = true;
+      }
+
+      if (displayName !== undefined) {
+        const cleanName = typeof displayName === 'string' ? displayName.trim() : '';
+        if (cleanName.length < 2) {
+          return res.status(400).json({ error: 'El nombre visible debe tener al menos 2 caracteres.' });
+        }
+        nextAccount.displayName = cleanName.slice(0, 100);
+        hasChange = true;
+      }
+
+      if (tag !== undefined) {
+        const normalizedTag = normalizeReferralCode(tag);
+        if (!normalizedTag) {
+          return res.status(400).json({
+            error: 'El tag debe tener entre 2 y 32 caracteres alfanuméricos o guiones.',
+          });
+        }
+        const dupAcc = accounts.some(
+          (a) => a.id !== current.id && a.tag.toUpperCase() === normalizedTag
+        );
+        if (dupAcc) {
+          return res.status(409).json({ error: `El tag "${normalizedTag}" ya está en uso por otra cuenta.` });
+        }
+        const dupRef = (store.referrers || []).some(
+          (r) => r.accountId !== current.id && r.code.toUpperCase() === normalizedTag
+        );
+        if (dupRef) {
+          return res.status(409).json({ error: `El tag "${normalizedTag}" ya está en uso por otro embajador.` });
+        }
+        nextAccount.tag = normalizedTag;
+        hasChange = true;
+      }
+
+      if (role !== undefined) {
+        const cleanRole = typeof role === 'string' ? role.trim() : '';
+        if (!VALID_ROLES.has(cleanRole)) {
+          return res.status(400).json({
+            error: 'Rol inválido. Valores permitidos: ai_manager, admin, telemarketing, vendedor.',
+          });
+        }
+        if (isSelf && cleanRole !== 'ai_manager') {
+          return res.status(400).json({
+            error: 'No puedes degradar tu propia cuenta de AI Manager.',
+          });
+        }
+        nextAccount.role = cleanRole;
+        if (!isElevatedAdminRole(cleanRole)) {
+          nextAccount.pinSalt = null;
+          nextAccount.pinHash = null;
+        }
+        hasChange = true;
+      }
+
+      if (typeof newPassword === 'string' && newPassword.length > 0) {
+        if (newPassword.length < 8) {
+          return res.status(400).json({
+            error: 'La nueva contraseña debe tener al menos 8 caracteres.',
+          });
+        }
+        const hashed = hashSecret(newPassword);
+        nextAccount.passwordSalt = hashed.salt;
+        nextAccount.passwordHash = USE_SUPABASE ? hashed.combined : hashed.hash;
+        hasChange = true;
+      }
+
+      if (newPin === null) {
+        nextAccount.pinSalt = null;
+        nextAccount.pinHash = null;
+        hasChange = true;
+      } else if (typeof newPin === 'string' && newPin.trim().length > 0) {
+        const cleanPin = newPin.trim();
+        if (!/^\d{4,12}$/.test(cleanPin)) {
+          return res.status(400).json({
+            error: 'El nuevo PIN debe contener entre 4 y 12 dígitos numéricos.',
+          });
+        }
+        const hashedPin = hashSecret(cleanPin);
+        nextAccount.pinSalt = hashedPin.salt;
+        nextAccount.pinHash = USE_SUPABASE ? hashedPin.combined : hashedPin.hash;
+        hasChange = true;
+      }
+
+      if (typeof active === 'boolean') {
+        if (isSelf && !active) {
+          return res.status(400).json({
+            error: 'No puedes desactivar tu propia cuenta de AI Manager.',
+          });
+        }
+        nextAccount.active = active;
+        hasChange = true;
+      }
+
+      if (!hasChange) {
+        return res.status(400).json({
+          error: 'Debes indicar al menos un campo a actualizar.',
+        });
+      }
+
+      nextAccount.tokenVersion = (current.tokenVersion || 1) + 1;
+      nextAccount.updatedAt = new Date().toISOString();
+
+      await persistUpdatedAuthAccount(nextAccount);
+
+      if (nextAccount.role === 'vendedor') {
+        await syncVendedorReferrer(store, nextAccount, { mode: 'upsert', previousTag });
+      }
+
+      const actor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
+      await recordActivityLog(
+        {
+          action: 'ai_manager_credentials_updated',
+          category: 'accounts',
+          ...actor,
+          summary: `${actor.actorName} actualizó credenciales/parámetros de "${nextAccount.displayName}" (@${nextAccount.username}, rol ${nextAccount.role}).`,
+          fromState: current.role,
+          toState: nextAccount.role,
+          targetType: 'account',
+          targetId: nextAccount.id,
+          targetLabel: `${nextAccount.displayName} (@${nextAccount.username})`,
+          metadata: {
+            changedUsername: username !== undefined,
+            changedPassword: Boolean(typeof newPassword === 'string' && newPassword.length > 0),
+            changedPin: newPin === null || Boolean(typeof newPin === 'string' && newPin.trim().length > 0),
+            active: Boolean(nextAccount.active),
+            tokenVersion: nextAccount.tokenVersion,
+          },
+        },
+        { store: USE_SUPABASE ? undefined : store }
+      );
+
+      let freshSessionToken;
+      if (isSelf) {
+        const auth = ensureAuthStore();
+        const signingSecret = getSigningSecret(auth);
+        freshSessionToken = signToken(
+          {
+            scope: 'dsb_session',
+            userId: nextAccount.id,
+            user: nextAccount.username,
+            role: nextAccount.role,
+            tokenVersion: nextAccount.tokenVersion,
+            exp: Date.now() + 8 * 60 * 60 * 1000,
+          },
+          signingSecret
+        );
+      }
+
+      const [updatedAccounts, updatedStore] = await Promise.all([
+        fetchAllAuthAccounts(),
+        USE_SUPABASE ? getActiveStore() : Promise.resolve(store),
+      ]);
+      const sanitizedState = sanitizeStateForClient(
+        updatedStore,
+        isSelf
+          ? {
+              ...req.dsbSession,
+              user: nextAccount.username,
+              username: nextAccount.username,
+              displayName: nextAccount.displayName,
+              tag: nextAccount.tag,
+              role: nextAccount.role,
+              tokenVersion: nextAccount.tokenVersion,
+            }
+          : req.dsbSession,
+        'ai_manager',
+        updatedAccounts
+      );
+
+      return res.json({
+        ok: true,
+        account: sanitizeAccountForClient(nextAccount, updatedStore.referrers),
+        state: sanitizedState,
+        ...(freshSessionToken ? { sessionToken: freshSessionToken } : {}),
+        message: 'Credenciales actualizadas correctamente por AI Manager.',
+      });
+    } catch (err) {
+      logServerError('POST /api/ai-manager/accounts/:id/credentials', err);
+      if (isUniqueViolationError(err)) {
+        return res.status(409).json({ error: 'El usuario o tag indicado ya está en uso.' });
+      }
+      return res.status(503).json({ error: 'No se pudieron actualizar las credenciales de la cuenta.' });
+    }
+  });
+});
+
+app.post('/api/ai-manager/accounts/:id/revoke-sessions', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { id } = req.params;
+
+  return withStoreMutationLock(async () => {
+    try {
+      const [accounts, store] = await Promise.all([fetchAllAuthAccounts(), getActiveStore()]);
+      const target = accounts.find((a) => a.id === id);
+      if (!target) {
+        return res.status(404).json({ error: 'Cuenta no encontrada.' });
+      }
+
+      const nextAccount = {
+        ...target,
+        tokenVersion: (target.tokenVersion || 1) + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      await persistUpdatedAuthAccount(nextAccount);
+
+      const actor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
+      await recordActivityLog(
+        {
+          action: 'sessions_revoked',
+          category: 'security',
+          ...actor,
+          summary: `${actor.actorName} revocó todas las sesiones activas de "${nextAccount.displayName}" (@${nextAccount.username}).`,
+          fromState: `v${target.tokenVersion || 1}`,
+          toState: `v${nextAccount.tokenVersion}`,
+          targetType: 'account',
+          targetId: nextAccount.id,
+          targetLabel: `${nextAccount.displayName} (@${nextAccount.username})`,
+          metadata: {
+            role: nextAccount.role,
+            tokenVersion: nextAccount.tokenVersion,
+          },
+        },
+        { store: USE_SUPABASE ? undefined : store }
+      );
+
+      const [updatedAccounts, updatedStore] = await Promise.all([
+        fetchAllAuthAccounts(),
+        USE_SUPABASE ? getActiveStore() : Promise.resolve(store),
+      ]);
+      const sanitizedState = sanitizeStateForClient(
+        updatedStore,
+        req.dsbSession,
+        'ai_manager',
+        updatedAccounts
+      );
+
+      return res.json({
+        ok: true,
+        account: sanitizeAccountForClient(nextAccount, updatedStore.referrers),
+        state: sanitizedState,
+        message: `Sesiones activas de @${nextAccount.username} revocadas inmediatamente.`,
+      });
+    } catch (err) {
+      logServerError('POST /api/ai-manager/accounts/:id/revoke-sessions', err);
+      return res.status(503).json({ error: 'No se pudieron revocar las sesiones activas.' });
+    }
+  });
+});
+
+app.get('/api/ai-manager/system-health', requireAiManagerRole, async (_req, res) => {
+  applyNoStoreHeaders(res);
+  try {
+    const [store, accounts] = await Promise.all([getActiveStore(), fetchAllAuthAccounts()]);
+    const referrers = Array.isArray(store.referrers) ? store.referrers : [];
+    const alerts = Array.isArray(store.securityAlerts) ? store.securityAlerts : [];
+    const gifts = Array.isArray(store.gifts) ? store.gifts : [];
+    const activityLogs = getActiveActivityLogs(store);
+    const processControls = sanitizeProcessControls(
+      store.settings?.processControls,
+      DEFAULT_PROCESS_CONTROLS
+    );
+
+    return res.json({
+      storage: USE_SUPABASE ? 'supabase' : 'local',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Math.round(process.uptime()),
+      counts: {
+        accounts: accounts.length,
+        aiManagers: accounts.filter((a) => a.role === 'ai_manager').length,
+        admins: accounts.filter((a) => a.role === 'admin').length,
+        vendedores: accounts.filter((a) => a.role === 'vendedor').length,
+        telemarketing: accounts.filter((a) => a.role === 'telemarketing').length,
+        leads: Array.isArray(store.leads) ? store.leads.length : 0,
+        referrers: referrers.length,
+        embajadores: referrers.filter((r) => r.partnerType === 'embajador').length,
+        qrCodes: Array.isArray(store.qrHistory) ? store.qrHistory.length : 0,
+        visits: Array.isArray(store.visitLog) ? store.visitLog.length : 0,
+        openAlerts: alerts.filter((a) => a.status === 'open').length,
+        totalAlerts: alerts.length,
+        activityLogs: activityLogs.length,
+        activeGifts: gifts.filter((g) => g.active).length,
+        totalGifts: gifts.length,
+      },
+      processControls,
+    });
+  } catch (err) {
+    logServerError('GET /api/ai-manager/system-health', err);
+    return res.status(503).json({ error: 'No se pudo generar el reporte de salud del sistema.' });
+  }
+});
+
+app.get('/api/ai-manager/export-backup', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  try {
+    const [store, accounts] = await Promise.all([getActiveStore(), fetchAllAuthAccounts()]);
+    const normalizedReferrers = Array.isArray(store.referrers)
+      ? store.referrers.map(normalizeReferrerRecord).filter(Boolean)
+      : [];
+    const processControls = sanitizeProcessControls(
+      store.settings?.processControls,
+      DEFAULT_PROCESS_CONTROLS
+    );
+
+    return res.json({
+      exportedAt: new Date().toISOString(),
+      storage: USE_SUPABASE ? 'supabase' : 'local',
+      exportedBy: req.dsbSession?.displayName || req.dsbSession?.user || 'Juan Orozco',
+      settings: {
+        ...store.settings,
+        pinCode: '',
+        processControls,
+      },
+      gifts: Array.isArray(store.gifts) ? store.gifts : [],
+      leads: Array.isArray(store.leads) ? store.leads : [],
+      referrers: normalizedReferrers,
+      qrHistory: Array.isArray(store.qrHistory) ? store.qrHistory : [],
+      visitLog: Array.isArray(store.visitLog) ? store.visitLog : [],
+      securityAlerts: Array.isArray(store.securityAlerts) ? store.securityAlerts : [],
+      activityLogs: getActiveActivityLogs(store),
+      accounts: accounts.map((a) => sanitizeAccountForClient(a, normalizedReferrers)),
+    });
+  } catch (err) {
+    logServerError('GET /api/ai-manager/export-backup', err);
+    return res.status(503).json({ error: 'No se pudo exportar el respaldo del sistema.' });
+  }
+});
+
+app.post('/api/ai-manager/alerts/purge', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const scope = req.body?.scope === 'all' ? 'all' : 'resolved';
+
+  return withStoreMutationLock(async () => {
+    try {
+      const [store, accounts] = await Promise.all([getActiveStore(), fetchAllAuthAccounts()]);
+      const currentAlerts = Array.isArray(store.securityAlerts)
+        ? store.securityAlerts.map(normalizeSecurityAlertRecord).filter(Boolean)
+        : [];
+      const nextAlerts =
+        scope === 'all' ? [] : currentAlerts.filter((item) => item.status === 'open');
+      const removed = Math.max(0, currentAlerts.length - nextAlerts.length);
+
+      const actor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
+      const purgeActivity = {
+        action: 'alerts_purged',
+        category: 'security',
+        ...actor,
+        summary:
+          scope === 'all'
+            ? `${actor.actorName} purgó todas las alertas de seguridad (${removed} eliminadas).`
+            : `${actor.actorName} purgó las alertas revisadas y descartadas (${removed} eliminadas).`,
+        fromState: `${currentAlerts.length} alertas`,
+        toState: `${nextAlerts.length} alertas`,
+        targetType: 'security',
+        targetId: null,
+        targetLabel: 'Purga de alertas',
+        metadata: {
+          scope,
+          removed,
+        },
+      };
+
+      if (USE_SUPABASE) {
+        saveFallbackSecurityAlerts(nextAlerts);
+        if (!securityAlertsTableMissing) {
+          try {
+            if (scope === 'all') {
+              await supabaseRest('security_alerts?id=not.is.null', { method: 'DELETE' });
+            } else {
+              await supabaseRest('security_alerts?status=in.(reviewed,dismissed)', {
+                method: 'DELETE',
+              });
+            }
+          } catch (err) {
+            if (isMissingSecurityAlertsTableError(err)) {
+              securityAlertsTableMissing = true;
+            } else {
+              throw err;
+            }
+          }
+        }
+        await recordActivityLog(purgeActivity);
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(
+          updatedStore,
+          req.dsbSession,
+          'ai_manager',
+          accounts
+        );
+        return res.json({
+          ok: true,
+          removed,
+          state: sanitized,
+        });
+      }
+
+      store.securityAlerts = nextAlerts.slice(0, MAX_SECURITY_ALERTS);
+      await recordActivityLog(purgeActivity, { store });
+      writeStore(store);
+      const sanitized = sanitizeStateForClient(store, req.dsbSession, 'ai_manager', accounts);
+      return res.json({
+        ok: true,
+        removed,
+        state: sanitized,
+      });
+    } catch (err) {
+      logServerError('POST /api/ai-manager/alerts/purge', err);
+      return res.status(503).json({ error: 'No se pudieron purgar las alertas de seguridad.' });
+    }
+  });
+});
+
+app.post('/api/ai-manager/activity/clear', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+
+  return withStoreMutationLock(async () => {
+    try {
+      const [store, accounts] = await Promise.all([getActiveStore(), fetchAllAuthAccounts()]);
+      const currentLogs = getActiveActivityLogs(store);
+      const removed = currentLogs.length;
+      const actor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
+      const clearEntry = {
+        action: 'activity_cleared',
+        category: 'system',
+        ...actor,
+        summary: `${actor.actorName} limpió el historial de actividad operativa (${removed} registro(s) archivados).`,
+        fromState: `${removed} registros`,
+        toState: 'Historial reiniciado',
+        targetType: 'system',
+        targetId: 'activity_logs',
+        targetLabel: 'Registro de Actividad',
+        metadata: {
+          removed,
+        },
+      };
+
+      if (USE_SUPABASE) {
+        saveFallbackActivityLogs([]);
+        if (!activityLogsTableMissing) {
+          try {
+            await supabaseRest('activity_logs?id=not.is.null', { method: 'DELETE' });
+          } catch (err) {
+            if (isMissingActivityLogsTableError(err)) {
+              activityLogsTableMissing = true;
+            } else {
+              throw err;
+            }
+          }
+        }
+        await recordActivityLog(clearEntry);
+        const updatedStore = await getActiveStore();
+        const sanitized = sanitizeStateForClient(
+          updatedStore,
+          req.dsbSession,
+          'ai_manager',
+          accounts
+        );
+        return res.json({
+          ok: true,
+          removed,
+          state: sanitized,
+        });
+      }
+
+      store.activityLogs = [];
+      await recordActivityLog(clearEntry, { store });
+      writeStore(store);
+      const sanitized = sanitizeStateForClient(store, req.dsbSession, 'ai_manager', accounts);
+      return res.json({
+        ok: true,
+        removed,
+        state: sanitized,
+      });
+    } catch (err) {
+      logServerError('POST /api/ai-manager/activity/clear', err);
+      return res.status(503).json({ error: 'No se pudo limpiar el historial de actividad.' });
+    }
+  });
+});
+
+app.post('/api/ai-manager/embajadores/:id/reassign', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const { id } = req.params;
+  const rawTarget = req.body?.targetVendedorAccountId;
+  if (rawTarget !== undefined && rawTarget !== null && typeof rawTarget !== 'string') {
+    return res.status(400).json({ error: 'La cuenta destino debe ser un Vendedor válido.' });
+  }
+  const targetVendedorAccountId =
+    typeof rawTarget === 'string' && rawTarget.trim() ? rawTarget.trim() : null;
+
+  return withStoreMutationLock(async () => {
+    try {
+      const [store, accounts] = await Promise.all([getActiveStore(), fetchAllAuthAccounts()]);
+      const existing = Array.isArray(store.referrers)
+        ? store.referrers.map(normalizeReferrerRecord).filter(Boolean)
+        : [];
+      const index = existing.findIndex((p) => p.id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Embajador no encontrado.' });
+      }
+
+      const current = existing[index];
+      if (current.partnerType !== 'embajador') {
+        return res.status(400).json({
+          error: 'Este registro pertenece a una cuenta de vendedor y no a un embajador.',
+        });
+      }
+
+      let newOwnerAccountId = null;
+      let newOwnerName = null;
+      let newOwnerTag = null;
+      if (targetVendedorAccountId) {
+        const targetAcc = accounts.find(
+          (a) => a && a.id === targetVendedorAccountId && a.role === 'vendedor'
+        );
+        if (!targetAcc) {
+          return res.status(400).json({
+            error: 'La cuenta destino debe ser un Vendedor válido.',
+          });
+        }
+        newOwnerAccountId = targetAcc.id;
+        newOwnerName = String(targetAcc.displayName || targetAcc.username || 'Vendedor')
+          .trim()
+          .slice(0, 120);
+        newOwnerTag = targetAcc.tag || null;
+      }
+
+      const previousOwnerAccountId = current.ownerVendedorAccountId ?? null;
+      const prevOwnerAcc = previousOwnerAccountId
+        ? accounts.find((a) => a && a.id === previousOwnerAccountId)
+        : null;
+      const previousOwnerName = previousOwnerAccountId
+        ? current.ownerVendedorName ||
+          prevOwnerAcc?.displayName ||
+          prevOwnerAcc?.username ||
+          'Vendedor anterior'
+        : 'Ciprian Directo';
+      const newOwnerDisplayName = newOwnerAccountId ? newOwnerName : 'Ciprian Directo';
+
+      const updatedEmbajador = normalizeReferrerRecord({
+        ...current,
+        accountId: null,
+        partnerType: 'embajador',
+        ownerVendedorAccountId: newOwnerAccountId,
+        ownerVendedorName: newOwnerAccountId ? newOwnerName : null,
+        ownerVendedorTag: newOwnerAccountId ? newOwnerTag : null,
+      });
+
+      const embCodeNorm = normalizeReferralCode(current.code);
+      const movedLeadsCount = (Array.isArray(store.leads) ? store.leads : []).filter((lead) => {
+        if (!lead) return false;
+        if (lead.referrerId && lead.referrerId === current.id) return true;
+        const leadCode = normalizeReferralCode(lead.referralCode);
+        return Boolean(embCodeNorm && leadCode && leadCode === embCodeNorm);
+      }).length;
+
+      const actor = buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco');
+
+      const buildReassignActivity = (movedQrsCount) => ({
+        action: 'embajador_reassigned',
+        category: 'qr',
+        ...actor,
+        actorRole: 'ai_manager',
+        summary: `${actor.actorName} reasignó al embajador "${updatedEmbajador.name}" (${updatedEmbajador.code}) de ${previousOwnerName} a ${newOwnerDisplayName} (${movedLeadsCount} prospecto(s), ${movedQrsCount} QR(s)).`,
+        fromState: previousOwnerName,
+        toState: newOwnerDisplayName,
+        targetType: 'referrer',
+        targetId: updatedEmbajador.id,
+        targetLabel: updatedEmbajador.name,
+        metadata: {
+          movedLeadsCount,
+          movedQrsCount,
+          previousOwnerAccountId,
+          newOwnerAccountId,
+        },
+      });
+
+      const buildResponseMessage = (movedQrsCount) =>
+        `Embajador "${updatedEmbajador.name}" reasignado de ${previousOwnerName} a ${newOwnerDisplayName} (${movedLeadsCount} prospecto${movedLeadsCount === 1 ? '' : 's'} y ${movedQrsCount} QR${movedQrsCount === 1 ? '' : 's'} transferidos).`;
+
+      if (USE_SUPABASE) {
+        cacheReferrerMeta(updatedEmbajador);
+        try {
+          await supabaseWriteWithOptionalColumns(
+            `referrers?id=eq.${encodeURIComponent(id)}`,
+            'PATCH',
+            { Prefer: 'return=minimal' },
+            {
+              partner_type: 'embajador',
+              owner_vendedor_account_id: updatedEmbajador.ownerVendedorAccountId ?? null,
+              owner_vendedor_name: updatedEmbajador.ownerVendedorName ?? null,
+              owner_vendedor_tag: updatedEmbajador.ownerVendedorTag ?? null,
+            },
+            REFERRER_OPTIONAL_COLUMNS
+          );
+        } catch (err) {
+          if (!isMissingReferrersTableError(err)) throw err;
+          const fallback = getFallbackReferrers();
+          const fbIdx = fallback.findIndex((p) => p.id === id);
+          if (fbIdx !== -1) {
+            fallback[fbIdx] = updatedEmbajador;
+            saveFallbackReferrers(fallback);
+          }
+        }
+
+        const { movedQrsCount } = await syncEmbajadorQrsOwner(
+          store,
+          updatedEmbajador,
+          newOwnerAccountId,
+          [current.code]
+        );
+
+        await recordActivityLog(buildReassignActivity(movedQrsCount));
+        const updatedStore = await getActiveStore();
+        return res.json({
+          ok: true,
+          referrer: updatedEmbajador,
+          movedLeadsCount,
+          movedQrsCount,
+          previousOwnerName,
+          newOwnerName: newOwnerDisplayName,
+          message: buildResponseMessage(movedQrsCount),
+          state: sanitizeStateForClient(updatedStore, req.dsbSession, 'ai_manager', accounts),
+        });
+      }
+
+      existing[index] = updatedEmbajador;
+      store.referrers = existing;
+      const { movedQrsCount } = await syncEmbajadorQrsOwner(
+        store,
+        updatedEmbajador,
+        newOwnerAccountId,
+        [current.code]
+      );
+      await recordActivityLog(buildReassignActivity(movedQrsCount), { store });
+      writeStore(store);
+
+      return res.json({
+        ok: true,
+        referrer: updatedEmbajador,
+        movedLeadsCount,
+        movedQrsCount,
+        previousOwnerName,
+        newOwnerName: newOwnerDisplayName,
+        message: buildResponseMessage(movedQrsCount),
+        state: sanitizeStateForClient(store, req.dsbSession, 'ai_manager', accounts),
+      });
+    } catch (err) {
+      logServerError('POST /api/ai-manager/embajadores/:id/reassign', err);
+      return res.status(503).json({ error: 'No se pudo reasignar el embajador.' });
+    }
+  });
+});
+
+// AI Manager exclusive: fetch own security questions metadata (ZERO hashes or plaintext answers)
+app.get('/api/ai-manager/security-questions', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  try {
+    const account = await findAuthAccountById(req.dsbSession.userId);
+    const questions = getSecurityQuestionsForAccount(account);
+    return res.json({
+      ok: true,
+      questions: sanitizeSecurityQuestionsForClient(questions),
+    });
+  } catch (err) {
+    logServerError('GET /api/ai-manager/security-questions', err);
+    return res.status(503).json({ error: 'No se pudieron cargar las preguntas de seguridad.' });
+  }
+});
+
+// AI Manager exclusive: update/rotate own security questions pool (minimum 3 questions, hashed with salted scrypt)
+app.put('/api/ai-manager/security-questions', requireAiManagerRole, async (req, res) => {
+  applyNoStoreHeaders(res);
+  const incoming = req.body?.questions;
+  if (!Array.isArray(incoming) || incoming.length < 3) {
+    return res.status(400).json({
+      error: 'Debes mantener al menos 3 preguntas de seguridad activas.',
+    });
+  }
+  if (incoming.length > 12) {
+    return res.status(400).json({
+      error: 'Puedes configurar un máximo de 12 preguntas de seguridad.',
+    });
+  }
+
+  return withStoreMutationLock(async () => {
+    try {
+      const account = await findAuthAccountById(req.dsbSession.userId);
+      if (!account || account.role !== 'ai_manager') {
+        return res.status(404).json({ error: 'Cuenta de AI Manager no encontrada.' });
+      }
+      const existingPool = getSecurityQuestionsForAccount(account);
+      const existingById = new Map(existingPool.map((q) => [q.id, q]));
+
+      const nextPool = [];
+      const seenIds = new Set();
+      for (let i = 0; i < incoming.length; i += 1) {
+        const raw = incoming[i] || {};
+        const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim().slice(0, 180) : '';
+        if (prompt.length < 4) {
+          return res.status(400).json({
+            error: `La pregunta #${i + 1} debe tener al menos 4 caracteres.`,
+          });
+        }
+        const rawType = typeof raw.type === 'string' ? raw.type.trim().toLowerCase() : 'custom';
+        const type = Object.prototype.hasOwnProperty.call(AI_SECURITY_QUESTION_TYPE_LABELS, rawType)
+          ? rawType
+          : 'custom';
+        const typeLabel =
+          typeof raw.typeLabel === 'string' && raw.typeLabel.trim()
+            ? raw.typeLabel.trim().slice(0, 48)
+            : AI_SECURITY_QUESTION_TYPE_LABELS[type];
+        let id =
+          typeof raw.id === 'string' && raw.id.trim()
+            ? raw.id.trim().slice(0, 64)
+            : generateId('sq');
+        while (seenIds.has(id)) {
+          id = `${id}-${i + 1}`;
+        }
+        seenIds.add(id);
+
+        const newPlainAnswer = typeof raw.answer === 'string' ? raw.answer.trim() : '';
+        let answerHash = '';
+        if (newPlainAnswer.length > 0) {
+          if (normalizeSecurityAnswer(newPlainAnswer).length < 2) {
+            return res.status(400).json({
+              error: `La respuesta de la pregunta #${i + 1} debe tener al menos 2 caracteres.`,
+            });
+          }
+          answerHash = hashSecurityAnswer(newPlainAnswer);
+        } else {
+          const prev = existingById.get(id);
+          if (!prev || !prev.answerHash) {
+            return res.status(400).json({
+              error: `Debes ingresar una respuesta para la pregunta nueva "${prompt}".`,
+            });
+          }
+          answerHash = prev.answerHash;
+        }
+        nextPool.push({ id, type, typeLabel, prompt, answerHash });
+      }
+
+      memoryAiSecurityQuestions.set(account.id, nextPool);
+      if (USE_SUPABASE) {
+        saveSupabaseOverlay();
+        await supabaseWriteWithOptionalColumns(
+          `dsb_auth?id=eq.${encodeURIComponent(account.id)}`,
+          'PATCH',
+          { Prefer: 'return=minimal' },
+          {
+            security_questions: nextPool,
+            updated_at: new Date().toISOString(),
+          },
+          ['security_questions', 'updated_at']
+        ).catch(() => {});
+      } else {
+        const authStore = ensureAuthStore();
+        const users = getUsersList(authStore).map((u) =>
+          u.id === account.id ? { ...u, securityQuestions: nextPool, updatedAt: new Date().toISOString() } : u
+        );
+        writeAuthStore({ ...authStore, users });
+      }
+
+      await recordActivityLog({
+        action: 'security_questions_updated',
+        category: 'security',
+        ...buildActorFromSession(req.dsbSession, 'ai_manager', 'Juan Orozco'),
+        summary: `${req.dsbSession.displayName || 'Juan Orozco'} actualizó su banco de preguntas de seguridad (${nextPool.length} preguntas activas).`,
+        fromState: `${existingPool.length} preguntas`,
+        toState: `${nextPool.length} preguntas`,
+        targetType: 'account',
+        targetId: account.id,
+        targetLabel: account.displayName || account.username,
+        metadata: { questionsCount: nextPool.length },
+      });
+
+      return res.json({
+        ok: true,
+        questions: sanitizeSecurityQuestionsForClient(nextPool),
+        message: `Banco de seguridad actualizado (${nextPool.length} preguntas activas).`,
+      });
+    } catch (err) {
+      logServerError('PUT /api/ai-manager/security-questions', err);
+      return res.status(503).json({ error: 'No se pudo actualizar el banco de preguntas de seguridad.' });
+    }
+  });
+});
+
 if (!IS_VERCEL && fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
   app.use(express.static(DIST_DIR));
   app.get('*', (_req, res) => {
@@ -10190,6 +11912,9 @@ if (!IS_VERCEL && !IS_TESTING) {
 export {
   DEFAULT_GIFT_PROBABILITY,
   DEFAULT_REFERRAL_PRIZE_RULE,
+  DEFAULT_PROCESS_CONTROLS,
+  isElevatedAdminRole,
+  sanitizeProcessControls,
   sanitizeGiftProbability,
   normalizeGiftRecord,
   normalizeLeadRecord,
@@ -10204,6 +11929,10 @@ export {
   mapActivityLogRow,
   recordActivityLog,
   getActiveActivityLogs,
+  isAiManagerHiddenLog,
+  filterActivityLogsForRole,
+  isAiManagerHiddenSecurityAlert,
+  filterSecurityAlertsForRole,
   resetFraudTrackers,
   sanitizeAvatarUrl,
   sanitizeEmojiInput,

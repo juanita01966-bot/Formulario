@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Play, Volume2, X } from 'lucide-react';
 
-export const WelcomeSceneGate: React.FC = () => {
+export interface WelcomeSceneGateProps {
+  enabled?: boolean;
+}
+
+export const WelcomeSceneGate: React.FC<WelcomeSceneGateProps> = ({ enabled = true }) => {
   const prefersReduced = useReducedMotion();
   // Opens once per full page load/reload; stays paused until user taps Play (with full audio)
   const [isOpen, setIsOpen] = useState(true);
@@ -19,12 +23,22 @@ export const WelcomeSceneGate: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
     const video = videoRef.current;
+    if (!enabled) {
+      if (video && !video.paused) {
+        video.pause();
+      }
+      return;
+    }
+    if (!isOpen) return;
     if (video) {
       enforceFullVolume(video);
     }
-  }, [enforceFullVolume, isOpen]);
+  }, [enabled, enforceFullVolume, isOpen]);
+
+  if (!enabled) {
+    return null;
+  }
 
   const handleVideoSurfaceClick = () => {
     const video = videoRef.current;

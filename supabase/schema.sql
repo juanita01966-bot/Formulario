@@ -22,6 +22,7 @@ create table if not exists public.app_settings (
   showcase_style text not null default 'luminous-gold',
   randomize_gifts boolean not null default true,
   referral_prize_rule jsonb not null default '{"prizeName":"Premio Embajador Royal Prestige","metric":"leads","targetCount":5,"maxWinners":3,"pointsPerLead":1,"pointsPerCita":3,"pointsPerDemo":5,"pointsPerOrden":10}'::jsonb,
+  process_controls jsonb not null default '{"publicFormEnabled":true,"publicFormDisabledTitle":"Experiencia en Pausa Temporal","publicFormDisabledMessage":"Estamos preparando una nueva edición del Show de Cocina Royal Prestige. Vuelve muy pronto.","welcomeVideoEnabled":true,"qualificationQuizEnabled":true,"giftRevealEnabled":true,"clientGuardEnabled":true}'::jsonb,
   updated_at timestamptz not null default now()
 );
 
@@ -30,6 +31,7 @@ alter table public.app_settings add column if not exists custom_box_color text n
 alter table public.app_settings add column if not exists showcase_style text not null default 'luminous-gold';
 alter table public.app_settings add column if not exists randomize_gifts boolean not null default true;
 alter table public.app_settings add column if not exists referral_prize_rule jsonb not null default '{"prizeName":"Premio Embajador Royal Prestige","metric":"leads","targetCount":5,"maxWinners":3,"pointsPerLead":1,"pointsPerCita":3,"pointsPerDemo":5,"pointsPerOrden":10}'::jsonb;
+alter table public.app_settings add column if not exists process_controls jsonb not null default '{"publicFormEnabled":true,"publicFormDisabledTitle":"Experiencia en Pausa Temporal","publicFormDisabledMessage":"Estamos preparando una nueva edición del Show de Cocina Royal Prestige. Vuelve muy pronto.","welcomeVideoEnabled":true,"qualificationQuizEnabled":true,"giftRevealEnabled":true,"clientGuardEnabled":true}'::jsonb;
 
 -- ----------------------------------------------------------------------------
 -- 2. Catálogo de obsequios exclusivos
@@ -143,6 +145,7 @@ create table if not exists public.dsb_auth (
   pre_auth_expires_at timestamptz,
   session_token text,
   session_expires_at timestamptz,
+  security_questions jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -155,6 +158,7 @@ alter table public.dsb_auth add column if not exists active boolean not null def
 alter table public.dsb_auth add column if not exists token_version int not null default 1;
 alter table public.dsb_auth add column if not exists pre_auth_token text;
 alter table public.dsb_auth add column if not exists pre_auth_expires_at timestamptz;
+alter table public.dsb_auth add column if not exists security_questions jsonb;
 alter table public.dsb_auth add column if not exists created_at timestamptz not null default now();
 alter table public.dsb_auth add column if not exists updated_at timestamptz not null default now();
 alter table public.dsb_auth alter column pin_hash drop not null;
@@ -915,7 +919,8 @@ insert into public.app_settings (
   custom_box_color,
   showcase_style,
   randomize_gifts,
-  referral_prize_rule
+  referral_prize_rule,
+  process_controls
 )
 values (
   'default',
@@ -929,7 +934,8 @@ values (
   '#C88A2B',
   'luminous-gold',
   true,
-  '{"prizeName":"Premio Embajador Royal Prestige","metric":"leads","targetCount":5,"maxWinners":3,"pointsPerLead":1,"pointsPerCita":3,"pointsPerDemo":5,"pointsPerOrden":10}'::jsonb
+  '{"prizeName":"Premio Embajador Royal Prestige","metric":"leads","targetCount":5,"maxWinners":3,"pointsPerLead":1,"pointsPerCita":3,"pointsPerDemo":5,"pointsPerOrden":10}'::jsonb,
+  '{"publicFormEnabled":true,"publicFormDisabledTitle":"Experiencia en Pausa Temporal","publicFormDisabledMessage":"Estamos preparando una nueva edición del Show de Cocina Royal Prestige. Vuelve muy pronto.","welcomeVideoEnabled":true,"qualificationQuizEnabled":true,"giftRevealEnabled":true,"clientGuardEnabled":true}'::jsonb
 )
 on conflict (id) do nothing;
 
@@ -1126,6 +1132,18 @@ values (
   'sha256$caller_pwd_s1$619d4db488230618b7cae0edb9032dbaa4e5817d3b1cc1cf079a76f07c5f3295',
   null,
   '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2',
+  1
+),
+(
+  'ai-manager-juan',
+  'JuanOrozco',
+  'Juan Orozco',
+  'ai_manager',
+  'AI-MANAGER',
+  true,
+  'sha256$aimgr_juan_s1$aaf24671f119321b092e5e2e2b17a86e4c79e7d6bc3f0dbc4742cdbc36b9b38e',
+  null,
+  '',
   1
 )
 on conflict do nothing;
