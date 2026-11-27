@@ -211,6 +211,106 @@ function loadLogoImage(): Promise<HTMLImageElement | null> {
   });
 }
 
+function loadCorsSafeAvatarImage(avatarUrl?: string | null): Promise<HTMLImageElement | null> {
+  const src = typeof avatarUrl === 'string' ? avatarUrl.trim() : '';
+  if (!src) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: HTMLImageElement | null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = window.setTimeout(() => finish(null), 4000);
+    const img = new Image();
+    if (/^https?:\/\//i.test(src)) {
+      img.crossOrigin = 'anonymous';
+    }
+    img.onload = () => {
+      if ((img.naturalWidth || img.width) > 0 && (img.naturalHeight || img.height) > 0) {
+        finish(img);
+      } else {
+        finish(null);
+      }
+    };
+    img.onerror = () => finish(null);
+    img.src = src;
+  });
+}
+
+function drawCircularPortrait(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  cx: number,
+  cy: number,
+  radius: number,
+  ringColor: string
+): void {
+  const srcW = img.naturalWidth || img.width || 1;
+  const srcH = img.naturalHeight || img.height || 1;
+  const side = Math.min(srcW, srcH);
+  const sx = (srcW - side) / 2;
+  const sy = (srcH - side) / 2;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, sx, sy, side, side, cx - radius, cy - radius, radius * 2, radius * 2);
+  ctx.restore();
+
+  ctx.save();
+  const grad = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+  grad.addColorStop(0, '#FDE68A');
+  grad.addColorStop(0.5, ringColor);
+  grad.addColorStop(1, '#8B550E');
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius + 1.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCircularEmojiMedallion(
+  ctx: CanvasRenderingContext2D,
+  emoji: string,
+  cx: number,
+  cy: number,
+  radius: number,
+  ringColor: string
+): void {
+  ctx.save();
+  const bgGrad = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+  bgGrad.addColorStop(0, '#3A2216');
+  bgGrad.addColorStop(0.5, '#26150D');
+  bgGrad.addColorStop(1, '#7A4610');
+  ctx.fillStyle = bgGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  const fontSize = Math.round(radius * 1.15);
+  ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, cx, cy + 2);
+  ctx.restore();
+
+  ctx.save();
+  const grad = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+  grad.addColorStop(0, '#FDE68A');
+  grad.addColorStop(0.5, ringColor);
+  grad.addColorStop(1, '#8B550E');
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius + 1.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function slugify(value: string): string {
   const base = value
     .normalize('NFD')
@@ -225,10 +325,14 @@ export interface RenderReferralQrCardOptions {
   partnerName: string;
   code: string;
   referralUrl: string;
+  avatarUrl?: string | null;
+  emoji?: string | null;
   styleId?: QrStyleId;
   subtitle?: string;
   brandTitle?: string;
 }
+
+export type DownloadReferralQrOptions = RenderReferralQrCardOptions;
 
 export async function renderReferralQrCardCanvas(
   options: RenderReferralQrCardOptions
@@ -237,7 +341,10 @@ export async function renderReferralQrCardCanvas(
   const matrix = createQrMatrix(options.referralUrl, { errorCorrectionLevel: 'H' });
   const size = matrix.modules.size;
   const totalUnits = size + QR_QUIET_MARGIN * 2;
-  const logoImg = await loadLogoImage();
+  const [logoImg, avatarImg] = await Promise.all([
+    loadLogoImage(),
+    loadCorsSafeAvatarImage(options.avatarUrl),
+  ]);
 
   const W = 1024;
   const H = 1280;
@@ -287,12 +394,31 @@ export async function renderReferralQrCardCanvas(
     102
   );
 
-  // Ambassador Name
+  // Ambassador Name (with optional circular gold-bordered portrait or emoji medallion beside name)
   const nameText = options.partnerName.trim() || 'Embajador Ciprian';
-  const nameFontSize = nameText.length > 26 ? 42 : nameText.length > 18 ? 48 : 54;
+  const nameFontSize = nameText.length > 26 ? 38 : nameText.length > 18 ? 44 : 50;
+  const cleanEmoji = typeof options.emoji === 'string' ? options.emoji.trim() : '';
   ctx.fillStyle = theme.fg;
   ctx.font = `700 ${nameFontSize}px Fraunces, Georgia, serif`;
-  ctx.fillText(nameText, W / 2, 162, W - 160);
+
+  if (avatarImg || cleanEmoji) {
+    const avatarR = 34;
+    const gap = 20;
+    const maxNameWidth = W - 260;
+    const measuredW = Math.min(ctx.measureText(nameText).width, maxNameWidth);
+    const totalRowW = avatarR * 2 + gap + measuredW;
+    const startX = (W - totalRowW) / 2;
+    if (avatarImg) {
+      drawCircularPortrait(ctx, avatarImg, startX + avatarR, 160, avatarR, theme.accent);
+    } else {
+      drawCircularEmojiMedallion(ctx, cleanEmoji, startX + avatarR, 160, avatarR, theme.accent);
+    }
+    ctx.textAlign = 'left';
+    ctx.fillText(nameText, startX + avatarR * 2 + gap, 162, maxNameWidth);
+    ctx.textAlign = 'center';
+  } else {
+    ctx.fillText(nameText, W / 2, 162, W - 160);
+  }
 
   // Decorative gold divider
   const divGrad = ctx.createLinearGradient(W / 2 - 220, 206, W / 2 + 220, 206);

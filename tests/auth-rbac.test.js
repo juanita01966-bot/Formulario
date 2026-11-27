@@ -1,26 +1,57 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-// Set test environment before importing the app
+const TEST_STORE_FILE = path.join(
+  os.tmpdir(),
+  `royal-auth-rbac-store-${process.pid}-${Date.now()}.json`
+);
+const TEST_AUTH_FILE = path.join(
+  os.tmpdir(),
+  `royal-auth-rbac-auth-${process.pid}-${Date.now()}.json`
+);
 process.env.NODE_ENV = 'test';
+process.env.TEST_STORE_PATH = TEST_STORE_FILE;
+process.env.TEST_AUTH_PATH = TEST_AUTH_FILE;
 
-const { default: app } = await import('../server/index.js');
+const MASTER_KEY = 'PoloNorte121966@';
+const ADMIN_CHANGE_PIN = '1532';
+const ADMIN_DEFAULT_PASSWORD = 'AdminMaster2026@';
+const ADMIN_UPDATED_PASSWORD = 'AdminNewPass2027@';
 
-describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
+const {
+  default: app,
+  supabaseWriteWithOptionalColumns,
+  encodeAccountLegacyMeta,
+  decodeAccountLegacyMeta,
+  hashSecret,
+  mapAuthAccountRow,
+  mapReferrerRow,
+  mapQrRow,
+  persistNewAuthAccount,
+  persistUpdatedAuthAccount,
+  persistDeletedAuthAccount,
+  memoryAccountMeta,
+  memoryAccountDbIds,
+  memoryReferrerAccountIds,
+  memoryQrAccountIds,
+} = await import('../server/index.js');
+
+describe('Multi-Role Auth, Accounts Security, Telemarketing/Vendedor Workflow & RBAC Suite', () => {
   let server;
   let baseUrl;
   let adminSessionToken;
-  let callerSessionToken;
-  let testLeadId;
-  const createdQrIds = new Set();
-  const createdGiftIds = new Set();
-  let initialShowcaseSettings = null;
+  let teleSessionToken;
+  let vendedor1Account;
+  let vendedor2Account;
+  let vendedor1Token;
+  let vendedor2Token;
 
   before(async () => {
     await new Promise((resolve) => {
@@ -30,1492 +61,604 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
         resolve();
       });
     });
-
-    // Create a sample lead with sensitive data for testing
-    const res = await fetch(`${baseUrl}/api/leads`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Cliente Prueba RBAC',
-        phone: '555-123-4567',
-        address: 'Calle Primavera 123',
-        acceptedTerms: true,
-        notes: 'Nota ultra confidencial del cliente',
-        qualification: { tier: 'alto', score: 95, creditProfile: 'excelente' },
-      }),
-    });
-    const data = await res.json();
-    testLeadId = data.lead.id;
   });
 
   after(async () => {
-    if (adminSessionToken) {
-      if (testLeadId) {
-        try {
-          await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${adminSessionToken}` },
-          });
-        } catch {
-          // Ignore cleanup failure
-        }
-      }
-      try {
-        const stateRes = await fetch(`${baseUrl}/api/state`, {
-          headers: { Authorization: `Bearer ${adminSessionToken}` },
-        });
-        if (stateRes.ok) {
-          const currentState = await stateRes.json();
-          const leftoverLeads = (currentState.leads || []).filter(
-            (l) =>
-              l.name === 'Cliente Prueba RBAC' ||
-              l.name === 'Lead para Borrar' ||
-              l.name === 'Lead Peso Ponderado' ||
-              l.name === 'Lead Invalidation Flow'
-          );
-          for (const lead of leftoverLeads) {
-            await fetch(`${baseUrl}/api/leads/${lead.id}`, {
-              method: 'DELETE',
-              headers: { Authorization: `Bearer ${adminSessionToken}` },
-            });
-          }
-        }
-      } catch {
-        // Ignore cleanup failure
-      }
-    }
-    if (createdQrIds.size > 0 && adminSessionToken) {
-      for (const qrId of createdQrIds) {
-        try {
-          await fetch(`${baseUrl}/api/qr/${qrId}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${adminSessionToken}` },
-          });
-        } catch {
-          // Ignore cleanup failure
-        }
-      }
-    }
-    if (createdGiftIds.size > 0 && adminSessionToken) {
-      for (const giftId of createdGiftIds) {
-        try {
-          await fetch(`${baseUrl}/api/gifts/${giftId}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${adminSessionToken}` },
-          });
-        } catch {
-          // Ignore cleanup failure
-        }
-      }
-    }
-    if (initialShowcaseSettings && adminSessionToken) {
-      try {
-        await fetch(`${baseUrl}/api/settings`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${adminSessionToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(initialShowcaseSettings),
-        });
-      } catch {
-        // Ignore cleanup failure
-      }
-    }
     if (server) {
       if (typeof server.closeAllConnections === 'function') {
         server.closeAllConnections();
       }
       await new Promise((resolve) => server.close(resolve));
     }
-  });
-
-  describe('1. Authentication Standardization (Admin & Caller)', () => {
-    test('AdminCiprian authenticates Step 1 with valid password (role: admin)', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'AdminCiprian',
-          password: 'AdminMaster2026@',
-        }),
-      });
-
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.strictEqual(data.ok, true);
-      assert.strictEqual(typeof data.preAuthToken, 'string');
-      assert.strictEqual(data.role, 'admin');
-      assert.strictEqual(data.username, 'AdminCiprian');
-    });
-
-    test('AdminCiprian completes Step 2 with valid PIN 1966', async () => {
-      // Step 1
-      const step1Res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'AdminCiprian',
-          password: 'AdminMaster2026@',
-        }),
-      });
-      const { preAuthToken } = await step1Res.json();
-
-      // Step 2
-      const step2Res = await fetch(`${baseUrl}/api/auth/verify-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preAuthToken,
-          pin: '1966',
-        }),
-      });
-
-      assert.strictEqual(step2Res.status, 200);
-      const step2Data = await step2Res.json();
-      assert.strictEqual(step2Data.ok, true);
-      assert.strictEqual(typeof step2Data.sessionToken, 'string');
-      assert.strictEqual(step2Data.role, 'admin');
-      assert.strictEqual(step2Data.username, 'AdminCiprian');
-
-      adminSessionToken = step2Data.sessionToken;
-    });
-
-    test('AdminCripian (alias/typo) is strictly REJECTED with 401 Unauthorized', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'AdminCripian',
-          password: 'AdminMaster2026@',
-        }),
-      });
-
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.strictEqual(data.ok, undefined);
-      assert.match(data.error, /inválidas/i);
-    });
-
-    test('admincripian (lowercase alias) is strictly REJECTED with 401 Unauthorized', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'admincripian',
-          password: 'AdminMaster2026@',
-        }),
-      });
-
-      assert.strictEqual(res.status, 401);
-    });
-
-    test('AdminCiprian with incorrect password is rejected (401)', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'AdminCiprian',
-          password: 'WrongPassword2026!',
-        }),
-      });
-
-      assert.strictEqual(res.status, 401);
-    });
-
-    test('AdminCiprian with incorrect PIN is rejected (401)', async () => {
-      const step1Res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'AdminCiprian',
-          password: 'AdminMaster2026@',
-        }),
-      });
-      const { preAuthToken } = await step1Res.json();
-
-      const step2Res = await fetch(`${baseUrl}/api/auth/verify-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preAuthToken,
-          pin: '0000',
-        }),
-      });
-
-      assert.strictEqual(step2Res.status, 401);
-      const data = await step2Res.json();
-      assert.match(data.error, /PIN incorrecto/i);
-    });
-
-    test('Caller authenticates Step 1 with valid password UsuCa2026@ (role: caller)', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'Caller',
-          password: 'UsuCa2026@',
-        }),
-      });
-
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.strictEqual(data.ok, true);
-      assert.strictEqual(typeof data.preAuthToken, 'string');
-      assert.strictEqual(data.role, 'caller');
-      assert.strictEqual(data.username, 'Caller');
-    });
-
-    test('Caller completes Step 2 with valid PIN 1532 (role: caller)', async () => {
-      const step1Res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'Caller',
-          password: 'UsuCa2026@',
-        }),
-      });
-      const { preAuthToken } = await step1Res.json();
-
-      const step2Res = await fetch(`${baseUrl}/api/auth/verify-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preAuthToken,
-          pin: '1532',
-        }),
-      });
-
-      assert.strictEqual(step2Res.status, 200);
-      const step2Data = await step2Res.json();
-      assert.strictEqual(step2Data.ok, true);
-      assert.strictEqual(typeof step2Data.sessionToken, 'string');
-      assert.strictEqual(step2Data.role, 'caller');
-      assert.strictEqual(step2Data.username, 'Caller');
-
-      callerSessionToken = step2Data.sessionToken;
-    });
-
-    test('Caller with incorrect password is rejected (401)', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'Caller',
-          password: 'BadPassword!',
-        }),
-      });
-
-      assert.strictEqual(res.status, 401);
-    });
-
-    test('Caller with incorrect PIN is rejected (401)', async () => {
-      const step1Res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: 'Caller',
-          password: 'UsuCa2026@',
-        }),
-      });
-      const { preAuthToken } = await step1Res.json();
-
-      const step2Res = await fetch(`${baseUrl}/api/auth/verify-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preAuthToken,
-          pin: '9999',
-        }),
-      });
-
-      assert.strictEqual(step2Res.status, 401);
-    });
-  });
-
-  describe('2. Session Verification & Roles', () => {
-    test('GET /api/auth/session with Admin token returns valid session with role: admin', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/session`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.strictEqual(data.authenticated, true);
-      assert.strictEqual(data.valid, true);
-      assert.strictEqual(data.role, 'admin');
-      assert.strictEqual(data.username, 'AdminCiprian');
-    });
-
-    test('GET /api/auth/session with Caller token returns valid session with role: caller', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/session`, {
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
-      });
-
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.strictEqual(data.authenticated, true);
-      assert.strictEqual(data.valid, true);
-      assert.strictEqual(data.role, 'caller');
-      assert.strictEqual(data.username, 'Caller');
-    });
-
-    test('GET /api/auth/session with invalid or forged token returns 401', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/session`, {
-        headers: { Authorization: 'Bearer invalid.forged.token' },
-      });
-
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.strictEqual(data.authenticated, false);
-    });
-
-    test('GET /api/auth/session without Authorization header returns 401', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/session`);
-
-      assert.strictEqual(res.status, 401);
-    });
-  });
-
-  describe('3. Zero-Trust RBAC Data Sanitization (GET /api/state)', () => {
-    test('Admin token receives full state with lead details, notes, qualification, and gifts', async () => {
-      const res = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-
-      assert.strictEqual(res.status, 200);
-      const state = await res.json();
-      assert.strictEqual(state.role, 'admin');
-      assert.ok(Array.isArray(state.leads));
-      assert.ok(state.leads.length > 0);
-
-      const lead = state.leads.find((l) => l.id === testLeadId) || state.leads[0];
-      assert.ok(lead);
-      // Admin sees sensitive fields
-      assert.ok('notes' in lead);
-      assert.ok('category' in lead);
-      assert.ok('called' in lead);
-      assert.ok('claimCode' in lead);
-      assert.ok(Array.isArray(state.gifts));
-      assert.ok(state.gifts.length > 0);
-    });
-
-    test('Caller token receives ONLY id, name, phone, address for each lead (all other fields stripped)', async () => {
-      const res = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
-      });
-
-      assert.strictEqual(res.status, 200);
-      const state = await res.json();
-      assert.strictEqual(state.role, 'caller');
-      assert.ok(Array.isArray(state.leads));
-      assert.ok(state.leads.length > 0);
-
-      for (const lead of state.leads) {
-        const keys = Object.keys(lead).sort();
-        const allowedKeys = ['address', 'id', 'name', 'phone'];
-
-        // Every key in lead must be in allowedKeys
-        for (const k of keys) {
-          assert.ok(
-            allowedKeys.includes(k),
-            `Lead contains forbidden sensitive key "${k}" for caller role`
-          );
-        }
-
-        // Explicitly verify critical sensitive fields are completely absent
-        assert.strictEqual(lead.notes, undefined, 'Caller must not receive notes');
-        assert.strictEqual(lead.qualification, undefined, 'Caller must not receive qualification');
-        assert.strictEqual(lead.category, undefined, 'Caller must not receive category');
-        assert.strictEqual(lead.called, undefined, 'Caller must not receive called status');
-        assert.strictEqual(lead.calledAt, undefined, 'Caller must not receive calledAt');
-        assert.strictEqual(lead.orderAmount, undefined, 'Caller must not receive orderAmount');
-        assert.strictEqual(lead.claimCode, undefined, 'Caller must not receive claimCode');
-        assert.strictEqual(lead.giftId, undefined, 'Caller must not receive giftId');
-        assert.strictEqual(lead.giftName, undefined, 'Caller must not receive giftName');
-        assert.strictEqual(lead.createdAt, undefined, 'Caller must not receive createdAt');
-        assert.strictEqual(lead.acceptedTerms, undefined, 'Caller must not receive acceptedTerms');
+    for (const file of [TEST_STORE_FILE, TEST_AUTH_FILE]) {
+      try {
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      } catch {
+        // Ignore cleanup failure
       }
+    }
+  });
 
-      // Caller state must not expose gifts catalog
-      assert.deepStrictEqual(state.gifts, []);
+  describe('1. Authentication: Admin 2FA vs Telemarketing/Vendedor 1FA', () => {
+    test('AdminCiprian requires 2FA (password + PIN 1966) and AdminCripian is strictly rejected', async () => {
+      const badAlias = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminCripian', password: 'AdminMaster2026@' }),
+      });
+      assert.strictEqual(badAlias.status, 401);
+
+      const step1 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminCiprian', password: 'AdminMaster2026@' }),
+      });
+      assert.strictEqual(step1.status, 200);
+      const d1 = await step1.json();
+      assert.strictEqual(d1.ok, true);
+      assert.strictEqual(d1.requiresPin, true);
+      assert.strictEqual(d1.role, 'admin');
+      assert.strictEqual(d1.tag, 'ADMIN-CIPRIAN');
+      assert.strictEqual(typeof d1.preAuthToken, 'string');
+      assert.strictEqual(d1.sessionToken, undefined);
+
+      const badPin = await fetch(`${baseUrl}/api/auth/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: d1.preAuthToken, pin: '0000' }),
+      });
+      assert.strictEqual(badPin.status, 401);
+
+      const step2 = await fetch(`${baseUrl}/api/auth/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: d1.preAuthToken, pin: '1966' }),
+      });
+      assert.strictEqual(step2.status, 200);
+      const d2 = await step2.json();
+      assert.strictEqual(d2.ok, true);
+      assert.strictEqual(d2.role, 'admin');
+      assert.strictEqual(d2.username, 'AdminCiprian');
+      assert.strictEqual(typeof d2.sessionToken, 'string');
+      adminSessionToken = d2.sessionToken;
     });
 
-    test('Unauthenticated GET /api/state receives empty leads array', async () => {
-      const res = await fetch(`${baseUrl}/api/state`);
-
+    test('Telemarketing logs in directly with 1FA (NO PIN required)', async () => {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'Telemarketing', password: 'UsuCa2026@' }),
+      });
       assert.strictEqual(res.status, 200);
-      const state = await res.json();
-      assert.deepStrictEqual(state.leads, []);
+      const data = await res.json();
+      assert.strictEqual(data.ok, true);
+      assert.strictEqual(data.requiresPin, false);
+      assert.strictEqual(data.role, 'telemarketing');
+      assert.strictEqual(data.tag, 'TELEMARKETING');
+      assert.strictEqual(typeof data.sessionToken, 'string');
+      assert.strictEqual(data.preAuthToken, undefined);
+      teleSessionToken = data.sessionToken;
+
+      const sessRes = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${teleSessionToken}` },
+      });
+      assert.strictEqual(sessRes.status, 200);
+      const sess = await sessRes.json();
+      assert.strictEqual(sess.ok, true);
+      assert.strictEqual(sess.authenticated, true);
+      assert.strictEqual(sess.role, 'telemarketing');
+      assert.strictEqual(sess.tag, 'TELEMARKETING');
     });
   });
 
-  describe('4. Administrative Route Protection (Caller 403 Forbidden)', () => {
-    test('DELETE /api/leads/:id with Caller token is REJECTED with HTTP 403 Forbidden', async () => {
-      const res = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
+  describe('2. Accounts Management, Password Change Rules & Token Revocation', () => {
+    test('Admin creates Vendedor accounts with own admin password; non-admin gets 403; wrong/missing password gets 401; duplicates get 409', async () => {
+      // Telemarketing rejected on /api/accounts
+      const teleGet = await fetch(`${baseUrl}/api/accounts`, {
+        headers: { Authorization: `Bearer ${teleSessionToken}` },
       });
+      assert.strictEqual(teleGet.status, 403);
 
-      assert.strictEqual(res.status, 403);
-      const data = await res.json();
-      assert.match(data.error, /Acceso denegado|administrativos/i);
-    });
-
-    test('PATCH /api/leads/:id with Caller token touching admin fields is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          called: true,
-          category: 'cita',
-          notes: 'Intento de edicion por caller',
-        }),
-      });
-
-      assert.strictEqual(res.status, 403);
-      const data = await res.json();
-      assert.match(data.error, /Acceso denegado|administrativos/i);
-    });
-
-    test('PATCH /api/leads/:id with Caller token updating qualification is strictly REJECTED with HTTP 403 Forbidden', async () => {
-      const res = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          qualification: { test: true, bypassed: true, rating: 100 },
-        }),
-      });
-
-      assert.strictEqual(res.status, 403);
-      const data = await res.json();
-      assert.match(data.error, /Acceso denegado|administrativos/i);
-    });
-
-    test('PATCH /api/leads/:id with Caller token updating giftId is strictly REJECTED with HTTP 403 Forbidden', async () => {
-      const res = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          giftId: 'some-gift',
-          giftName: 'Regalo Modificado por Caller',
-        }),
-      });
-
-      assert.strictEqual(res.status, 403);
-      const data = await res.json();
-      assert.match(data.error, /Acceso denegado|administrativos/i);
-    });
-
-    test('POST /api/leads with Caller token is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/leads`, {
+      // Missing admin password -> 401
+      const noPassword = await fetch(`${baseUrl}/api/accounts`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Lead Creado por Caller',
-          phone: '555-999-0000',
-          address: 'Calle No Permitida',
-        }),
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-
-    test('POST /api/gifts with Caller token is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/gifts`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Regalo Malicioso',
-          subtitle: 'No permitido',
-        }),
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-
-    test('PATCH /api/gifts/:id with Caller token is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/gifts/gift-cutlery`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: 'Nombre Modificado' }),
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-
-    test('DELETE /api/gifts/:id with Caller token is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/gifts/gift-cutlery`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-
-    test('POST /api/gifts/reset with Caller token is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/gifts/reset`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-
-    test('PATCH /api/settings with Caller token is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/settings`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ advisorName: 'Nuevo Nombre Hackeado' }),
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-
-    test('POST /api/auth/update-credentials with Caller token is REJECTED with HTTP 403', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/update-credentials`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          masterPassword: 'PoloNorte121966@',
-          newUsername: 'HackedAdmin',
-        }),
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-  });
-
-  describe('5. Admin Authorization on Administrative Operations', () => {
-    test('Admin token can successfully update a lead and receives full state and lead', async () => {
-      const res = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-        method: 'PATCH',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          called: true,
-          category: 'orden',
-          orderAmount: 1250,
-          notes: 'Nota administrativa actualizada por AdminCiprian',
+          username: 'vendedor1',
+          displayName: 'Carlos Ventas',
+          role: 'vendedor',
+          tag: 'CARLOS-01',
+          password: 'Password123!',
+          confirmPassword: 'Password123!',
         }),
       });
+      assert.strictEqual(noPassword.status, 401);
+      const noPasswordBody = await noPassword.json();
+      assert.strictEqual(noPasswordBody.locked, false);
+      assert.strictEqual(typeof noPasswordBody.remainingAttempts, 'number');
 
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.strictEqual(data.lead.id, testLeadId);
-      assert.strictEqual(data.lead.notes, 'Nota administrativa actualizada por AdminCiprian');
-      assert.strictEqual(data.lead.category, 'orden');
-      assert.strictEqual(data.lead.orderAmount, 1250);
-      assert.strictEqual(data.state.role, 'admin');
-      assert.ok(Array.isArray(data.state.gifts));
-      assert.ok(data.state.gifts.length > 0);
-    });
-
-    test('Unauthenticated public PATCH /api/leads/:id does not expose sensitive notes or admin fields in response', async () => {
-      const res = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          qualification: { publicStep: 'completed', score: 90 },
-        }),
-      });
-
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.ok(data.lead);
-      // Verify sensitive administrative fields are not leaked to public client
-      assert.strictEqual(data.lead.notes, undefined);
-      assert.strictEqual(data.lead.orderAmount, undefined);
-      assert.strictEqual(data.lead.called, undefined);
-      assert.strictEqual(data.lead.category, undefined);
-      assert.ok(data.state);
-      assert.strictEqual(data.state.role, undefined);
-      // The single lead in state must also be sanitized
-      assert.strictEqual(data.state.leads[0].notes, undefined);
-      assert.strictEqual(data.state.leads[0].orderAmount, undefined);
-    });
-
-    test('Admin token can successfully delete a lead', async () => {
-      // First create a disposable lead
-      const createRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Lead para Borrar',
-          phone: '555-000-1111',
-          address: 'Direccion Borrable',
-        }),
-      });
-      const { lead } = await createRes.json();
-
-      // Delete with admin token
-      const deleteRes = await fetch(`${baseUrl}/api/leads/${lead.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-
-      assert.strictEqual(deleteRes.status, 200);
-      const state = await deleteRes.json();
-      assert.strictEqual(state.state.leads.some((l) => l.id === lead.id), false);
-    });
-  });
-
-  describe('6. QR Studio Endpoints, Validation & Zero-Trust RBAC', () => {
-    let createdQrId;
-
-    test('Unauthenticated GET /api/qr, POST /api/qr, and DELETE /api/qr/:id return HTTP 401', async () => {
-      const getRes = await fetch(`${baseUrl}/api/qr`);
-      assert.strictEqual(getRes.status, 401);
-
-      const postRes = await fetch(`${baseUrl}/api/qr`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'QR Sin Sesion',
-          targetUrl: 'https://example.com',
-        }),
-      });
-      assert.strictEqual(postRes.status, 401);
-
-      const delRes = await fetch(`${baseUrl}/api/qr/qr-unauth-test`, {
-        method: 'DELETE',
-      });
-      assert.strictEqual(delRes.status, 401);
-    });
-
-    test('AdminCiprian POST /api/qr creates a styled QR code and returns HTTP 201', async () => {
-      const payload = {
-        name: 'QR Mesa VIP Otoño',
-        targetUrl: 'https://royal.ciprian.example/show?mesa=vip',
-        styleId: 'obsidian-dots',
-        dotShape: 'dots',
-        foregroundColor: '#D4942A',
-        backgroundColor: '#14100D',
-        includeLogo: true,
-        frameText: 'Escanea y reclama tu obsequio',
-      };
-
-      const res = await fetch(`${baseUrl}/api/qr`, {
+      // Master key is NOT accepted when creating vendedor/telemarketing -> 401
+      const masterRejected = await fetch(`${baseUrl}/api/accounts`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          username: 'vendedor1',
+          displayName: 'Carlos Ventas',
+          role: 'vendedor',
+          tag: 'CARLOS-01',
+          password: 'Password123!',
+          confirmPassword: 'Password123!',
+        }),
       });
+      assert.strictEqual(masterRejected.status, 401);
 
-      assert.strictEqual(res.status, 201);
-      const data = await res.json();
-      assert.ok(data.qr);
-      assert.strictEqual(typeof data.qr.id, 'string');
-      assert.strictEqual(data.qr.name, payload.name);
-      assert.strictEqual(data.qr.targetUrl, payload.targetUrl);
-      assert.strictEqual(data.qr.styleId, payload.styleId);
-      assert.strictEqual(data.qr.dotShape, payload.dotShape);
-      assert.strictEqual(data.qr.foregroundColor, payload.foregroundColor);
-      assert.strictEqual(data.qr.backgroundColor, payload.backgroundColor);
-      assert.strictEqual(data.qr.includeLogo, true);
-      assert.strictEqual(data.qr.frameText, payload.frameText);
-      assert.strictEqual(typeof data.qr.createdAt, 'string');
-      assert.ok(Array.isArray(data.qrHistory));
-      assert.ok(data.qrHistory.some((item) => item.id === data.qr.id));
-      assert.strictEqual(data.state.role, 'admin');
-      assert.ok(data.state.qrHistory.some((item) => item.id === data.qr.id));
-
-      createdQrId = data.qr.id;
-      createdQrIds.add(createdQrId);
-    });
-
-    test('Saved QR appears in Admin GET /api/state and Admin GET /api/qr', async () => {
-      const stateRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(stateRes.status, 200);
-      const state = await stateRes.json();
-      assert.ok(Array.isArray(state.qrHistory));
-      const inState = state.qrHistory.find((item) => item.id === createdQrId);
-      assert.ok(inState, 'Admin GET /api/state must contain saved QR');
-      assert.strictEqual(inState.styleId, 'obsidian-dots');
-      assert.strictEqual(inState.dotShape, 'dots');
-
-      const qrRes = await fetch(`${baseUrl}/api/qr`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(qrRes.status, 200);
-      const qrData = await qrRes.json();
-      assert.ok(Array.isArray(qrData.qrHistory));
-      const inQr = qrData.qrHistory.find((item) => item.id === createdQrId);
-      assert.ok(inQr, 'Admin GET /api/qr must contain saved QR');
-      assert.strictEqual(inQr.foregroundColor, '#D4942A');
-      assert.strictEqual(inQr.backgroundColor, '#14100D');
-    });
-
-    test('Caller-role GET /api/qr, POST /api/qr, and DELETE /api/qr/:id return HTTP 403 Forbidden', async () => {
-      const getRes = await fetch(`${baseUrl}/api/qr`, {
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
-      });
-      assert.strictEqual(getRes.status, 403);
-
-      const postRes = await fetch(`${baseUrl}/api/qr`, {
+      // Create Vendedor 1 with logged-in admin's own password (adminPassword field)
+      const c1 = await fetch(`${baseUrl}/api/accounts`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
+          Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: 'QR No Autorizado',
-          targetUrl: 'https://example.com',
+          adminPassword: ADMIN_DEFAULT_PASSWORD,
+          username: 'vendedor1',
+          displayName: 'Carlos Ventas',
+          role: 'vendedor',
+          tag: 'CARLOS-01',
+          password: 'Password123!',
+          confirmPassword: 'Password123!',
         }),
       });
-      assert.strictEqual(postRes.status, 403);
+      assert.strictEqual(c1.status, 201);
+      const d1 = await c1.json();
+      vendedor1Account = d1.account;
+      assert.strictEqual(vendedor1Account.role, 'vendedor');
+      assert.strictEqual(vendedor1Account.tag, 'CARLOS-01');
+      assert.strictEqual(vendedor1Account.hasPin, false);
+      assert.strictEqual(vendedor1Account.passwordHash, undefined);
 
-      const delRes = await fetch(`${baseUrl}/api/qr/${createdQrId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
+      // Duplicate tag rejected with 409
+      const dupTag = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: ADMIN_DEFAULT_PASSWORD,
+          username: 'vendedor_dup',
+          displayName: 'Dup',
+          role: 'vendedor',
+          tag: 'carlos-01',
+          password: 'Password123!',
+          confirmPassword: 'Password123!',
+        }),
       });
-      assert.strictEqual(delRes.status, 403);
+      assert.strictEqual(dupTag.status, 409);
+
+      // Create Vendedor 2 using backward-compatible masterPassword field carrying the admin's password
+      const c2 = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: ADMIN_DEFAULT_PASSWORD,
+          username: 'vendedor2',
+          displayName: 'María Ventas',
+          role: 'vendedor',
+          tag: 'MARIA-02',
+          password: 'MariaPassword1!',
+          confirmPassword: 'MariaPassword1!',
+        }),
+      });
+      assert.strictEqual(c2.status, 201);
+      vendedor2Account = (await c2.json()).account;
+
+      // Both vendedores log in directly (1FA)
+      const l1 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'vendedor1', password: 'Password123!' }),
+      });
+      assert.strictEqual(l1.status, 200);
+      const ld1 = await l1.json();
+      assert.strictEqual(ld1.requiresPin, false);
+      vendedor1Token = ld1.sessionToken;
+
+      const l2 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'vendedor2', password: 'MariaPassword1!' }),
+      });
+      assert.strictEqual(l2.status, 200);
+      vendedor2Token = (await l2.json()).sessionToken;
     });
 
-    test('Caller and unauthenticated GET /api/state receive qrHistory: [] even when Admin saved QR items', async () => {
-      const callerStateRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
+    test('POST /api/accounts/:id/password validates target currentPassword + 2x newPassword, rejects admin, and revokes old tokens', async () => {
+      // Rejects admin account with 400
+      const adminReject = await fetch(`${baseUrl}/api/accounts/default/password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: 'AdminMaster2026@',
+          newPassword: 'NewPassword99!',
+          confirmNewPassword: 'NewPassword99!',
+        }),
       });
-      assert.strictEqual(callerStateRes.status, 200);
-      const callerState = await callerStateRes.json();
-      assert.strictEqual(callerState.role, 'caller');
-      assert.deepStrictEqual(callerState.qrHistory, []);
+      assert.strictEqual(adminReject.status, 400);
 
-      const publicStateRes = await fetch(`${baseUrl}/api/state`);
-      assert.strictEqual(publicStateRes.status, 200);
-      const publicState = await publicStateRes.json();
-      assert.deepStrictEqual(publicState.qrHistory, []);
+      // Wrong currentPassword -> 403
+      const wrongCurrent = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}/password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: 'WrongOldPassword!',
+          newPassword: 'NewPassword99!',
+          confirmNewPassword: 'NewPassword99!',
+        }),
+      });
+      assert.strictEqual(wrongCurrent.status, 403);
+
+      // Mismatch confirmNewPassword -> 400
+      const mismatch = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}/password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: 'Password123!',
+          newPassword: 'NewPassword99!',
+          confirmNewPassword: 'Different99!',
+        }),
+      });
+      assert.strictEqual(mismatch.status, 400);
+
+      // Valid password change revokes old token
+      const oldToken = vendedor1Token;
+      const okPwd = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}/password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: 'Password123!',
+          newPassword: 'NewPassword99!',
+          confirmNewPassword: 'NewPassword99!',
+        }),
+      });
+      assert.strictEqual(okPwd.status, 200);
+
+      const oldSess = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${oldToken}` },
+      });
+      assert.strictEqual(oldSess.status, 401);
+
+      // Login with new password succeeds
+      const relogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'vendedor1', password: 'NewPassword99!' }),
+      });
+      assert.strictEqual(relogin.status, 200);
+      vendedor1Token = (await relogin.json()).sessionToken;
     });
 
-    test('Admin POST /api/qr rejects missing/invalid targetUrl or short name with HTTP 400', async () => {
-      const invalidCases = [
-        { name: 'A', targetUrl: 'https://example.com' },
-        { name: '   ', targetUrl: 'https://example.com' },
-        { name: 'QR Sin URL' },
-        { name: 'QR URL Vacia', targetUrl: '   ' },
-        { name: 'QR XSS Protocol', targetUrl: 'javascript:alert(1)' },
-        { name: 'QR Protocol Relative', targetUrl: '//evil.example.com' },
-        { name: 'QR Malformed URL', targetUrl: 'not-a-valid-url' },
+    test('Account avatarUrl supports HTTPS + compressed base64, syncs to referrers/all roles, clears to null, and rejects SVG/XSS/oversized with 400', async () => {
+      const samplePng =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+
+      // Reject SVG XSS, javascript:, and oversized base64 on POST & PATCH
+      const badAvatars = [
+        'data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+PC9zdmc+',
+        'javascript:alert(1)',
+        `data:image/webp;base64,${'A'.repeat(560000)}`,
       ];
+      for (const bad of badAvatars) {
+        const badPatch = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ adminPassword: ADMIN_DEFAULT_PASSWORD, avatarUrl: bad }),
+        });
+        assert.strictEqual(badPatch.status, 400, `Expected 400 for invalid avatar: ${bad.slice(0, 40)}`);
+      }
 
-      for (const body of invalidCases) {
-        const res = await fetch(`${baseUrl}/api/qr`, {
+      // Set base64 PNG avatar on vendedor1 -> syncs to referrers & appears in all 3 roles' GET /api/state + session
+      const setPng = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_DEFAULT_PASSWORD, avatarUrl: samplePng }),
+      });
+      assert.strictEqual(setPng.status, 200);
+      const setPngData = await setPng.json();
+      assert.strictEqual(setPngData.account.avatarUrl, samplePng);
+      const syncedRef = setPngData.state.referrers.find((r) => r.code === 'CARLOS-01');
+      assert.strictEqual(syncedRef.avatarUrl, samplePng);
+
+      // Telemarketing GET /api/state exposes avatarUrl on referrers[]
+      const teleState = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${teleSessionToken}` },
+        })
+      ).json();
+      const teleRef = teleState.referrers.find((r) => r.code === 'CARLOS-01');
+      assert.strictEqual(teleRef.avatarUrl, samplePng);
+
+      // Vendedor session & GET /api/state expose avatarUrl
+      const v1Sess = await (
+        await fetch(`${baseUrl}/api/auth/session`, {
+          headers: { Authorization: `Bearer ${vendedor1Token}` },
+        })
+      ).json();
+      assert.strictEqual(v1Sess.avatarUrl, samplePng);
+
+      const v1State = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${vendedor1Token}` },
+        })
+      ).json();
+      assert.strictEqual(v1State.referrers[0].avatarUrl, samplePng);
+
+      // PATCH /api/referrals/:id updates avatarUrl and syncs back to linked account
+      const httpsAvatar = 'https://cdn.example.com/carlos-pro.webp';
+      const refPatch = await fetch(`${baseUrl}/api/referrals/${syncedRef.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_DEFAULT_PASSWORD, avatarUrl: httpsAvatar }),
+      });
+      assert.strictEqual(refPatch.status, 200);
+      const refPatchData = await refPatch.json();
+      assert.strictEqual(refPatchData.referrer.avatarUrl, httpsAvatar);
+      const syncedAcc = refPatchData.state.accounts.find((a) => a.id === vendedor1Account.id);
+      assert.strictEqual(syncedAcc.avatarUrl, httpsAvatar);
+
+      // Clearing avatar to null clears both account & referrer
+      const clearRes = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_DEFAULT_PASSWORD, avatarUrl: null }),
+      });
+      assert.strictEqual(clearRes.status, 200);
+      const clearData = await clearRes.json();
+      assert.strictEqual(clearData.account.avatarUrl, null);
+      assert.strictEqual(
+        clearData.state.referrers.find((r) => r.code === 'CARLOS-01').avatarUrl,
+        null
+      );
+    });
+  });
+
+  describe('3. Telemarketing Queue, Reposo, Vendedor Ownership & Lock, and Admin Unlock', () => {
+    let leadAId; // CARLOS-01 -> scheduled -> confirmed & locked
+    let leadBId; // CARLOS-01 -> not_scheduled (reposo) -> reactivated by admin
+    let leadCId; // MARIA-02 -> isolated from CARLOS-01
+
+    before(async () => {
+      const makeLead = async (name, phone, referralCode) => {
+        const r = await fetch(`${baseUrl}/api/leads`, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${adminSessionToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, phone, address: 'Dallas, TX', acceptedTerms: true, referralCode }),
         });
-        assert.strictEqual(
-          res.status,
-          400,
-          `Expected HTTP 400 for invalid QR payload: ${JSON.stringify(body)}`
-        );
-      }
-    });
-
-    test('Admin DELETE /api/qr/:id deletes saved QR cleanly (HTTP 200) and returns 404 when missing', async () => {
-      const delRes = await fetch(`${baseUrl}/api/qr/${createdQrId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(delRes.status, 200);
-      const delData = await delRes.json();
-      assert.strictEqual(delData.qrHistory.some((item) => item.id === createdQrId), false);
-      assert.strictEqual(delData.state.qrHistory.some((item) => item.id === createdQrId), false);
-      createdQrIds.delete(createdQrId);
-
-      // Confirm via GET /api/qr that it is gone
-      const listRes = await fetch(`${baseUrl}/api/qr`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(listRes.status, 200);
-      const listData = await listRes.json();
-      assert.strictEqual(listData.qrHistory.some((item) => item.id === createdQrId), false);
-
-      // Deleting non-existent ID returns 404
-      const missingRes = await fetch(`${baseUrl}/api/qr/qr-does-not-exist`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(missingRes.status, 404);
-    });
-  });
-
-  describe('7. Royal Prestige Catalog, UsageTips, ShowcaseStyle & Randomization RBAC', () => {
-    const EXPECTED_GIFT_IDS = [
-      'gift-utensils-6',
-      'gift-utensil-holder',
-      'gift-bowls-3',
-      'gift-santoku-5',
-      'gift-cleaver-7',
-      'gift-icecream-2',
-      'gift-mugs-2',
-      'gift-bamboo-large',
-      'gift-warmer-pro',
-    ];
-
-    test('Default store and GET /api/state return the 9 Royal Prestige PNG prizes with usageTip and showcaseStyle / randomizeGifts defaults', async () => {
-      const defaultStore = JSON.parse(
-        fs.readFileSync(path.join(PROJECT_ROOT, 'src', 'shared', 'defaultStore.json'), 'utf8')
-      );
-      assert.strictEqual(defaultStore.settings.showcaseStyle, 'luminous-gold');
-      assert.strictEqual(defaultStore.settings.randomizeGifts, true);
-      assert.strictEqual(defaultStore.gifts.length, 9);
-      assert.deepStrictEqual(
-        defaultStore.gifts.map((g) => g.id),
-        EXPECTED_GIFT_IDS
-      );
-
-      for (const routeHeaders of [undefined, { Authorization: `Bearer ${adminSessionToken}` }]) {
-        const res = await fetch(`${baseUrl}/api/state`, routeHeaders ? { headers: routeHeaders } : undefined);
-        assert.strictEqual(res.status, 200);
-        const state = await res.json();
-
-        assert.strictEqual(state.settings.showcaseStyle, 'luminous-gold');
-        assert.strictEqual(state.settings.randomizeGifts, true);
-        assert.ok(Array.isArray(state.gifts));
-        assert.strictEqual(state.gifts.length, 9);
-        assert.deepStrictEqual(
-          state.gifts.map((g) => g.id),
-          EXPECTED_GIFT_IDS
-        );
-
-        for (const gift of state.gifts) {
-          assert.strictEqual(gift.active, true, `Gift ${gift.id} must be active`);
-          assert.strictEqual(typeof gift.usageTip, 'string', `Gift ${gift.id} must include usageTip`);
-          assert.ok(gift.usageTip.trim().length >= 15, `Gift ${gift.id} usageTip must be meaningful`);
-          assert.strictEqual(typeof gift.customImageUrl, 'string', `Gift ${gift.id} must include customImageUrl`);
-          assert.ok(
-            gift.customImageUrl.startsWith('/sin%20fondo/') && gift.customImageUrl.endsWith('-Photoroom.png'),
-            `Gift ${gift.id} customImageUrl must point to transparent PNG in /sin%20fondo/: ${gift.customImageUrl}`
-          );
-        }
-      }
-    });
-
-    test('Unauthenticated gift mutations and PATCH /api/settings are REJECTED with HTTP 401', async () => {
-      const createGiftRes = await fetch(`${baseUrl}/api/gifts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Regalo Sin Sesion',
-          usageTip: 'No autorizado',
-        }),
-      });
-      assert.strictEqual(createGiftRes.status, 401);
-
-      const updateGiftRes = await fetch(`${baseUrl}/api/gifts/gift-utensils-6`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usageTip: 'Intento sin sesion' }),
-      });
-      assert.strictEqual(updateGiftRes.status, 401);
-
-      const deleteGiftRes = await fetch(`${baseUrl}/api/gifts/gift-utensils-6`, {
-        method: 'DELETE',
-      });
-      assert.strictEqual(deleteGiftRes.status, 401);
-
-      const settingsRes = await fetch(`${baseUrl}/api/settings`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ showcaseStyle: 'crystal-aurora', randomizeGifts: false }),
-      });
-      assert.strictEqual(settingsRes.status, 401);
-    });
-
-    test('Caller-role gift mutations with usageTip and PATCH /api/settings showcaseStyle/randomizeGifts are REJECTED with HTTP 403', async () => {
-      const createGiftRes = await fetch(`${baseUrl}/api/gifts`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Regalo Caller Con Tip',
-          usageTip: 'Tip bloqueado para caller',
-        }),
-      });
-      assert.strictEqual(createGiftRes.status, 403);
-
-      const updateGiftRes = await fetch(`${baseUrl}/api/gifts/gift-utensils-6`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ usageTip: 'Tip modificado por caller' }),
-      });
-      assert.strictEqual(updateGiftRes.status, 403);
-
-      const settingsRes = await fetch(`${baseUrl}/api/settings`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ showcaseStyle: 'crystal-aurora', randomizeGifts: false }),
-      });
-      assert.strictEqual(settingsRes.status, 403);
-    });
-
-    test('AdminCiprian can create, update with usageTip, verify in GET /api/state, and delete a gift cleanly', async () => {
-      const createPayload = {
-        name: 'Set Gourmet Prueba QA',
-        subtitle: 'Obsequio temporal para pruebas de integración.',
-        usageTip: 'Úsalo para cocinar al vapor conservando nutrientes y sabor.',
-        tag: 'QA Edition',
-        visualKey: 'pot',
-        customImageUrl: '/sin%20fondo/WhatsApp_Image_2026-11-17_at_7.45.48_ccc0c9bc-Photoroom.png',
-        accentColor: '#C88A2B',
-        stockLabel: 'Prueba',
+        assert.strictEqual(r.status, 201);
+        return (await r.json()).lead.id;
       };
 
-      const createRes = await fetch(`${baseUrl}/api/gifts`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(createPayload),
-      });
-      assert.strictEqual(createRes.status, 201);
-      const created = await createRes.json();
-      assert.ok(created.gift);
-      assert.strictEqual(typeof created.gift.id, 'string');
-      assert.strictEqual(created.gift.name, createPayload.name);
-      assert.strictEqual(created.gift.usageTip, createPayload.usageTip);
-      assert.strictEqual(created.gift.customImageUrl, createPayload.customImageUrl);
-      assert.ok(created.state.gifts.some((g) => g.id === created.gift.id));
-
-      const giftId = created.gift.id;
-      createdGiftIds.add(giftId);
-
-      const updatedTip = 'Tip actualizado QA: precalienta 2 minutos antes de sellar carnes.';
-      const patchRes = await fetch(`${baseUrl}/api/gifts/${giftId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          usageTip: updatedTip,
-          subtitle: 'Descripción actualizada por AdminCiprian.',
-        }),
-      });
-      assert.strictEqual(patchRes.status, 200);
-      const patched = await patchRes.json();
-      assert.strictEqual(patched.gift.id, giftId);
-      assert.strictEqual(patched.gift.usageTip, updatedTip);
-      assert.strictEqual(patched.gift.subtitle, 'Descripción actualizada por AdminCiprian.');
-
-      const publicStateRes = await fetch(`${baseUrl}/api/state`);
-      assert.strictEqual(publicStateRes.status, 200);
-      const publicState = await publicStateRes.json();
-      const verifiedGift = publicState.gifts.find((g) => g.id === giftId);
-      assert.ok(verifiedGift);
-      assert.strictEqual(verifiedGift.usageTip, updatedTip);
-
-      // Clean up test-created gift
-      const deleteRes = await fetch(`${baseUrl}/api/gifts/${giftId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(deleteRes.status, 200);
-      const deleted = await deleteRes.json();
-      assert.strictEqual(deleted.state.gifts.some((g) => g.id === giftId), false);
-      assert.strictEqual(deleted.state.gifts.length, 9);
-      createdGiftIds.delete(giftId);
+      leadAId = await makeLead('Lead Agendado Carlos', '555-101-1001', 'CARLOS-01');
+      leadBId = await makeLead('Lead Reposo Carlos', '555-102-1002', 'CARLOS-01');
+      leadCId = await makeLead('Lead De Maria', '555-103-1003', 'MARIA-02');
     });
 
-    test('AdminCiprian can update showcaseStyle and randomizeGifts via PATCH /api/settings and restore defaults cleanly', async () => {
-      const initialRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(initialRes.status, 200);
-      const initialState = await initialRes.json();
-      initialShowcaseSettings = {
-        showcaseStyle: initialState.settings.showcaseStyle || 'luminous-gold',
-        randomizeGifts:
-          typeof initialState.settings.randomizeGifts === 'boolean' ? initialState.settings.randomizeGifts : true,
-      };
+    test('Telemarketing sees pending leads WITH seller attribution, marks scheduled/not_scheduled, and processed leads disappear from queue', async () => {
+      const beforeState = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${teleSessionToken}` },
+        })
+      ).json();
+      assert.strictEqual(beforeState.role, 'telemarketing');
+      assert.deepStrictEqual(beforeState.gifts, []);
+      assert.deepStrictEqual(beforeState.qrHistory, []);
+      assert.deepStrictEqual(beforeState.accounts, []);
+      const leadA = beforeState.leads.find((l) => l.id === leadAId);
+      assert.ok(leadA);
+      assert.strictEqual(leadA.referralCode, 'CARLOS-01');
+      assert.strictEqual(leadA.referrerName, 'Carlos Ventas');
+      assert.strictEqual(leadA.callOutcome, 'pending');
+      assert.strictEqual(leadA.notes, undefined);
 
-      const auroraRes = await fetch(`${baseUrl}/api/settings`, {
+      // Telemarketing cannot set category or notes -> 403
+      const forbidden = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${teleSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          showcaseStyle: 'crystal-aurora',
-          randomizeGifts: false,
-        }),
+        body: JSON.stringify({ callOutcome: 'scheduled', category: 'cita' }),
       });
-      assert.strictEqual(auroraRes.status, 200);
-      const auroraData = await auroraRes.json();
-      assert.strictEqual(auroraData.settings.showcaseStyle, 'crystal-aurora');
-      assert.strictEqual(auroraData.settings.randomizeGifts, false);
+      assert.strictEqual(forbidden.status, 403);
 
-      const emberRes = await fetch(`${baseUrl}/api/settings`, {
+      // Mark Lead A as scheduled -> disappears from telemarketing state
+      const schedRes = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${teleSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          showcaseStyle: 'royal-ember',
-        }),
+        body: JSON.stringify({ callOutcome: 'scheduled' }),
       });
-      assert.strictEqual(emberRes.status, 200);
-      const emberData = await emberRes.json();
-      assert.strictEqual(emberData.settings.showcaseStyle, 'royal-ember');
-      assert.strictEqual(emberData.settings.randomizeGifts, false);
+      assert.strictEqual(schedRes.status, 200);
+      const schedData = await schedRes.json();
+      assert.strictEqual(schedData.lead.callOutcome, 'scheduled');
+      assert.strictEqual(schedData.state.leads.some((l) => l.id === leadAId), false);
 
-      // Invalid showcaseStyle value must not corrupt persisted setting
-      const invalidRes = await fetch(`${baseUrl}/api/settings`, {
+      // Re-marking Lead A -> 409
+      const dupMark = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${teleSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          showcaseStyle: 'invalid-style-attempt',
-        }),
+        body: JSON.stringify({ callOutcome: 'not_scheduled' }),
       });
-      assert.strictEqual(invalidRes.status, 200);
-      const invalidData = await invalidRes.json();
-      assert.strictEqual(invalidData.settings.showcaseStyle, 'royal-ember');
+      assert.strictEqual(dupMark.status, 409);
 
-      const publicStateRes = await fetch(`${baseUrl}/api/state`);
-      assert.strictEqual(publicStateRes.status, 200);
-      const publicState = await publicStateRes.json();
-      assert.strictEqual(publicState.settings.showcaseStyle, 'royal-ember');
-      assert.strictEqual(publicState.settings.randomizeGifts, false);
-
-      // Restore original defaults
-      const restoreRes = await fetch(`${baseUrl}/api/settings`, {
+      // Mark Lead B as not_scheduled (Reposo) -> disappears from telemarketing state
+      const reposoRes = await fetch(`${baseUrl}/api/leads/${leadBId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${teleSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(initialShowcaseSettings),
+        body: JSON.stringify({ callOutcome: 'not_scheduled' }),
       });
-      assert.strictEqual(restoreRes.status, 200);
-      const restored = await restoreRes.json();
-      assert.strictEqual(restored.settings.showcaseStyle, 'luminous-gold');
-      assert.strictEqual(restored.settings.randomizeGifts, true);
-      initialShowcaseSettings = null;
-    });
-  });
-
-  describe('7b. Gift Probability Persistence, Sanitization & RBAC', () => {
-    const EXPECTED_SEEDED_PROBABILITIES = {
-      'gift-utensil-holder': 30,
-      'gift-bowls-3': 30,
-      'gift-utensils-6': 30,
-      'gift-icecream-2': 30,
-      'gift-mugs-2': 30,
-      'gift-bamboo-large': 5,
-      'gift-warmer-pro': 10,
-      'gift-santoku-5': 5,
-      'gift-cleaver-7': 3,
-    };
-
-    test('Unauthenticated and Caller PATCH /api/gifts/probabilities are REJECTED (401 / 403)', async () => {
-      const unauthRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ probabilities: { 'gift-utensils-6': 50 } }),
-      });
-      assert.strictEqual(unauthRes.status, 401);
-
-      const callerRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ probabilities: { 'gift-utensils-6': 50 } }),
-      });
-      assert.strictEqual(callerRes.status, 403);
+      assert.strictEqual(reposoRes.status, 200);
+      const reposoData = await reposoRes.json();
+      assert.strictEqual(reposoData.state.leads.some((l) => l.id === leadBId), false);
     });
 
-    test('GET /api/state returns updated seeded probabilities on all 9 gifts and omits gifts for Caller', async () => {
-      const publicRes = await fetch(`${baseUrl}/api/state`);
-      assert.strictEqual(publicRes.status, 200);
-      const publicState = await publicRes.json();
-      assert.strictEqual(publicState.gifts.length, 9);
-      for (const gift of publicState.gifts) {
-        assert.strictEqual(gift.probability, EXPECTED_SEEDED_PROBABILITIES[gift.id]);
-      }
+    test('Vendedor sees ONLY own leads across all statuses, can ONLY confirm & lock scheduled leads, and Admin can unlock/reactivate', async () => {
+      const v1State = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${vendedor1Token}` },
+        })
+      ).json();
+      assert.strictEqual(v1State.role, 'vendedor');
+      assert.strictEqual(v1State.leads.some((l) => l.id === leadAId), true);
+      assert.strictEqual(v1State.leads.some((l) => l.id === leadBId), true);
+      assert.strictEqual(v1State.leads.some((l) => l.id === leadCId), false);
 
-      const callerRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${callerSessionToken}` },
-      });
-      assert.strictEqual(callerRes.status, 200);
-      const callerState = await callerRes.json();
-      assert.deepStrictEqual(callerState.gifts, []);
-    });
-
-    test('Admin POST /api/gifts & PATCH /api/gifts/:id sanitize probability (defaults, >=0 clamping, 2 decimals) and support concurrent updates', async () => {
-      // 1. Missing probability defaults to 10; negative clamps to 0; decimal rounds cleanly
-      const defaultRes = await fetch(`${baseUrl}/api/gifts`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: 'Regalo Default Prob' }),
-      });
-      assert.strictEqual(defaultRes.status, 201);
-      const defaultData = await defaultRes.json();
-      assert.strictEqual(defaultData.gift.probability, 10);
-      createdGiftIds.add(defaultData.gift.id);
-
-      const negRes = await fetch(`${baseUrl}/api/gifts`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: 'Regalo Negativo Prob', probability: -15.4 }),
-      });
-      assert.strictEqual(negRes.status, 201);
-      const negData = await negRes.json();
-      assert.strictEqual(negData.gift.probability, 0);
-      createdGiftIds.add(negData.gift.id);
-
-      // 2. PATCH clamps negative, rounds 2 decimals, and keeps current on invalid non-numeric input
-      const patchRoundRes = await fetch(`${baseUrl}/api/gifts/${defaultData.gift.id}`, {
+      // Cross-seller PATCH -> 403
+      const crossSeller = await fetch(`${baseUrl}/api/leads/${leadCId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${vendedor1Token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ probability: 33.337 }),
+        body: JSON.stringify({ category: 'cita', confirmLock: true }),
       });
-      assert.strictEqual(patchRoundRes.status, 200);
-      const patchRoundData = await patchRoundRes.json();
-      assert.strictEqual(patchRoundData.gift.probability, 33.34);
+      assert.strictEqual(crossSeller.status, 403);
 
-      const patchInvalidRes = await fetch(`${baseUrl}/api/gifts/${defaultData.gift.id}`, {
+      // Reposo (not_scheduled) lead -> 409
+      const reposoTry = await fetch(`${baseUrl}/api/leads/${leadBId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${vendedor1Token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ probability: 'not-a-number' }),
+        body: JSON.stringify({ category: 'cita', confirmLock: true }),
       });
-      assert.strictEqual(patchInvalidRes.status, 200);
-      const patchInvalidData = await patchInvalidRes.json();
-      assert.strictEqual(patchInvalidData.gift.probability, 33.34);
+      assert.strictEqual(reposoTry.status, 409);
 
-      // 3. Concurrent PATCH /api/gifts/:id calls must not overwrite each other
-      const [c1, c2] = await Promise.all([
-        fetch(`${baseUrl}/api/gifts/${defaultData.gift.id}`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${adminSessionToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ probability: 42.5 }),
-        }),
-        fetch(`${baseUrl}/api/gifts/${negData.gift.id}`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${adminSessionToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ probability: 18.25 }),
-        }),
-      ]);
-      assert.strictEqual(c1.status, 200);
-      assert.strictEqual(c2.status, 200);
-
-      const verifyRes = await fetch(`${baseUrl}/api/state`);
-      const verifyState = await verifyRes.json();
-      assert.strictEqual(
-        verifyState.gifts.find((g) => g.id === defaultData.gift.id)?.probability,
-        42.5
-      );
-      assert.strictEqual(
-        verifyState.gifts.find((g) => g.id === negData.gift.id)?.probability,
-        18.25
-      );
-
-      // Clean up temporary gifts
-      for (const gid of [defaultData.gift.id, negData.gift.id]) {
-        await fetch(`${baseUrl}/api/gifts/${gid}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${adminSessionToken}` },
-        });
-        createdGiftIds.delete(gid);
-      }
-    });
-
-    test('Admin PATCH /api/gifts/probabilities updates weights in bulk, respects 0-weight in POST /api/leads fallback, and POST /api/gifts/reset restores seeded weights', async () => {
-      const bulkRes = await fetch(`${baseUrl}/api/gifts/probabilities`, {
+      // Explicit confirmLock: false -> 400
+      const rejectFalseConfirm = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${vendedor1Token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          probabilities: {
-            'gift-utensils-6': 100,
-            'gift-utensil-holder': 0,
-            'gift-bowls-3': -10,
-            'gift-santoku-5': 0,
-            'gift-cleaver-7': 0,
-            'gift-icecream-2': 0,
-            'gift-mugs-2': 0,
-            'gift-bamboo-large': 0,
-            'gift-warmer-pro': 0,
-          },
-        }),
+        body: JSON.stringify({ category: 'cita', confirmLock: false }),
       });
-      assert.strictEqual(bulkRes.status, 200);
-      const bulkData = await bulkRes.json();
-      assert.strictEqual(
-        bulkData.gifts.find((g) => g.id === 'gift-utensils-6')?.probability,
-        100
-      );
-      assert.strictEqual(
-        bulkData.gifts.find((g) => g.id === 'gift-bowls-3')?.probability,
-        0
-      );
+      assert.strictEqual(rejectFalseConfirm.status, 400);
 
-      // Lead created without giftId must draw only positive-weight gift ('gift-utensils-6')
-      const leadRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Lead Peso Ponderado',
-          phone: '555-777-8888',
-          address: 'Test Ave',
-        }),
-      });
-      assert.strictEqual(leadRes.status, 201);
-      const leadData = await leadRes.json();
-      assert.strictEqual(leadData.lead.giftId, 'gift-utensils-6');
-
-      await fetch(`${baseUrl}/api/leads/${leadData.lead.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-
-      // Reset catalog back to default seeded weights
-      const resetRes = await fetch(`${baseUrl}/api/gifts/reset`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(resetRes.status, 200);
-      const resetData = await resetRes.json();
-      assert.strictEqual(resetData.state.gifts.length, 9);
-      for (const gift of resetData.state.gifts) {
-        assert.strictEqual(gift.probability, EXPECTED_SEEDED_PROBABILITIES[gift.id]);
-      }
-    });
-  });
-
-  describe('7c. Anti-Cache Headers & Promo Code Invalidation with Admin-Password-Only Revert', () => {
-    test('GET /api/state and PATCH /api/leads/:id enforce Cache-Control: no-store and Pragma: no-cache', async () => {
-      const stateRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(stateRes.status, 200);
-      const cacheControl = stateRes.headers.get('cache-control') || '';
-      assert.match(cacheControl, /no-store/i);
-      assert.match(cacheControl, /no-cache/i);
-      assert.match(cacheControl, /must-revalidate/i);
-      assert.strictEqual(stateRes.headers.get('pragma'), 'no-cache');
-
-      const patchRes = await fetch(`${baseUrl}/api/leads/${testLeadId}`, {
+      // Scheduled lead advances forward cleanly (none -> cita without confirmLock -> orden with confirmLock: true)
+      const advanceCita = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ notes: 'Verificación no-store' }),
-      });
-      assert.strictEqual(patchRes.status, 200);
-      assert.match(patchRes.headers.get('cache-control') || '', /no-store/i);
-      assert.strictEqual(patchRes.headers.get('pragma'), 'no-cache');
-    });
-
-    test('Category assignment invalidates promo code, forward progression preserves invalidation, and revert/downgrade strictly requires valid Admin password', async () => {
-      const createRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Lead Invalidation Flow',
-          phone: '555-888-9999',
-          address: 'Dallas, TX',
-          claimCode: 'OTN-7788',
-        }),
-      });
-      assert.strictEqual(createRes.status, 201);
-      const created = await createRes.json();
-      const leadId = created.lead.id;
-      assert.strictEqual(created.lead.promoCodeInvalidated, false);
-      assert.strictEqual(created.lead.promoCodeInvalidatedAt, null);
-
-      // Unauthenticated and Caller cannot mutate promoCodeInvalidated
-      const unauthPatch = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ promoCodeInvalidated: false }),
-      });
-      assert.strictEqual(unauthPatch.status, 401);
-
-      const callerPatch = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ promoCodeInvalidated: false }),
-      });
-      assert.strictEqual(callerPatch.status, 403);
-
-      // Mark called first
-      const calledRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ called: true }),
-      });
-      assert.strictEqual(calledRes.status, 200);
-      const calledData = await calledRes.json();
-      assert.strictEqual(calledData.lead.called, true);
-      assert.strictEqual(calledData.lead.promoCodeInvalidated, false);
-
-      // Assign category 'cita' -> invalidates promo code
-      const citaRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${vendedor1Token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ category: 'cita' }),
       });
-      assert.strictEqual(citaRes.status, 200);
-      const citaData = await citaRes.json();
-      assert.strictEqual(citaData.lead.category, 'cita');
-      assert.strictEqual(citaData.lead.promoCodeInvalidated, true);
-      assert.strictEqual(typeof citaData.lead.promoCodeInvalidatedAt, 'string');
-      const invalidatedTimestamp = citaData.lead.promoCodeInvalidatedAt;
+      assert.strictEqual(advanceCita.status, 200);
+      assert.strictEqual((await advanceCita.json()).lead.category, 'cita');
 
-      // Forward progression 'cita' -> 'demo' -> 'orden' works without adminPassword and preserves invalidation
-      const demoRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+      // Forward progression cita -> orden by vendedor -> 200
+      const confirmRes = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ category: 'demo' }),
-      });
-      assert.strictEqual(demoRes.status, 200);
-      const demoData = await demoRes.json();
-      assert.strictEqual(demoData.lead.category, 'demo');
-      assert.strictEqual(demoData.lead.promoCodeInvalidated, true);
-      assert.strictEqual(demoData.lead.promoCodeInvalidatedAt, invalidatedTimestamp);
-
-      const ordenRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ category: 'orden', orderAmount: 2792 }),
-      });
-      assert.strictEqual(ordenRes.status, 200);
-      const ordenData = await ordenRes.json();
-      assert.strictEqual(ordenData.lead.category, 'orden');
-      assert.strictEqual(ordenData.lead.orderAmount, 2792);
-      assert.strictEqual(ordenData.lead.promoCodeInvalidated, true);
-
-      // Revert / downgrade / uninvalidate / called:false WITHOUT or WITH WRONG adminPassword MUST return 403
-      const protectedPayloads = [
-        { category: 'none' },
-        { category: 'none', adminPassword: 'WrongPassword!' },
-        { promoCodeInvalidated: false },
-        { promoCodeInvalidated: false, adminPassword: 'WrongPassword!' },
-        { category: 'demo' },
-        { category: 'cita', adminPassword: 'WrongPassword!' },
-        { called: false },
-      ];
-      for (const body of protectedPayloads) {
-        const blockedRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${adminSessionToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-        });
-        assert.strictEqual(
-          blockedRes.status,
-          403,
-          `Expected 403 for protected revert/downgrade payload: ${JSON.stringify(body)}`
-        );
-      }
-
-      // Downgrade 'orden' -> 'demo' WITH valid Admin password succeeds while keeping code invalidated
-      const downgradeOkRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
+          Authorization: `Bearer ${vendedor1Token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          category: 'demo',
-          adminPassword: 'AdminMaster2026@',
+          category: 'orden',
+          orderAmount: 3500,
+          notes: 'Venta cerrada en demo',
+          confirmLock: true,
         }),
       });
-      assert.strictEqual(downgradeOkRes.status, 200);
-      const downgradeOkData = await downgradeOkRes.json();
-      assert.strictEqual(downgradeOkData.lead.category, 'demo');
-      assert.strictEqual(downgradeOkData.lead.orderAmount, null);
-      assert.strictEqual(downgradeOkData.lead.promoCodeInvalidated, true);
+      assert.strictEqual(confirmRes.status, 200);
+      const confirmData = await confirmRes.json();
+      assert.strictEqual(confirmData.lead.category, 'orden');
+      assert.strictEqual(confirmData.lead.orderAmount, 3500);
+      assert.strictEqual(confirmData.lead.sellerLocked, true);
+      assert.strictEqual(confirmData.lead.sellerConfirmedBy, 'vendedor1');
+      assert.strictEqual(confirmData.lead.promoCodeInvalidated, true);
 
-      // Full revert to 'none' & promoCodeInvalidated: false WITH valid Admin password succeeds
-      const revertOkRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+      // Once at orden, vendedor CANNOT downgrade without Admin password -> 403 ADMIN_PASSWORD_REQUIRED
+      const lockedRetry = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${vendedor1Token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'demo', confirmLock: true }),
+      });
+      assert.strictEqual(lockedRetry.status, 403);
+      assert.strictEqual((await lockedRetry.json()).code, 'ADMIN_PASSWORD_REQUIRED');
+
+      // Same-rank orden edit (updating orderAmount/notes) is permitted per Opción A -> 200
+      const repeatSameRetry = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${vendedor1Token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'orden', orderAmount: 4200 }),
+      });
+      assert.strictEqual(repeatSameRetry.status, 200);
+      assert.strictEqual((await repeatSameRetry.json()).lead.orderAmount, 4200);
+
+      // Admin cannot unlock without adminPassword -> 403
+      const unlockNoPwd = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'none', sellerLocked: false }),
+      });
+      assert.strictEqual(unlockNoPwd.status, 403);
+
+      // Admin unlocks with valid adminPassword -> 200
+      const unlockOk = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
@@ -1523,46 +666,38 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
         },
         body: JSON.stringify({
           category: 'none',
+          sellerLocked: false,
           promoCodeInvalidated: false,
           adminPassword: 'AdminMaster2026@',
         }),
       });
-      assert.strictEqual(revertOkRes.status, 200);
-      const revertOkData = await revertOkRes.json();
-      assert.strictEqual(revertOkData.lead.category, 'none');
-      assert.strictEqual(revertOkData.lead.promoCodeInvalidated, false);
-      assert.strictEqual(revertOkData.lead.promoCodeInvalidatedAt, null);
-      assert.strictEqual(revertOkData.lead.orderAmount, null);
+      assert.strictEqual(unlockOk.status, 200);
+      const unlocked = await unlockOk.json();
+      assert.strictEqual(unlocked.lead.category, 'none');
+      assert.strictEqual(unlocked.lead.sellerLocked, false);
+      assert.strictEqual(unlocked.lead.promoCodeInvalidated, false);
+      assert.strictEqual(unlocked.lead.orderAmount, null);
 
-      // Assign 'orden' again and revert solely via { promoCodeInvalidated: false, adminPassword }
-      await fetch(`${baseUrl}/api/leads/${leadId}`, {
+      // Admin reactivates Lead B from reposo -> pending (reappears in telemarketing queue)
+      const reactivateRes = await fetch(`${baseUrl}/api/leads/${leadBId}`, {
         method: 'PATCH',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ category: 'orden', orderAmount: 3100 }),
-      });
-      const reactivateRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminSessionToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          promoCodeInvalidated: false,
-          adminPassword: 'AdminMaster2026@',
-        }),
+        body: JSON.stringify({ callOutcome: 'pending' }),
       });
       assert.strictEqual(reactivateRes.status, 200);
-      const reactivateData = await reactivateRes.json();
-      assert.strictEqual(reactivateData.lead.category, 'none');
-      assert.strictEqual(reactivateData.lead.promoCodeInvalidated, false);
-      assert.strictEqual(reactivateData.lead.promoCodeInvalidatedAt, null);
-      assert.strictEqual(reactivateData.lead.orderAmount, null);
 
-      // Verify qualification.cedeGoldenTicket passes cleanly through PATCH /api/leads/:id and GET /api/state
-      const cedeRes = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+      const teleAfter = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${teleSessionToken}` },
+        })
+      ).json();
+      assert.strictEqual(teleAfter.leads.some((l) => l.id === leadBId), true);
+
+      // Public PATCH preserving qualification.cedeGoldenTicket = true
+      const cedePatch = await fetch(`${baseUrl}/api/leads/${leadAId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1574,112 +709,1220 @@ describe('DSB Authentication Standardization & Caller RBAC Test Suite', () => {
             tier: 'medio',
             knowsBrand: false,
             isClient: false,
-            productRating: null,
             cedeGoldenTicket: true,
           },
         }),
       });
-      assert.strictEqual(cedeRes.status, 200);
-      const cedeData = await cedeRes.json();
+      assert.strictEqual(cedePatch.status, 200);
+      const cedeData = await cedePatch.json();
       assert.strictEqual(cedeData.lead.qualification?.cedeGoldenTicket, true);
 
-      const adminStateRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
-      assert.strictEqual(adminStateRes.status, 200);
-      const adminState = await adminStateRes.json();
-      const persistedLead = adminState.leads.find((l) => l.id === leadId);
+      const adminCheck = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${adminSessionToken}` },
+        })
+      ).json();
+      const persistedLead = adminCheck.leads.find((l) => l.id === leadAId);
       assert.strictEqual(persistedLead?.qualification?.cedeGoldenTicket, true);
-
-      await fetch(`${baseUrl}/api/leads/${leadId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminSessionToken}` },
-      });
     });
   });
 
-  describe('8. Master-Key Full Reset (POST /api/admin/reset-all)', () => {
-    test('Unauthenticated and Caller requests to POST /api/admin/reset-all are REJECTED (401 / 403)', async () => {
-      const unauthRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ masterPassword: 'PoloNorte121966@' }),
-      });
-      assert.strictEqual(unauthRes.status, 401);
-
-      const callerRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
-        method: 'POST',
+  describe('4. Own Admin Password on Operational Mutations & Special Security Key ONLY on Admin Credential Change (Key + 2x New + PIN 1532)', () => {
+    test('Settings and Gift mutations require logged-in Admin own password (401 without it or with Master Key, 200/201 with own password)', async () => {
+      const noMasterSettings = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${callerSessionToken}`,
+          Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ masterPassword: 'PoloNorte121966@' }),
+        body: JSON.stringify({ showcaseStyle: 'crystal-aurora' }),
       });
-      assert.strictEqual(callerRes.status, 403);
-    });
+      assert.strictEqual(noMasterSettings.status, 401);
 
-    test('Admin POST /api/admin/reset-all rejects invalid masterPassword with 403 without wiping leads', async () => {
-      const leadRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Lead Protegido Master',
-          phone: '555-321-7777',
-          address: 'Dallas, TX',
-        }),
+      const masterKeySettingsRejected = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ showcaseStyle: 'crystal-aurora', masterPassword: MASTER_KEY }),
       });
-      assert.strictEqual(leadRes.status, 201);
+      assert.strictEqual(masterKeySettingsRejected.status, 401);
 
-      const badRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
+      const okSettings = await fetch(`${baseUrl}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ showcaseStyle: 'crystal-aurora', adminPassword: ADMIN_DEFAULT_PASSWORD }),
+      });
+      assert.strictEqual(okSettings.status, 200);
+      assert.strictEqual((await okSettings.json()).settings.showcaseStyle, 'crystal-aurora');
+
+      const noMasterGift = await fetch(`${baseUrl}/api/gifts`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ masterPassword: 'WrongMasterPassword!' }),
+        body: JSON.stringify({ name: 'Regalo Sin Clave' }),
       });
-      assert.strictEqual(badRes.status, 403);
+      assert.strictEqual(noMasterGift.status, 401);
 
+      const okGift = await fetch(`${baseUrl}/api/gifts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'Regalo Con Clave', probability: 25, adminPassword: ADMIN_DEFAULT_PASSWORD }),
+      });
+      assert.strictEqual(okGift.status, 201);
+      const giftId = (await okGift.json()).gift.id;
+
+      const noMasterDelGift = await fetch(`${baseUrl}/api/gifts/${giftId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(noMasterDelGift.status, 401);
+
+      const okDelGift = await fetch(`${baseUrl}/api/gifts/${giftId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_DEFAULT_PASSWORD }),
+      });
+      assert.strictEqual(okDelGift.status, 200);
+    });
+
+    test('POST /api/auth/update-credentials enforces PoloNorte121966@ + PIN 1532 + 2x matching newPassword and rotates admin token', async () => {
+      // Missing PIN -> 403
+      const noPin = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          newPassword: 'AdminNewPass2027@',
+          confirmNewPassword: 'AdminNewPass2027@',
+        }),
+      });
+      assert.strictEqual(noPin.status, 403);
+
+      // Wrong PIN -> 403
+      const badPin = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          confirmationPin: '9999',
+          newPassword: 'AdminNewPass2027@',
+          confirmNewPassword: 'AdminNewPass2027@',
+        }),
+      });
+      assert.strictEqual(badPin.status, 403);
+
+      // Mismatched confirmNewPassword -> 400
+      const badConfirm = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: 'AdminNewPass2027@',
+          confirmNewPassword: 'MismatchPass2027@',
+        }),
+      });
+      assert.strictEqual(badConfirm.status, 400);
+
+      // Valid update rotates token & invalidates old token
+      const oldAdminToken = adminSessionToken;
+      const okCreds = await fetch(`${baseUrl}/api/auth/update-credentials`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: 'AdminNewPass2027@',
+          confirmNewPassword: 'AdminNewPass2027@',
+        }),
+      });
+      assert.strictEqual(okCreds.status, 200);
+      const credsData = await okCreds.json();
+      assert.strictEqual(credsData.ok, true);
+      assert.strictEqual(typeof credsData.sessionToken, 'string');
+      adminSessionToken = credsData.sessionToken;
+
+      const oldAdminSess = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${oldAdminToken}` },
+      });
+      assert.strictEqual(oldAdminSess.status, 401);
+
+      const newAdminSess = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(newAdminSess.status, 200);
+    });
+
+    test('Deactivating & deleting an account immediately revokes its session and disables its referrer', async () => {
+      const deact = await fetch(`${baseUrl}/api/accounts/${vendedor2Account.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_UPDATED_PASSWORD, active: false }),
+      });
+      assert.strictEqual(deact.status, 200);
+
+      const v2Sess = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${vendedor2Token}` },
+      });
+      assert.strictEqual(v2Sess.status, 401);
+
+      const v2Login = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'vendedor2', password: 'MariaPassword1!' }),
+      });
+      assert.strictEqual(v2Login.status, 403);
+
+      const delRes = await fetch(`${baseUrl}/api/accounts/${vendedor2Account.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_UPDATED_PASSWORD }),
+      });
+      assert.strictEqual(delRes.status, 200);
+      const delData = await delRes.json();
+      assert.strictEqual(delData.accounts.some((a) => a.id === vendedor2Account.id), false);
+    });
+
+    test('Anti-cache headers and Master Reset clear leads, QRs & visitLog cleanly', async () => {
       const stateRes = await fetch(`${baseUrl}/api/state`, {
         headers: { Authorization: `Bearer ${adminSessionToken}` },
       });
-      const state = await stateRes.json();
-      assert.ok(state.leads.some((l) => l.name === 'Lead Protegido Master'));
+      assert.strictEqual(stateRes.status, 200);
+      assert.match(stateRes.headers.get('cache-control') || '', /no-store/i);
+      assert.strictEqual(stateRes.headers.get('pragma'), 'no-cache');
+
+      const resetRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_UPDATED_PASSWORD, resetCatalogAndSettings: true }),
+      });
+      assert.strictEqual(resetRes.status, 200);
+      const resetData = await resetRes.json();
+      assert.deepStrictEqual(resetData.state.leads, []);
+      assert.deepStrictEqual(resetData.state.qrHistory, []);
+      assert.deepStrictEqual(resetData.state.visitLog, []);
+      assert.strictEqual(resetData.state.gifts.length, 9);
+    });
+  });
+
+  describe('5. Regression Suite: Live Supabase Schema Drift, Legacy dsb_auth & Referrer Sync', () => {
+    test('persistNewAuthAccount / persistUpdatedAuthAccount send non-null pin_hash="" for vendedor, survive missing dsb_auth columns via meta_v1 fallback, and resolve legacy id="caller"', async () => {
+      memoryAccountMeta.clear();
+      memoryAccountDbIds.clear();
+
+      // Simulate legacy live Supabase dsb_auth table:
+      // - pin_hash is NOT NULL (rejects null with 23502)
+      // - master_hash is NOT NULL (rejects null/missing on POST with 23502)
+      // - display_name, tag, avatar_url, active, token_version, created_at DO NOT EXIST (PGRST204)
+      const legacyColumns = new Set([
+        'id',
+        'username',
+        'role',
+        'password_hash',
+        'pin_hash',
+        'master_hash',
+        'pre_auth_token',
+        'updated_at',
+      ]);
+      const mockTable = new Map([
+        [
+          'caller',
+          {
+            id: 'caller',
+            username: 'Caller',
+            role: 'caller',
+            password_hash: 'sha256$s$h',
+            pin_hash: '',
+            master_hash: '',
+            pre_auth_token: null,
+            updated_at: '2026-11-20T00:00:00.000Z',
+          },
+        ],
+      ]);
+
+      const mockRest = async (restPath, init = {}) => {
+        const method = init.method || 'GET';
+        const body = init.body ? JSON.parse(init.body) : null;
+        if (method === 'POST' && restPath === 'dsb_auth') {
+          for (const col of Object.keys(body)) {
+            if (!legacyColumns.has(col)) {
+              const err = new Error(`Could not find the '${col}' column of 'dsb_auth' in the schema cache`);
+              err.code = 'PGRST204';
+              throw err;
+            }
+          }
+          if (body.pin_hash === null || body.pin_hash === undefined) {
+            const err = new Error('null value in column "pin_hash" of relation "dsb_auth" violates not-null constraint');
+            err.code = '23502';
+            throw err;
+          }
+          if (body.master_hash === null || body.master_hash === undefined) {
+            const err = new Error('null value in column "master_hash" of relation "dsb_auth" violates not-null constraint');
+            err.code = '23502';
+            throw err;
+          }
+          mockTable.set(body.id, { ...body });
+          return null;
+        }
+        if (method === 'PATCH' && restPath.startsWith('dsb_auth?id=eq.')) {
+          const targetId = decodeURIComponent(restPath.split('id=eq.')[1]);
+          for (const col of Object.keys(body)) {
+            if (!legacyColumns.has(col)) {
+              const err = new Error(`Could not find the '${col}' column of 'dsb_auth' in the schema cache`);
+              err.code = 'PGRST204';
+              throw err;
+            }
+          }
+          if ('pin_hash' in body && body.pin_hash === null) {
+            const err = new Error('null value in column "pin_hash" of relation "dsb_auth" violates not-null constraint');
+            err.code = '23502';
+            throw err;
+          }
+          const existing = mockTable.get(targetId);
+          if (existing) {
+            mockTable.set(targetId, { ...existing, ...body });
+          }
+          return null;
+        }
+        if (method === 'DELETE' && restPath.startsWith('dsb_auth?id=eq.')) {
+          const targetId = decodeURIComponent(restPath.split('id=eq.')[1]);
+          mockTable.delete(targetId);
+          return null;
+        }
+        throw new Error(`Unexpected mock call: ${method} ${restPath}`);
+      };
+
+      const vendedorAcc = {
+        id: 'usr-vend-legacy-1',
+        username: 'pedrov',
+        displayName: 'Pedro Ventas',
+        role: 'vendedor',
+        tag: 'PEDRO-VIP',
+        avatarUrl: 'https://cdn.example.com/pedro.png',
+        active: true,
+        passwordSalt: 'aabbcc',
+        passwordHash: 'scrypt$aabbcc$ddeeff',
+        pinSalt: null,
+        pinHash: null,
+        tokenVersion: 1,
+        createdAt: '2026-11-25T10:00:00.000Z',
+        updatedAt: '2026-11-25T10:00:00.000Z',
+      };
+
+      await persistNewAuthAccount(vendedorAcc, mockRest);
+
+      const storedRow = mockTable.get(vendedorAcc.id);
+      assert.ok(storedRow, 'Vendedor row must be inserted into legacy dsb_auth');
+      assert.strictEqual(storedRow.pin_hash, '', 'Non-admin pin_hash must be empty string, never null');
+      assert.strictEqual(storedRow.master_hash, '', 'master_hash must be preserved as non-null empty string');
+      assert.strictEqual(storedRow.role, 'vendedor');
+      assert.ok(
+        typeof storedRow.pre_auth_token === 'string' && storedRow.pre_auth_token.startsWith('meta_v1:'),
+        'Compact legacy metadata fallback must be persisted when optional columns are missing'
+      );
+
+      // Simulate server restart / cold start by clearing in-memory metadata map
+      memoryAccountMeta.clear();
+      const reloaded = mapAuthAccountRow(storedRow);
+      assert.strictEqual(reloaded.displayName, 'Pedro Ventas');
+      assert.strictEqual(reloaded.tag, 'PEDRO-VIP');
+      assert.strictEqual(reloaded.active, true);
+      assert.strictEqual(reloaded.tokenVersion, 1);
+      assert.strictEqual(reloaded.pinHash, null);
+
+      // Update account: deactivate + bump tokenVersion + rename tag -> survives restart
+      const updatedVendedor = {
+        ...vendedorAcc,
+        displayName: 'Pedro VIP Pro',
+        tag: 'PEDRO-PRO',
+        active: false,
+        tokenVersion: 2,
+        updatedAt: '2026-11-25T11:00:00.000Z',
+      };
+      await persistUpdatedAuthAccount(updatedVendedor, mockRest);
+      memoryAccountMeta.clear();
+      const reloadedAfterPatch = mapAuthAccountRow(mockTable.get(vendedorAcc.id));
+      assert.strictEqual(reloadedAfterPatch.displayName, 'Pedro VIP Pro');
+      assert.strictEqual(reloadedAfterPatch.tag, 'PEDRO-PRO');
+      assert.strictEqual(reloadedAfterPatch.active, false);
+      assert.strictEqual(reloadedAfterPatch.tokenVersion, 2);
+
+      // Legacy id="caller" row maps to id="telemarketing", and PATCH/DELETE target real DB id="caller"
+      const mappedTele = mapAuthAccountRow(mockTable.get('caller'));
+      assert.strictEqual(mappedTele.id, 'telemarketing');
+      assert.strictEqual(memoryAccountDbIds.get('telemarketing'), 'caller');
+
+      await persistUpdatedAuthAccount(
+        {
+          ...mappedTele,
+          displayName: 'Equipo Telemarketing',
+          tokenVersion: 3,
+          updatedAt: '2026-11-25T12:00:00.000Z',
+        },
+        mockRest
+      );
+      assert.strictEqual(mockTable.get('caller').username, 'Telemarketing');
+      assert.strictEqual(mockTable.get('caller').role, 'telemarketing');
+      assert.strictEqual(decodeAccountLegacyMeta(mockTable.get('caller').pre_auth_token)?.tokenVersion, 3);
+
+      await persistDeletedAuthAccount(vendedorAcc.id, mockRest);
+      assert.strictEqual(mockTable.has(vendedorAcc.id), false);
+
+      // Verify exact column matching & empty PATCH guard in supabaseWriteWithOptionalColumns
+      let patchCount = 0;
+      await supabaseWriteWithOptionalColumns(
+        'leads?id=eq.lead-x',
+        'PATCH',
+        {},
+        { promo_code_invalidated: true, promo_code_invalidated_at: '2026-11-25T00:00:00.000Z' },
+        ['promo_code_invalidated', 'promo_code_invalidated_at'],
+        async (_p, init) => {
+          patchCount += 1;
+          const b = JSON.parse(init.body);
+          if ('promo_code_invalidated_at' in b) {
+            const e = new Error("Could not find the 'promo_code_invalidated_at' column of 'leads' in the schema cache");
+            e.code = 'PGRST204';
+            throw e;
+          }
+          if ('promo_code_invalidated' in b) {
+            const e = new Error("Could not find the 'promo_code_invalidated' column of 'leads' in the schema cache");
+            e.code = 'PGRST204';
+            throw e;
+          }
+          throw new Error('Should not send empty PATCH {}');
+        }
+      );
+      assert.strictEqual(patchCount, 2, 'Must strip one column at a time and skip empty PATCH {} cleanly');
+
+      // Verify mapReferrerRow & mapQrRow fallback to memory accountId maps when account_id column is missing
+      memoryReferrerAccountIds.set('ref-legacy-1', 'usr-vend-legacy-1');
+      const mappedRef = mapReferrerRow({
+        id: 'ref-legacy-1',
+        name: 'Pedro Ventas',
+        code: 'PEDRO-VIP',
+        active: true,
+        visits_count: 0,
+        unique_visits_count: 0,
+        created_at: '2026-11-25T10:00:00.000Z',
+      });
+      assert.strictEqual(mappedRef.accountId, 'usr-vend-legacy-1');
+      memoryReferrerAccountIds.delete('ref-legacy-1');
+
+      memoryQrAccountIds.set('qr-legacy-1', 'usr-vend-legacy-1');
+      const mappedQr = mapQrRow({
+        id: 'qr-legacy-1',
+        name: 'QR Pedro',
+        target_url: 'https://example.com/?ref=PEDRO-VIP',
+        referral_code: 'PEDRO-VIP',
+        referrer_id: 'ref-legacy-1',
+        created_at: '2026-11-25T10:00:00.000Z',
+      });
+      assert.strictEqual(mappedQr.accountId, 'usr-vend-legacy-1');
+      memoryQrAccountIds.delete('qr-legacy-1');
+
+      // Verify encodeAccountLegacyMeta / decodeAccountLegacyMeta roundtrip
+      const encoded = encodeAccountLegacyMeta({
+        displayName: 'Test User',
+        tag: 'TEST-01',
+        active: false,
+        tokenVersion: 4,
+        createdAt: '2026-11-25T00:00:00.000Z',
+      });
+      assert.deepStrictEqual(decodeAccountLegacyMeta(encoded), {
+        displayName: 'Test User',
+        tag: 'TEST-01',
+        active: false,
+        tokenVersion: 4,
+        createdAt: '2026-11-25T00:00:00.000Z',
+      });
+      assert.strictEqual(decodeAccountLegacyMeta('random-hex-token'), null);
+
+      memoryAccountMeta.clear();
+      memoryAccountDbIds.clear();
     });
 
-    test('Admin POST /api/admin/reset-all with valid Master Password clears leads & QR history to 0 cleanly', async () => {
-      const qrRes = await fetch(`${baseUrl}/api/qr`, {
+    test('Vendedor creation + linked referrer lifecycle + PATCH /api/referrals/:id syncs tag/name back to account + delete deactivates referrer', async () => {
+      // Create a fresh vendedor account with empty avatarUrl string (as UI forms often send)
+      // Note: Section 4 rotated AdminCiprian's password to ADMIN_UPDATED_PASSWORD
+      const createRes = await fetch(`${baseUrl}/api/accounts`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: 'QR Temporal Reset',
-          targetUrl: 'https://royal.ciprian.example/reset-test',
+          adminPassword: ADMIN_UPDATED_PASSWORD,
+          username: 'vendedor_reg_1',
+          displayName: 'Lucía Vendedora',
+          role: 'vendedor',
+          tag: 'lucia-ventas',
+          avatarUrl: '',
+          password: 'LuciaPassword1!',
+          confirmPassword: 'LuciaPassword1!',
         }),
       });
-      assert.strictEqual(qrRes.status, 201);
+      assert.strictEqual(createRes.status, 201);
+      const created = await createRes.json();
+      assert.strictEqual(created.ok, true);
+      assert.strictEqual(created.account.tag, 'LUCIA-VENTAS');
+      assert.strictEqual(created.account.avatarUrl, null);
+      assert.ok(created.referrer);
+      assert.strictEqual(created.referrer.accountId, created.account.id);
+      assert.strictEqual(created.referrer.code, 'LUCIA-VENTAS');
 
-      const okRes = await fetch(`${baseUrl}/api/admin/reset-all`, {
+      // Update referrer code/name via PATCH /api/referrals/:id -> syncs tag/displayName back to vendedor account
+      const patchRef = await fetch(`${baseUrl}/api/referrals/${created.referrer.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: ADMIN_UPDATED_PASSWORD,
+          name: 'Lucía Elite',
+          code: 'LUCIA-ELITE',
+        }),
+      });
+      assert.strictEqual(patchRef.status, 200);
+      const patchRefData = await patchRef.json();
+      assert.strictEqual(patchRefData.referrer.code, 'LUCIA-ELITE');
+      const syncedAccount = patchRefData.state.accounts.find((a) => a.id === created.account.id);
+      assert.strictEqual(syncedAccount.tag, 'LUCIA-ELITE');
+      assert.strictEqual(syncedAccount.displayName, 'Lucía Elite');
+
+      // Delete vendedor account -> account removed and linked referrer deactivated
+      const delRes = await fetch(`${baseUrl}/api/accounts/${created.account.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_UPDATED_PASSWORD }),
+      });
+      assert.strictEqual(delRes.status, 200);
+      const delData = await delRes.json();
+      assert.strictEqual(delData.accounts.some((a) => a.id === created.account.id), false);
+      const deactivatedRef = delData.state.referrers.find((r) => r.id === created.referrer.id);
+      assert.strictEqual(deactivatedRef.active, false);
+      assert.strictEqual(deactivatedRef.accountId, null);
+    });
+  });
+
+  describe('6. Multi-Admin Per-Account Password Isolation for Vendedor & Telemarketing Creation', () => {
+    test('Each logged-in Admin must authorize vendedor/telemarketing creation strictly with their OWN password (never another admin password or master key)', async () => {
+      const adminBPassword = 'AdminB_Distinct2026!';
+      const adminBPin = '2468';
+      const pwdHashed = hashSecret(adminBPassword);
+      const pinHashed = hashSecret(adminBPin);
+      const nowIso = new Date().toISOString();
+
+      await persistNewAuthAccount({
+        id: 'admin-segundo',
+        username: 'AdminSegundo',
+        displayName: 'Segundo Administrador',
+        role: 'admin',
+        tag: 'ADMIN-SEGUNDO',
+        avatarUrl: null,
+        active: true,
+        passwordSalt: pwdHashed.salt,
+        passwordHash: pwdHashed.hash,
+        pinSalt: pinHashed.salt,
+        pinHash: pinHashed.hash,
+        tokenVersion: 1,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+
+      // Log in as Admin B (2FA)
+      const bStep1 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminSegundo', password: adminBPassword }),
+      });
+      assert.strictEqual(bStep1.status, 200);
+      const bD1 = await bStep1.json();
+      assert.strictEqual(bD1.requiresPin, true);
+
+      const bStep2 = await fetch(`${baseUrl}/api/auth/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: bD1.preAuthToken, pin: adminBPin }),
+      });
+      assert.strictEqual(bStep2.status, 200);
+      const adminBToken = (await bStep2.json()).sessionToken;
+      assert.strictEqual(typeof adminBToken, 'string');
+
+      // --- Admin B session checks ---
+      // Admin B trying Admin A's current password -> 401
+      const bWithAdminAPwd = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminBToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: ADMIN_UPDATED_PASSWORD,
+          username: 'vend_b_fail_1',
+          displayName: 'Fallido Uno',
+          role: 'vendedor',
+          tag: 'B-FAIL-01',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(bWithAdminAPwd.status, 401);
+      const bFail1 = await bWithAdminAPwd.json();
+      assert.strictEqual(bFail1.locked, false);
+      assert.strictEqual(typeof bFail1.remainingAttempts, 'number');
+
+      // Admin B trying wrong password for telemarketing -> 401
+      const bWithWrongPwd = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminBToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: 'CompletelyWrongPassword!',
+          username: 'tele_b_fail_1',
+          displayName: 'Tele Fallido',
+          role: 'telemarketing',
+          tag: 'TELE-B-FAIL',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(bWithWrongPwd.status, 401);
+
+      // Admin B trying MASTER_KEY for telemarketing -> 401
+      const bWithMasterKey = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminBToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          username: 'tele_b_fail_2',
+          displayName: 'Tele Master Fail',
+          role: 'telemarketing',
+          tag: 'TELE-B-MFAIL',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(bWithMasterKey.status, 401);
+
+      // Admin B creating vendedor with Admin B's own password -> 201
+      const bCreateVend = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminBToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: adminBPassword,
+          username: 'vend_from_admin_b',
+          displayName: 'Vendedor De Admin B',
+          role: 'vendedor',
+          tag: 'VEND-B-01',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(bCreateVend.status, 201);
+      assert.strictEqual((await bCreateVend.json()).account.role, 'vendedor');
+
+      // Admin B creating telemarketing with Admin B's own password via masterPassword compat field -> 201
+      const bCreateTele = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminBToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: adminBPassword,
+          username: 'tele_from_admin_b',
+          displayName: 'Tele De Admin B',
+          role: 'telemarketing',
+          tag: 'TELE-B-01',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(bCreateTele.status, 201);
+      assert.strictEqual((await bCreateTele.json()).account.role, 'telemarketing');
+
+      // --- Admin A session checks (current password is ADMIN_UPDATED_PASSWORD) ---
+      // Admin A trying Admin B's password -> 401
+      const aWithAdminBPwd = await fetch(`${baseUrl}/api/accounts`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${adminSessionToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          masterPassword: 'PoloNorte121966@',
-          resetCatalogAndSettings: true,
+          adminPassword: adminBPassword,
+          username: 'vend_a_fail_1',
+          displayName: 'Fallido Admin A',
+          role: 'vendedor',
+          tag: 'A-FAIL-01',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
         }),
       });
-      assert.strictEqual(okRes.status, 200);
-      const data = await okRes.json();
-      assert.strictEqual(data.ok, true);
-      assert.deepStrictEqual(data.state.leads, []);
-      assert.deepStrictEqual(data.state.qrHistory, []);
-      assert.strictEqual(data.state.gifts.length, 9);
-      assert.strictEqual(data.state.settings.showcaseStyle, 'luminous-gold');
-      assert.strictEqual(data.state.settings.randomizeGifts, true);
+      assert.strictEqual(aWithAdminBPwd.status, 401);
+
+      // Admin A trying its old rotated password -> 401
+      const aWithOldPwd = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: ADMIN_DEFAULT_PASSWORD,
+          username: 'tele_a_fail_1',
+          displayName: 'Tele Old Pwd',
+          role: 'telemarketing',
+          tag: 'TELE-A-OLD',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(aWithOldPwd.status, 401);
+
+      // Admin A creating vendedor with Admin A's current password -> 201
+      const aCreateVend = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: ADMIN_UPDATED_PASSWORD,
+          username: 'vend_from_admin_a',
+          displayName: 'Vendedor De Admin A',
+          role: 'vendedor',
+          tag: 'VEND-A-01',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(aCreateVend.status, 201);
+      assert.strictEqual((await aCreateVend.json()).account.role, 'vendedor');
+
+      // Admin A creating telemarketing with Admin A's current password -> 201
+      const aCreateTele = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: ADMIN_UPDATED_PASSWORD,
+          username: 'tele_from_admin_a',
+          displayName: 'Tele De Admin A',
+          role: 'telemarketing',
+          tag: 'TELE-A-01',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(aCreateTele.status, 201);
+      assert.strictEqual((await aCreateTele.json()).account.role, 'telemarketing');
+
+      // Creating role='admin' ALSO uses logged-in Admin's own password (rejects MASTER_KEY with 401; rejects missing PIN with 400)
+      const roleAdminWithMaster = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          username: 'other_admin',
+          displayName: 'Other Admin',
+          role: 'admin',
+          tag: 'OTHER-ADM',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+          pin: '2468',
+        }),
+      });
+      assert.strictEqual(roleAdminWithMaster.status, 401);
+
+      const roleAdminMissingPin = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: ADMIN_UPDATED_PASSWORD,
+          username: 'other_admin',
+          displayName: 'Other Admin',
+          role: 'admin',
+          tag: 'OTHER-ADM',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(roleAdminMissingPin.status, 400);
+
+      // Rate limit lockout (429) on repeated wrong admin passwords from a tracked IP
+      const testIp = '198.51.100.77';
+      for (let i = 1; i <= 4; i += 1) {
+        const failRes = await fetch(`${baseUrl}/api/accounts`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${adminBToken}`,
+            'Content-Type': 'application/json',
+            'x-test-ip': testIp,
+          },
+          body: JSON.stringify({
+            adminPassword: 'WrongPasswordAttempt!',
+            username: 'lock_test_vend',
+            displayName: 'Lock Test',
+            role: 'vendedor',
+            tag: 'LOCK-TEST',
+            password: 'UserPass123!',
+            confirmPassword: 'UserPass123!',
+          }),
+        });
+        assert.strictEqual(failRes.status, 401);
+        const failBody = await failRes.json();
+        assert.strictEqual(failBody.locked, false);
+        assert.strictEqual(failBody.remainingAttempts, 5 - i);
+      }
+
+      const fifthFail = await fetch(`${baseUrl}/api/accounts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminBToken}`,
+          'Content-Type': 'application/json',
+          'x-test-ip': testIp,
+        },
+        body: JSON.stringify({
+          adminPassword: 'WrongPasswordAttempt!',
+          username: 'lock_test_vend',
+          displayName: 'Lock Test',
+          role: 'vendedor',
+          tag: 'LOCK-TEST',
+          password: 'UserPass123!',
+          confirmPassword: 'UserPass123!',
+        }),
+      });
+      assert.strictEqual(fifthFail.status, 429);
+      const lockedBody = await fifthFail.json();
+      assert.strictEqual(lockedBody.locked, true);
+      assert.ok(lockedBody.retryAfterSeconds > 0);
+      assert.strictEqual(lockedBody.remainingAttempts, 0);
+    });
+  });
+
+  describe('7. Admin-Only Password Change Endpoint (POST /api/accounts/:id/admin-password)', () => {
+    test('Enforces RBAC, security key, confirmation PIN, 2x matching newPassword, admin-only target, token rotation, cross-admin update & lockout', async () => {
+      const adminASelfNewPass = 'AdminASelfRotated2028@';
+      const adminBNewPass = 'AdminBByAdminA2028!';
+
+      // 1. Non-admin callers (telemarketing & vendedor) are rejected with 403
+      const teleCall = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${teleSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(teleCall.status, 403);
+
+      const vendCall = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${vendedor1Token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(vendCall.status, 403);
+
+      // 2. Wrong security key -> 401
+      const wrongKey = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: 'WrongSecurityKey999!',
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(wrongKey.status, 401);
+      const wrongKeyBody = await wrongKey.json();
+      assert.strictEqual(wrongKeyBody.error, 'Clave de seguridad incorrecta.');
+      assert.strictEqual(wrongKeyBody.locked, false);
+      assert.strictEqual(typeof wrongKeyBody.remainingAttempts, 'number');
+
+      // 3. Wrong confirmation PIN -> 401
+      const wrongPin = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: '0000',
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(wrongPin.status, 401);
+      const wrongPinBody = await wrongPin.json();
+      assert.strictEqual(wrongPinBody.error, 'PIN de confirmación incorrecto.');
+      assert.strictEqual(wrongPinBody.locked, false);
+      assert.strictEqual(typeof wrongPinBody.remainingAttempts, 'number');
+
+      // 4. Short newPassword (<8 chars) & mismatched confirmNewPassword -> 400
+      const shortPass = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: 'short1!',
+          confirmNewPassword: 'short1!',
+        }),
+      });
+      assert.strictEqual(shortPass.status, 400);
+
+      const mismatchPass = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: 'DifferentConfirm2028@',
+        }),
+      });
+      assert.strictEqual(mismatchPass.status, 400);
+      const mismatchBody = await mismatchPass.json();
+      assert.strictEqual(mismatchBody.error, 'La confirmación de la nueva contraseña no coincide.');
+
+      // 5. Rejects ANY target id !== req.dsbSession.userId (vendedor, telemarketing, unknown, or other admin) with 403 Forbidden
+      const nonAdminVend = await fetch(`${baseUrl}/api/accounts/${vendedor1Account.id}/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(nonAdminVend.status, 403);
+
+      const nonAdminTele = await fetch(`${baseUrl}/api/accounts/telemarketing/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(nonAdminTele.status, 403);
+
+      const missingTarget = await fetch(`${baseUrl}/api/accounts/nonexistent-admin-id/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(missingTarget.status, 403);
+
+      // 6. Self update (Admin A updates Admin A): returns fresh sessionToken, revokes old token, logs audit alert, 2FA works with new password & rejects old
+      const oldAdminAToken = adminSessionToken;
+      const selfOk = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${oldAdminAToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminASelfNewPass,
+          confirmNewPassword: adminASelfNewPass,
+        }),
+      });
+      assert.strictEqual(selfOk.status, 200);
+      const selfData = await selfOk.json();
+      assert.strictEqual(selfData.ok, true);
+      assert.strictEqual(selfData.message, 'Contraseña de administrador actualizada correctamente.');
+      assert.strictEqual(typeof selfData.sessionToken, 'string');
+      assert.strictEqual(selfData.account.id, 'default');
+      assert.strictEqual(selfData.account.passwordHash, undefined);
+      adminSessionToken = selfData.sessionToken;
+
+      // Old token revoked, fresh token active
+      const oldASess = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${oldAdminAToken}` },
+      });
+      assert.strictEqual(oldASess.status, 401);
+
+      const newASess = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(newASess.status, 200);
+
+      // Old password rejected on login
+      const oldALogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminCiprian', password: ADMIN_UPDATED_PASSWORD }),
+      });
+      assert.strictEqual(oldALogin.status, 401);
+
+      // New password succeeds via 2FA login + PIN 1966
+      const newALogin1 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminCiprian', password: adminASelfNewPass }),
+      });
+      assert.strictEqual(newALogin1.status, 200);
+      const newALogin1Data = await newALogin1.json();
+      assert.strictEqual(newALogin1Data.requiresPin, true);
+
+      const newALogin2 = await fetch(`${baseUrl}/api/auth/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: newALogin1Data.preAuthToken, pin: '1966' }),
+      });
+      assert.strictEqual(newALogin2.status, 200);
+      assert.strictEqual(typeof (await newALogin2.json()).sessionToken, 'string');
+
+      // Audit event recorded in securityAlerts
+      const stateAfterSelf = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${adminSessionToken}` },
+        })
+      ).json();
+      const selfAudit = (stateAfterSelf.securityAlerts || []).find(
+        (a) =>
+          a.code === 'admin_audit_event' &&
+          a.category === 'audit' &&
+          a.severity === 'medium' &&
+          a.metadata?.action === 'admin_password_change' &&
+          a.metadata?.targetAccountId === 'default'
+      );
+      assert.ok(selfAudit, 'Expected admin_audit_event for Admin A self password update');
+
+      // 7. Strict Self-Only Cross-Admin Block: Admin A attempting to change Admin B's ("admin-segundo") password -> 403 + critical alert
+      // First establish an active Admin B session so we can prove it stays untouched
+      const bPre1 = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminSegundo', password: 'AdminB_Distinct2026!' }),
+      });
+      assert.strictEqual(bPre1.status, 200);
+      const bPre2 = await fetch(`${baseUrl}/api/auth/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preAuthToken: (await bPre1.json()).preAuthToken, pin: '2468' }),
+      });
+      assert.strictEqual(bPre2.status, 200);
+      const oldAdminBToken = (await bPre2.json()).sessionToken;
+
+      // Admin A attempting to update Admin B (even WITH valid MASTER_KEY + PIN 1532) MUST return 403
+      const crossBlocked = await fetch(`${baseUrl}/api/accounts/admin-segundo/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          masterPassword: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: adminBNewPass,
+          confirmNewPassword: adminBNewPass,
+        }),
+      });
+      assert.strictEqual(crossBlocked.status, 403);
+
+      // Both sessions remain valid and Admin B's original password still works (unchanged)
+      const aStillValid = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${adminSessionToken}` },
+      });
+      assert.strictEqual(aStillValid.status, 200);
+
+      const bStillValid = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { Authorization: `Bearer ${oldAdminBToken}` },
+      });
+      assert.strictEqual(bStillValid.status, 200);
+
+      const bOrigLogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminSegundo', password: 'AdminB_Distinct2026!' }),
+      });
+      assert.strictEqual(bOrigLogin.status, 200);
+
+      const bForgedLogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'AdminSegundo', password: adminBNewPass }),
+      });
+      assert.strictEqual(bForgedLogin.status, 401);
+
+      // Critical security alert recorded for cross-admin password attempt
+      const stateAfterCross = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${adminSessionToken}` },
+        })
+      ).json();
+      assert.ok(
+        (stateAfterCross.securityAlerts || []).some(
+          (a) =>
+            a.code === 'rbac_unauthorized_attempt' &&
+            a.severity === 'critical' &&
+            a.metadata?.reason === 'cross_admin_password_attempt' &&
+            a.metadata?.targetAccountId === 'admin-segundo'
+        ),
+        'Expected critical rbac_unauthorized_attempt alert for cross-admin password attempt'
+      );
+
+      // 8. Rate-limit lockout on admin_pw_change bucket (5 failures -> 429)
+      const pwTestIp = '203.0.113.88';
+      for (let i = 1; i <= 4; i += 1) {
+        const failRes = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            'Content-Type': 'application/json',
+            'x-test-ip': pwTestIp,
+          },
+          body: JSON.stringify({
+            securityKey: i % 2 === 0 ? MASTER_KEY : 'WrongKey!',
+            confirmationPin: i % 2 === 0 ? '9999' : ADMIN_CHANGE_PIN,
+            newPassword: 'AnotherPass2029!',
+            confirmNewPassword: 'AnotherPass2029!',
+          }),
+        });
+        assert.strictEqual(failRes.status, 401);
+        const failBody = await failRes.json();
+        assert.strictEqual(failBody.locked, false);
+        assert.strictEqual(failBody.remainingAttempts, 5 - i);
+      }
+
+      const fifthFail = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+          'x-test-ip': pwTestIp,
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: '9999',
+          newPassword: 'AnotherPass2029!',
+          confirmNewPassword: 'AnotherPass2029!',
+        }),
+      });
+      assert.strictEqual(fifthFail.status, 429);
+      const lockedData = await fifthFail.json();
+      assert.strictEqual(lockedData.locked, true);
+      assert.ok(lockedData.retryAfterSeconds > 0);
+      assert.strictEqual(lockedData.remainingAttempts, 0);
+
+      // Even with valid credentials, locked IP gets 429
+      const blockedValid = await fetch(`${baseUrl}/api/accounts/default/admin-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminSessionToken}`,
+          'Content-Type': 'application/json',
+          'x-test-ip': pwTestIp,
+        },
+        body: JSON.stringify({
+          securityKey: MASTER_KEY,
+          confirmationPin: ADMIN_CHANGE_PIN,
+          newPassword: 'AnotherPass2029!',
+          confirmNewPassword: 'AnotherPass2029!',
+        }),
+      });
+      assert.strictEqual(blockedValid.status, 429);
+      const blockedBody = await blockedValid.json();
+      assert.strictEqual(blockedBody.locked, true);
+      assert.strictEqual(blockedBody.remainingAttempts, 0);
     });
   });
 });

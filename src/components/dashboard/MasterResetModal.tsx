@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, Eye, EyeOff, RotateCcw, ShieldAlert, Trash2, X } from 'lucide-react';
 import { DsbAuthError } from '../../services/storeClient';
@@ -20,6 +20,15 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!open) {
+      setMasterPassword('');
+      setShowPassword(false);
+      setError(null);
+      setSubmitting(false);
+    }
+  }, [open]);
+
   const handleClose = () => {
     if (submitting) return;
     setMasterPassword('');
@@ -31,7 +40,7 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
     e.preventDefault();
     setError(null);
     if (!masterPassword) {
-      setError('Ingresa la contraseña maestra de autorización.');
+      setError('Ingresa tu contraseña de Administrador para confirmar el reinicio.');
       return;
     }
 
@@ -62,27 +71,29 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#120804]/78 px-3.5 sm:px-4 py-4 sm:py-6 backdrop-blur-sm sm:backdrop-blur-md overflow-y-auto"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#120804]/78 px-3 sm:px-4 py-3 sm:py-6 backdrop-blur-sm sm:backdrop-blur-md overflow-y-auto"
+          onClick={handleClose}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.94, y: 14 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="relative w-full max-w-[460px] max-h-[90dvh] overflow-y-auto rounded-[24px] sm:rounded-[28px] border border-[#C88A2B]/50 bg-gradient-to-b from-[#23140D] via-[#1A0E08] to-[#120804] p-5 sm:p-6 text-[#FFFDF9] shadow-[0_32px_80px_-14px_rgba(0,0,0,0.85)]"
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-[460px] max-h-[90dvh] overflow-y-auto rounded-[22px] sm:rounded-[28px] border border-[#C88A2B]/50 bg-gradient-to-b from-[#23140D] via-[#1A0E08] to-[#120804] p-4 sm:p-6 text-[#FFFDF9] shadow-[0_32px_80px_-14px_rgba(0,0,0,0.85)]"
           >
             <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#8C3318] via-[#F4CA73] to-[#C88A2B]" />
 
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-start justify-between gap-2.5 sm:gap-3">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                 <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-rose-400/35 bg-rose-500/15 text-rose-300">
                   <Trash2 className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
                   <span className="text-[10px] font-bold uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[#F4CA73] block">
-                    Autorización Maestra Requerida
+                    Autorización de Administrador
                   </span>
-                  <h2 id="master-reset-title" className="font-serif text-lg sm:text-xl font-bold text-white leading-snug">
+                  <h2 id="master-reset-title" className="font-serif text-base sm:text-xl font-bold text-white leading-snug break-words">
                     Reiniciar Métricas y Todo desde 0
                   </h2>
                 </div>
@@ -121,17 +132,19 @@ export const MasterResetModal: React.FC<MasterResetModalProps> = ({
               <div className="space-y-1.5">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-[#F4CA73]">
                   <ShieldAlert className="h-3.5 w-3.5" />
-                  Contraseña Maestra de Autorización
+                  Tu contraseña de Administrador
                 </label>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    autoFocus
+                    disabled={submitting}
                     value={masterPassword}
                     onChange={(e) => {
                       setMasterPassword(e.target.value);
                       setError(null);
                     }}
-                    placeholder="Ingresa tu contraseña maestra"
+                    placeholder="Ingresa tu contraseña de acceso"
                     className="w-full min-h-[44px] rounded-xl border border-[#F4CA73]/40 bg-[#110804] pl-3.5 pr-12 py-2.5 text-base sm:text-sm text-white placeholder:text-white/35 focus:border-[#F4CA73] focus:outline-none"
                   />
                   <button

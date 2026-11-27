@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   Briefcase,
   Calendar,
+  CalendarCheck2,
   Check,
+  Clock,
   Download,
   Eye,
   EyeOff,
@@ -14,6 +16,7 @@ import {
   MapPin,
   MessageCircle,
   Package,
+  PauseCircle,
   Phone,
   PhoneCall,
   Plus,
@@ -22,20 +25,34 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   StickyNote,
   Trash2,
   X,
 } from 'lucide-react';
-import type { GiftItem, Lead, LeadCategory, ReferralPartner } from '../../types/app';
+import type {
+  CallOutcome,
+  GiftItem,
+  Lead,
+  LeadCategory,
+  ReferralPartner,
+  UserAccount,
+  UserRole,
+} from '../../types/app';
 import { GiftIllustration } from '../gifts/GiftIllustration';
+import { AmbassadorAvatar } from '../shared/AmbassadorAvatar';
 import type { KpiFilterKey } from './KpiGrid';
+import { getRoleTheme } from './roleTheme';
 
 export interface LeadUpdatePayload {
   called?: boolean;
+  callOutcome?: CallOutcome;
   category?: LeadCategory;
   orderAmount?: number | null;
   notes?: string;
   promoCodeInvalidated?: boolean;
+  sellerLocked?: boolean;
+  confirmLock?: boolean;
   adminPassword?: string;
 }
 
@@ -48,17 +65,28 @@ interface ProspectsManagerProps {
   leads: Lead[];
   gifts: GiftItem[];
   referrers?: ReferralPartner[];
+  accounts?: UserAccount[];
+  userRole?: UserRole;
+  currentUser?: {
+    userId?: string;
+    displayName?: string;
+    username?: string;
+    tag?: string;
+  } | null;
+  hideOriginFilter?: boolean;
   defaultTicketAmount: number;
   activeFilter: KpiFilterKey;
   onFilterChange: (filter: KpiFilterKey) => void;
   onUpdateLead: (id: string, updates: LeadUpdatePayload) => Promise<void>;
-  onCreateManualLead: (payload: {
+  onCreateManualLead?: (payload: {
     name: string;
     phone: string;
     address: string;
     giftId: string;
+    referrerId?: string | null;
+    referralCode?: string | null;
   }) => Promise<void>;
-  onDeleteLead: (id: string) => Promise<void>;
+  onDeleteLead?: (id: string) => Promise<void>;
   onBusyChange?: (busy: boolean) => void;
 }
 
@@ -67,6 +95,13 @@ const CATEGORY_LABELS: Record<LeadCategory, string> = {
   cita: 'Cita',
   demo: 'Demo',
   orden: 'Orden',
+};
+
+const CATEGORY_RANK: Record<LeadCategory, number> = {
+  none: 0,
+  cita: 1,
+  demo: 2,
+  orden: 3,
 };
 
 function isPromoCodeInvalidated(lead: Lead): boolean {
@@ -128,14 +163,16 @@ function getUsCreditDisplay(lead: Lead): {
 
 const FILTER_PILLS: Array<{ key: KpiFilterKey; label: string }> = [
   { key: 'all', label: 'Todos' },
-  { key: 'vip', label: '🔥 Buen Crédito (VIP)' },
-  { key: 'client', label: 'Es cliente' },
-  { key: 'non_client', label: 'No es cliente' },
-  { key: 'pending', label: 'Por llamar' },
-  { key: 'called', label: 'Ya llamados' },
+  { key: 'pending', label: 'Pend. Telemarketing' },
+  { key: 'scheduled', label: 'Agendados' },
+  { key: 'reposo', label: 'En Reposo' },
   { key: 'cita', label: 'Citas' },
   { key: 'demo', label: 'Demos' },
   { key: 'orden', label: 'Órdenes' },
+  { key: 'vip', label: '🔥 Buen Crédito (VIP)' },
+  { key: 'client', label: 'Es cliente' },
+  { key: 'non_client', label: 'No es cliente' },
+  { key: 'called', label: 'Ya llamados' },
 ];
 
 const CATEGORIES: Array<{
@@ -179,6 +216,10 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   leads,
   gifts,
   referrers = [],
+  accounts = [],
+  userRole = 'admin',
+  currentUser = null,
+  hideOriginFilter = false,
   defaultTicketAmount,
   activeFilter,
   onFilterChange,
@@ -187,29 +228,44 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   onDeleteLead,
   onBusyChange,
 }) => {
+  const isAdmin = userRole === 'admin';
+  const isVendedor = userRole === 'vendedor';
+  const roleTheme = getRoleTheme(userRole);
+
   const [search, setSearch] = useState('');
   const [originFilter, setOriginFilter] = useState<string>('all');
   const [lockedHintId, setLockedHintId] = useState<string | null>(null);
   const [togglingLeadId, setTogglingLeadId] = useState<string | null>(null);
+  const [updatingCategoryLeadId, setUpdatingCategoryLeadId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [expandedNotesId, setExpandedNotesId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   const [amountDraft, setAmountDraft] = useState<Record<string, string>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingLeadId, setDeletingLeadId] = useState<string | null>(null);
 
-  // Manual Lead Modal
+  const defaultGiftId = useMemo(
+    () => gifts.find((g) => g.active)?.id || gifts[0]?.id || '',
+    [gifts]
+  );
+
+  // Manual Lead Modal (Admin & Vendedor)
   const [manualOpen, setManualOpen] = useState(false);
   const [manualName, setManualName] = useState('');
   const [manualPhone, setManualPhone] = useState('');
   const [manualAddress, setManualAddress] = useState('');
-  const [manualGiftId, setManualGiftId] = useState(gifts[0]?.id || '');
+  const [manualGiftId, setManualGiftId] = useState(defaultGiftId);
+  const [manualReferrerKey, setManualReferrerKey] = useState('');
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
 
-  // Security Confirmation Modal (assigning / progressing category -> invalidates promo code & locks card)
+  // Security Confirmation Modal (assigning / progressing to Orden)
   const [confirmCategoryModal, setConfirmCategoryModal] = useState<{
     lead: Lead;
     targetCategory: Exclude<LeadCategory, 'none'>;
   } | null>(null);
   const [confirmOrderAmount, setConfirmOrderAmount] = useState('');
+  const [confirmNotes, setConfirmNotes] = useState('');
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [savingOrderAmountId, setSavingOrderAmountId] = useState<string | null>(null);
@@ -218,7 +274,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   const [adminRevertModal, setAdminRevertModal] = useState<{
     lead: Lead;
     targetCategory: LeadCategory;
-    mode: 'revert' | 'downgrade' | 'unmark_called';
+    mode: 'reactivate_code' | 'downgrade' | 'unmark_called';
   } | null>(null);
   const [adminPassword, setAdminPassword] = useState('');
   const [showAdminPassword, setShowAdminPassword] = useState(false);
@@ -231,6 +287,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       Boolean(confirmCategoryModal) ||
       Boolean(adminRevertModal) ||
       Boolean(togglingLeadId) ||
+      Boolean(updatingCategoryLeadId) ||
       Boolean(savingOrderAmountId) ||
       expandedNotesId !== null;
     onBusyChange?.(busy);
@@ -240,6 +297,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     confirmCategoryModal,
     adminRevertModal,
     togglingLeadId,
+    updatingCategoryLeadId,
     savingOrderAmountId,
     expandedNotesId,
     onBusyChange,
@@ -261,24 +319,59 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     return map;
   }, [referrers]);
 
-  const resolveLeadReferral = (lead: Lead): { code: string; name: string | null; partnerId: string | null } | null => {
+  const accountByTag = useMemo(() => {
+    const map = new Map<string, UserAccount>();
+    for (const acc of accounts) {
+      if (acc.role !== 'vendedor') continue;
+      map.set(acc.tag.trim().toUpperCase(), acc);
+    }
+    return map;
+  }, [accounts]);
+
+  const resolveLeadReferral = (
+    lead: Lead
+  ): {
+    code: string;
+    name: string | null;
+    partnerId: string | null;
+    avatarUrl: string | null;
+    emoji: string | null;
+    isEmbajador: boolean;
+    ownerVendedorName: string | null;
+    ownerVendedorTag: string | null;
+  } | null => {
     const rawCode = (lead.referralCode || '').trim().toUpperCase();
     const matchedPartner =
       (lead.referrerId ? referrerById.get(lead.referrerId) : undefined) ||
       (rawCode ? referrerByCode.get(rawCode) : undefined);
+    const codeUpper = rawCode || (matchedPartner?.code || '').trim().toUpperCase();
+    const matchedAccount = codeUpper ? accountByTag.get(codeUpper) : undefined;
+    const avatarUrl = matchedPartner?.avatarUrl ?? matchedAccount?.avatarUrl ?? null;
+    const emoji = matchedPartner?.emoji ?? null;
+    const isEmbajador = matchedPartner?.partnerType === 'embajador';
 
     if (matchedPartner) {
       return {
         code: rawCode || matchedPartner.code,
         name: matchedPartner.name,
         partnerId: matchedPartner.id,
+        avatarUrl,
+        emoji,
+        isEmbajador,
+        ownerVendedorName: matchedPartner.ownerVendedorName ?? null,
+        ownerVendedorTag: matchedPartner.ownerVendedorTag ?? null,
       };
     }
     if (rawCode || lead.referrerName) {
       return {
         code: rawCode,
-        name: lead.referrerName || null,
-        partnerId: lead.referrerId || null,
+        name: lead.referrerName || matchedAccount?.displayName || null,
+        partnerId: lead.referrerId || matchedAccount?.referrerId || null,
+        avatarUrl,
+        emoji: null,
+        isEmbajador: false,
+        ownerVendedorName: null,
+        ownerVendedorTag: null,
       };
     }
     return null;
@@ -325,20 +418,113 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     };
   }, [leads, referrers, referrerById, referrerByCode]);
 
+  const vendedorOwnTag = (currentUser?.tag || '').trim().toUpperCase();
+  const vendedorOwnReferrer = useMemo(() => {
+    if (!isVendedor) return null;
+    return (
+      referrers.find(
+        (r) =>
+          r.partnerType !== 'embajador' &&
+          ((currentUser?.userId && r.accountId === currentUser.userId) ||
+            (vendedorOwnTag && r.code.trim().toUpperCase() === vendedorOwnTag))
+      ) || null
+    );
+  }, [isVendedor, referrers, currentUser?.userId, vendedorOwnTag]);
+
+  const { manualVendedorOptions, manualEmbajadorOptions, allManualOptions } = useMemo(() => {
+    const vendedoresByTag = new Map<
+      string,
+      { label: string; referrerId: string | null; code: string; isEmbajador: boolean }
+    >();
+    const embajadoresByTag = new Map<
+      string,
+      { label: string; referrerId: string | null; code: string; isEmbajador: boolean }
+    >();
+
+    if (isAdmin) {
+      for (const acc of accounts) {
+        if (acc.role !== 'vendedor' || !acc.active) continue;
+        const code = acc.tag.trim().toUpperCase();
+        if (!code) continue;
+        const linkedRef =
+          (acc.referrerId ? referrerById.get(acc.referrerId) : undefined) ||
+          referrerByCode.get(code);
+        vendedoresByTag.set(code, {
+          label: `${acc.displayName} (${code})`,
+          referrerId: linkedRef?.id ?? acc.referrerId ?? null,
+          code,
+          isEmbajador: false,
+        });
+      }
+    }
+
+    for (const ref of referrers) {
+      if (!ref.active) continue;
+      const code = ref.code.trim().toUpperCase();
+      if (!code) continue;
+
+      if (ref.partnerType === 'embajador') {
+        const isOwnedByCurrentVendedor =
+          !isVendedor ||
+          (currentUser?.userId && ref.ownerVendedorAccountId === currentUser.userId) ||
+          (vendedorOwnTag && (ref.ownerVendedorTag || '').trim().toUpperCase() === vendedorOwnTag) ||
+          (!ref.ownerVendedorAccountId && !ref.ownerVendedorTag && code !== vendedorOwnTag);
+        if (!isOwnedByCurrentVendedor) continue;
+
+        const emojiPrefix = ref.emoji?.trim() ? `${ref.emoji.trim()} ` : '✨ ';
+        const ownerCtx =
+          isAdmin && (ref.ownerVendedorName || ref.ownerVendedorTag)
+            ? ` · de ${ref.ownerVendedorName || ref.ownerVendedorTag}`
+            : '';
+        embajadoresByTag.set(code, {
+          label: `${emojiPrefix}${ref.name} (${code})${ownerCtx}`,
+          referrerId: ref.id,
+          code,
+          isEmbajador: true,
+        });
+        continue;
+      }
+
+      if (isAdmin && !vendedoresByTag.has(code)) {
+        vendedoresByTag.set(code, {
+          label: `${ref.name} (${code})`,
+          referrerId: ref.id,
+          code,
+          isEmbajador: false,
+        });
+      }
+    }
+
+    const vList = Array.from(vendedoresByTag.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, 'es')
+    );
+    const eList = Array.from(embajadoresByTag.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, 'es')
+    );
+    return {
+      manualVendedorOptions: vList,
+      manualEmbajadorOptions: eList,
+      allManualOptions: [...vList, ...eList],
+    };
+  }, [accounts, referrers, referrerById, referrerByCode, isAdmin, isVendedor, currentUser?.userId, vendedorOwnTag]);
+
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rawCodeQuery = q.replace(/^#/, '');
     return leads.filter((lead) => {
+      const outcome: CallOutcome = lead.callOutcome ?? (lead.called ? 'scheduled' : 'pending');
       if (activeFilter === 'vip' && lead.qualification?.tier !== 'alto') return false;
       if (activeFilter === 'client' && isClientLead(lead) !== true) return false;
       if (activeFilter === 'non_client' && isClientLead(lead) !== false) return false;
-      if (activeFilter === 'pending' && lead.called) return false;
+      if (activeFilter === 'pending' && outcome !== 'pending') return false;
+      if (activeFilter === 'scheduled' && outcome !== 'scheduled') return false;
+      if (activeFilter === 'reposo' && outcome !== 'not_scheduled') return false;
       if (activeFilter === 'called' && !lead.called) return false;
       if (activeFilter === 'cita' && lead.category !== 'cita') return false;
       if (activeFilter === 'demo' && lead.category !== 'demo') return false;
       if (activeFilter === 'orden' && lead.category !== 'orden') return false;
 
-      if (originFilter !== 'all') {
+      if (!hideOriginFilter && originFilter !== 'all') {
         const ref = resolveLeadReferral(lead);
         if (originFilter === 'organic') {
           if (ref !== null) return false;
@@ -378,17 +564,23 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   }, [leads, activeFilter, originFilter, search, referrerById, referrerByCode]);
 
   const handleToggleCalled = async (lead: Lead) => {
-    if (togglingLeadId) return;
+    if (!isAdmin || togglingLeadId) return;
     setActionError(null);
 
-    const promoLocked = lead.category !== 'none' || isPromoCodeInvalidated(lead);
-    if (promoLocked) {
+    const hasStatusLock =
+      Boolean(lead.sellerLocked) ||
+      CATEGORY_RANK[lead.category] > 0 ||
+      isPromoCodeInvalidated(lead);
+    if (hasStatusLock) {
       return;
     }
 
     setTogglingLeadId(lead.id);
     try {
-      await onUpdateLead(lead.id, { called: !lead.called });
+      await onUpdateLead(lead.id, {
+        called: !lead.called,
+        callOutcome: !lead.called ? 'scheduled' : 'pending',
+      });
       setLockedHintId(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'No se pudo actualizar el estado de llamada.');
@@ -397,27 +589,84 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     }
   };
 
+  const handleImmediateForwardAdvance = async (
+    lead: Lead,
+    targetCategory: Exclude<LeadCategory, 'none'>
+  ) => {
+    if (updatingCategoryLeadId) return;
+    setActionError(null);
+    setUpdatingCategoryLeadId(lead.id);
+    try {
+      await onUpdateLead(lead.id, {
+        category: targetCategory,
+        ...(isVendedor ? {} : { promoCodeInvalidated: true }),
+        confirmLock: true,
+      });
+      setExpandedNotesId((cur) => (cur === lead.id ? null : cur));
+      setConfirmDeleteId((cur) => (cur === lead.id ? null : cur));
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'No se pudo actualizar el estado del prospecto.'
+      );
+    } finally {
+      setUpdatingCategoryLeadId(null);
+    }
+  };
+
   const handleCategoryClick = (lead: Lead, cat: Exclude<LeadCategory, 'none'>) => {
-    const promoLocked = lead.category !== 'none' || isPromoCodeInvalidated(lead);
-    if (promoLocked) {
+    const outcome: CallOutcome = lead.callOutcome ?? (lead.called ? 'scheduled' : 'pending');
+    const currentRank = CATEGORY_RANK[lead.category];
+    const targetRank = CATEGORY_RANK[cat];
+
+    // Current active stage — no-op
+    if (targetRank === currentRank) {
       return;
     }
 
-    if (!lead.called) {
+    // Backward / Downgrade (targetRank < currentRank) — requires Admin password for both Admin & Vendedor
+    if (targetRank < currentRank) {
+      if (!isAdmin && !isVendedor) {
+        return;
+      }
+      setActionError(null);
+      setAdminPassword('');
+      setShowAdminPassword(false);
+      setAdminError(null);
+      setAdminRevertModal({
+        lead,
+        targetCategory: cat,
+        mode: 'downgrade',
+      });
+      return;
+    }
+
+    // Forward advance (targetRank > currentRank) — allowed without password once eligible
+    if (isVendedor) {
+      if (outcome === 'not_scheduled') {
+        setLockedHintId(lead.id);
+        window.setTimeout(() => setLockedHintId((cur) => (cur === lead.id ? null : cur)), 2400);
+        return;
+      }
+    } else if (!lead.called && outcome !== 'scheduled' && currentRank === 0) {
       setLockedHintId(lead.id);
       window.setTimeout(() => setLockedHintId((cur) => (cur === lead.id ? null : cur)), 2200);
       return;
     }
 
-    setActionError(null);
-    setConfirmError(null);
     if (cat === 'orden') {
+      setActionError(null);
+      setConfirmError(null);
+      setConfirmNotes(lead.notes || '');
       setConfirmOrderAmount(String(lead.orderAmount ?? defaultTicketAmount));
+      setConfirmCategoryModal({ lead, targetCategory: cat });
+      return;
     }
-    setConfirmCategoryModal({ lead, targetCategory: cat });
+
+    void handleImmediateForwardAdvance(lead, cat);
   };
 
   const handleOpenReactivateModal = (lead: Lead) => {
+    if (!isAdmin && !isVendedor) return;
     setActionError(null);
     setAdminPassword('');
     setShowAdminPassword(false);
@@ -425,7 +674,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     setAdminRevertModal({
       lead,
       targetCategory: 'none',
-      mode: 'revert',
+      mode: 'reactivate_code',
     });
   };
 
@@ -445,10 +694,13 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     setConfirmError(null);
     setConfirmLoading(true);
     try {
+      const trimmedNotes = confirmNotes.trim();
       await onUpdateLead(lead.id, {
         category: targetCategory,
-        orderAmount: resolvedOrderAmount,
-        promoCodeInvalidated: true,
+        ...(targetCategory === 'orden' ? { orderAmount: resolvedOrderAmount } : {}),
+        ...(trimmedNotes !== (lead.notes || '').trim() ? { notes: trimmedNotes } : {}),
+        ...(isVendedor ? {} : { promoCodeInvalidated: true }),
+        confirmLock: true,
       });
       setAmountDraft((prev) => {
         if (!(lead.id in prev)) return prev;
@@ -485,20 +737,26 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
           called: false,
           category: 'none',
           promoCodeInvalidated: false,
+          sellerLocked: false,
           orderAmount: null,
           adminPassword,
         });
       } else if (mode === 'downgrade' && targetCategory !== 'none') {
         await onUpdateLead(lead.id, {
           category: targetCategory,
-          orderAmount: null,
+          ...(lead.category === 'orden' ? { orderAmount: null } : {}),
           adminPassword,
         });
       } else {
         await onUpdateLead(lead.id, {
           category: 'none',
-          promoCodeInvalidated: false,
-          orderAmount: null,
+          ...(isVendedor
+            ? { orderAmount: null }
+            : {
+                promoCodeInvalidated: false,
+                sellerLocked: false,
+                orderAmount: null,
+              }),
           adminPassword,
         });
       }
@@ -540,7 +798,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
   };
 
   const handleSaveNotes = async (lead: Lead) => {
-    const isLocked = lead.category !== 'none' || isPromoCodeInvalidated(lead);
+    if (isVendedor) return;
+    const isLocked =
+      Boolean(lead.sellerLocked) ||
+      lead.category !== 'none' ||
+      isPromoCodeInvalidated(lead);
     if (isLocked) return;
     const nextNotes = notesDraft[lead.id] ?? lead.notes;
     setActionError(null);
@@ -607,47 +869,119 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleDeleteLeadClick = async (leadId: string) => {
+    if (!onDeleteLead || deletingLeadId) return;
+    setActionError(null);
+    setDeletingLeadId(leadId);
+    try {
+      await onDeleteLead(leadId);
+      setConfirmDeleteId((cur) => (cur === leadId ? null : cur));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'No se pudo eliminar el prospecto.');
+    } finally {
+      setDeletingLeadId(null);
+    }
+  };
+
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (manualName.trim().length < 2 || manualPhone.replace(/\D/g, '').length < 7) return;
-    await onCreateManualLead({
-      name: manualName.trim(),
-      phone: manualPhone.trim(),
-      address: manualAddress.trim(),
-      giftId: manualGiftId || gifts[0]?.id || '',
-    });
-    setManualName('');
-    setManualPhone('');
-    setManualAddress('');
-    setManualOpen(false);
+    if (!onCreateManualLead || manualSubmitting) return;
+    setManualError(null);
+    if (manualName.trim().length < 2) {
+      setManualError('Ingresa un nombre completo válido (mínimo 2 caracteres).');
+      return;
+    }
+    if (manualPhone.replace(/\D/g, '').length < 7) {
+      setManualError('Ingresa un número de teléfono válido (mínimo 7 dígitos).');
+      return;
+    }
+    const chosenSeller = manualReferrerKey
+      ? allManualOptions.find((s) => s.code === manualReferrerKey) || null
+      : null;
+    const resolvedReferrerId = isVendedor
+      ? chosenSeller
+        ? chosenSeller.referrerId
+        : vendedorOwnReferrer?.id ?? null
+      : chosenSeller?.referrerId ?? null;
+    const resolvedReferralCode = isVendedor
+      ? chosenSeller
+        ? chosenSeller.code
+        : vendedorOwnTag || vendedorOwnReferrer?.code?.trim().toUpperCase() || null
+      : chosenSeller?.code ?? null;
+    const resolvedGiftId =
+      manualGiftId && gifts.some((g) => g.id === manualGiftId)
+        ? manualGiftId
+        : defaultGiftId;
+
+    setManualSubmitting(true);
+    try {
+      await onCreateManualLead({
+        name: manualName.trim(),
+        phone: manualPhone.trim(),
+        address: manualAddress.trim(),
+        giftId: resolvedGiftId,
+        referrerId: resolvedReferrerId,
+        referralCode: resolvedReferralCode,
+      });
+      setManualName('');
+      setManualPhone('');
+      setManualAddress('');
+      setManualGiftId(defaultGiftId);
+      setManualReferrerKey('');
+      setManualError(null);
+      setManualOpen(false);
+    } catch (err) {
+      setManualError(
+        err instanceof Error ? err.message : 'No se pudo registrar el prospecto.'
+      );
+    } finally {
+      setManualSubmitting(false);
+    }
   };
 
   return (
-    <section className="rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-3.5 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
+    <>
+    <section className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-3 sm:p-6">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-1"
+        style={{ background: roleTheme.headerStrip }}
+      />
       {/* Toolbar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4 pb-4 sm:pb-5 border-b border-[#EFE3D2]">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 pb-3.5 sm:pb-5 border-b border-slate-900/10">
         <div className="min-w-0">
-          <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E]">
-            Prospectos del Show de Cocina
+          <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E] leading-snug">
+            {isVendedor ? 'Mis Prospectos del Show de Cocina' : 'Prospectos del Show de Cocina'}
           </h2>
-          <p className="text-xs sm:text-sm text-[#7B5D4A] mt-0.5">
-            Marca el check de llamada realizada para desbloquear la clasificación en Cita, Demo u Orden.
+          <p className="text-xs sm:text-sm text-[#594133] mt-0.5 leading-relaxed">
+            {isVendedor
+              ? 'Visualiza y registra tus prospectos. Puedes avanzar libremente (Cita → Demo → Orden) sin contraseña en cualquier prospecto activo; retroceder requiere contraseña de Administrador.'
+              : 'Gestiona los prospectos, su estado de Telemarketing y avanza libremente (Cita → Demo → Orden) sin contraseña; retroceder a un estado anterior requiere contraseña de Administrador.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={() => setManualOpen(true)}
-            className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full bg-[#22150E] px-4 py-2 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] transition-colors cursor-pointer"
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            Agregar prospecto
-          </button>
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto shrink-0">
+          {(isAdmin || isVendedor) && onCreateManualLead && (
+            <button
+              type="button"
+              data-preserve-surface="true"
+              onClick={() => {
+                setManualError(null);
+                setManualGiftId(defaultGiftId);
+                setManualReferrerKey('');
+                setManualOpen(true);
+              }}
+              style={{ background: roleTheme.heroGradient }}
+              className="inline-flex min-h-[42px] sm:min-h-[44px] flex-1 sm:flex-none min-w-0 items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-xs font-semibold text-white whitespace-nowrap shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              <span>Agregar prospecto</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={handleExportCsv}
-            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-4 py-2 text-xs font-semibold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer shrink-0"
+            className="dsb-glass-subtle inline-flex min-h-[42px] sm:min-h-[44px] items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-xs font-semibold text-[#4E382B] hover:bg-white/85 transition-colors cursor-pointer shrink-0"
           >
             <Download className="h-3.5 w-3.5 shrink-0" />
             CSV
@@ -656,47 +990,49 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       </div>
 
       {/* Search, Origin Dropdown & Filter Chips */}
-      <div className="mt-4 space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center gap-3">
+      <div className="mt-3.5 sm:mt-4 space-y-2.5 sm:space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="relative flex-1 md:max-w-md min-w-0">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#9B816E]" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#7B5D4A]" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nombre, teléfono, Nº de orden, embajador o regalo..."
-              className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#B84A27] focus:bg-white focus:outline-none"
+              className="w-full min-h-[42px] sm:min-h-[44px] rounded-xl border border-[#DFCBB3]/85 bg-white/75 backdrop-blur-sm py-2 sm:py-2.5 pl-10 pr-3.5 sm:pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#8A6D5B] focus:border-[#8B0018] focus:bg-white focus:outline-none transition-colors"
             />
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <QrCode className="h-4 w-4 text-[#C88A2B] shrink-0" />
-            <label
-              htmlFor="prospects-origin-filter"
-              className="text-xs font-semibold text-[#6E5341] whitespace-nowrap"
-            >
-              Origen QR:
-            </label>
-            <select
-              id="prospects-origin-filter"
-              value={originFilter}
-              onChange={(e) => setOriginFilter(e.target.value)}
-              className="min-h-[44px] max-w-full sm:max-w-[260px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-xs font-semibold text-[#22150E] focus:border-[#C88A2B] focus:bg-white focus:outline-none"
-            >
-              <option value="all">Todos los orígenes ({leads.length})</option>
-              <option value="organic">Orgánico / Sin QR ({originFilterOptions.organicCount})</option>
-              {originFilterOptions.partnerEntries.map((entry) => (
-                <option key={entry.value} value={entry.value}>
-                  {entry.label} · {entry.count}
-                </option>
-              ))}
-              {originFilterOptions.orphanEntries.map((entry) => (
-                <option key={entry.value} value={entry.value}>
-                  QR {entry.label} · {entry.count}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!hideOriginFilter && isAdmin && (
+            <div className="flex items-center gap-2 w-full md:w-auto min-w-0 shrink-0">
+              <QrCode className={`h-4 w-4 shrink-0 ${roleTheme.textAccent}`} />
+              <label
+                htmlFor="prospects-origin-filter"
+                className="text-xs font-semibold text-[#594133] whitespace-nowrap shrink-0"
+              >
+                Origen QR:
+              </label>
+              <select
+                id="prospects-origin-filter"
+                value={originFilter}
+                onChange={(e) => setOriginFilter(e.target.value)}
+                className="flex-1 md:flex-none min-w-0 w-full md:w-auto md:max-w-[260px] min-h-[42px] sm:min-h-[44px] rounded-xl border border-[#DFCBB3]/85 bg-white/75 backdrop-blur-sm px-3 py-2 text-base sm:text-xs font-semibold text-[#22150E] focus:border-[#8B0018] focus:bg-white focus:outline-none transition-colors"
+              >
+                <option value="all">Todos los orígenes ({leads.length})</option>
+                <option value="organic">Orgánico / Sin QR ({originFilterOptions.organicCount})</option>
+                {originFilterOptions.partnerEntries.map((entry) => (
+                  <option key={entry.value} value={entry.value}>
+                    {entry.label} · {entry.count}
+                  </option>
+                ))}
+                {originFilterOptions.orphanEntries.map((entry) => (
+                  <option key={entry.value} value={entry.value}>
+                    QR {entry.label} · {entry.count}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:overflow-visible max-w-full">
@@ -707,10 +1043,10 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 key={pill.key}
                 type="button"
                 onClick={() => onFilterChange(pill.key)}
-                className={`shrink-0 whitespace-nowrap min-h-[44px] sm:min-h-[34px] rounded-full px-3.5 py-2 sm:py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                className={`shrink-0 whitespace-nowrap min-h-[38px] sm:min-h-[34px] rounded-full px-3 sm:px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                   active
-                    ? 'bg-[#B84A27] text-white shadow-sm'
-                    : 'bg-[#FAF3E8] text-[#6E5341] hover:bg-[#F0E1CC]'
+                    ? roleTheme.activePillClass
+                    : 'dsb-glass-subtle text-[#594133] hover:bg-white/85'
                 }`}
               >
                 {pill.label}
@@ -721,7 +1057,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       </div>
 
       {actionError && (
-        <div className="mt-3 flex items-start justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">
+        <div className="mt-3 flex items-start justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50/90 backdrop-blur-sm px-3.5 py-2.5 text-xs font-semibold text-rose-800">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
             <span>{actionError}</span>
@@ -739,9 +1075,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
       {/* Leads List */}
       <div className="mt-5 space-y-3">
         {filteredLeads.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[#DFCBB3] bg-[#FAF3E8]/40 py-12 text-center">
+          <div className="dsb-glass-subtle rounded-2xl border-dashed border-[#DFCBB3] py-12 text-center">
             <p className="font-serif text-lg font-semibold text-[#594133]">Sin prospectos en esta vista</p>
-            <p className="mt-1 text-xs text-[#8B6F5B]">
+            <p className="mt-1 text-xs text-[#7B5D4A]">
               Cuando alguien complete el formulario público aparecerá automáticamente aquí.
             </p>
           </div>
@@ -752,7 +1088,17 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
             const showLockHint = lockedHintId === lead.id;
             const notesOpen = expandedNotesId === lead.id;
             const promoInvalidated = isPromoCodeInvalidated(lead);
-            const isCardLocked = lead.category !== 'none' || promoInvalidated;
+            const leadOutcome: CallOutcome =
+              lead.callOutcome ?? (lead.called ? 'scheduled' : 'pending');
+            const currentRank = CATEGORY_RANK[lead.category];
+            const hasAssignedCategory = currentRank > 0;
+            const isFinalStage = lead.category === 'orden';
+            const hasStatusLock =
+              Boolean(lead.sellerLocked) || hasAssignedCategory || promoInvalidated;
+            const canChangeStatusBase = isVendedor
+              ? leadOutcome !== 'not_scheduled'
+              : lead.called || leadOutcome === 'scheduled' || hasAssignedCategory;
+            const isUpdatingCategoryThis = updatingCategoryLeadId === lead.id;
             const isOrderAmountLocked =
               lead.category === 'orden' &&
               lead.orderAmount !== null &&
@@ -767,20 +1113,21 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
             return (
               <div
                 key={lead.id}
-                className={`rounded-2xl border p-3.5 sm:p-4 transition-colors ${
-                  isCardLocked
-                    ? 'border-stone-300/90 bg-stone-50/90'
-                    : lead.called
-                      ? 'border-[#DFCBB3] bg-white'
-                      : 'border-amber-300/90 bg-gradient-to-r from-[#FFFDF7] to-[#FEF7E8]'
+                data-dsb-card={isFinalStage ? 'locked' : lead.called || hasAssignedCategory ? 'default' : 'pending'}
+                className={`min-w-0 max-w-full rounded-2xl border p-3 sm:p-4 backdrop-blur-md transition-all duration-200 ${
+                  isFinalStage
+                    ? 'border-stone-300/80 bg-stone-50/70'
+                    : lead.called || hasAssignedCategory
+                      ? 'border-white/75 bg-white/72 shadow-[0_6px_20px_-14px_rgba(15,23,42,0.16),inset_0_1px_0_rgba(255,255,255,0.85)] hover:bg-white/85'
+                      : 'border-amber-300/80 bg-gradient-to-r from-white/78 to-[#FEF7E8]/75 shadow-[0_6px_20px_-14px_rgba(180,83,9,0.16),inset_0_1px_0_rgba(255,255,255,0.85)] hover:bg-white/88'
                 }`}
               >
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 min-w-0">
                   {/* Left: Person & Revealed Gift */}
-                  <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+                  <div className="flex items-start gap-2.5 sm:gap-3.5 min-w-0 flex-1">
                     <div
-                      className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border ${
-                        isCardLocked
+                      className={`flex h-9 w-9 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border ${
+                        isFinalStage
                           ? 'bg-stone-100 border-stone-200 opacity-75'
                           : 'bg-[#FAF3E8] border-[#E6D5BF]'
                       }`}
@@ -789,15 +1136,17 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                         visualKey={matchedGift?.visualKey || lead.giftVisualKey || 'cutlery'}
                         customImageUrl={matchedGift?.customImageUrl}
                         accentColor={matchedGift?.accentColor || '#C88A2B'}
-                        size={32}
+                        size={30}
                       />
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                        <h3 className="text-[15px] font-bold text-[#22150E] break-words">{lead.name}</h3>
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
+                        <h3 className="text-[14.5px] sm:text-[15px] font-bold text-[#22150E] min-w-0 max-w-full break-words leading-snug">
+                          {lead.name}
+                        </h3>
                         <span
-                          className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
+                          className={`inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10.5px] sm:text-[11px] font-bold tabular-nums break-words ${
                             promoInvalidated
                               ? 'bg-stone-100 border-stone-300 text-stone-500 line-through'
                               : 'bg-[#FAF0E0] border-[#E6C99E] text-[#8C4A19]'
@@ -809,10 +1158,10 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                           }
                         >
                           <Hash className="h-3 w-3 shrink-0 opacity-75" />
-                          Orden {lead.claimCode}
+                          <span className="min-w-0 break-all">Orden {lead.claimCode}</span>
                         </span>
                         <span
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                          className={`inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold break-words ${
                             promoInvalidated
                               ? 'bg-rose-50 border-rose-200 text-rose-800'
                               : 'bg-emerald-50 border-emerald-200 text-emerald-800'
@@ -821,41 +1170,95 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                           {promoInvalidated ? (
                             <>
                               <Lock className="h-2.5 w-2.5 shrink-0" />
-                              Código invalidado
+                              <span>Código invalidado</span>
                             </>
                           ) : (
                             <>
                               <ShieldCheck className="h-2.5 w-2.5 shrink-0" />
-                              Código válido
+                              <span>Código válido</span>
                             </>
                           )}
                         </span>
-                        {isCardLocked && lead.category !== 'none' && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-stone-300 bg-stone-200/80 px-2.5 py-0.5 text-[10px] font-bold text-stone-700">
+                        {lead.category === 'orden' ? (
+                          <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 break-words">
                             <Lock className="h-2.5 w-2.5 shrink-0" />
-                            Bloqueada · {CATEGORY_LABELS[lead.category]}
+                            <span className="min-w-0 break-words">Cerrado · Orden</span>
                           </span>
-                        )}
-                        {!lead.called && (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                            Nuevo
+                        ) : lead.category === 'demo' ? (
+                          <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold text-sky-800 break-words">
+                            <Briefcase className="h-2.5 w-2.5 shrink-0" />
+                            <span className="min-w-0 break-words">En curso · Demo</span>
+                          </span>
+                        ) : lead.category === 'cita' ? (
+                          <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[10px] font-bold text-rose-800 break-words">
+                            <Calendar className="h-2.5 w-2.5 shrink-0" />
+                            <span className="min-w-0 break-words">En curso · Cita</span>
+                          </span>
+                        ) : hasStatusLock ? (
+                          <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-stone-300 bg-stone-200/80 px-2.5 py-0.5 text-[10px] font-bold text-stone-700 break-words">
+                            <Lock className="h-2.5 w-2.5 shrink-0" />
+                            <span className="min-w-0 break-words">Bloqueado</span>
+                          </span>
+                        ) : leadOutcome === 'scheduled' ? (
+                          <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 break-words">
+                            <CalendarCheck2 className="h-2.5 w-2.5 shrink-0" />
+                            <span className="min-w-0 break-words">Cita agendada · Disponible</span>
+                          </span>
+                        ) : leadOutcome === 'not_scheduled' ? (
+                          <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-900">
+                            <PauseCircle className="h-2.5 w-2.5 shrink-0" />
+                            <span>En Reposo</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold text-sky-800 break-words">
+                            <Clock className="h-2.5 w-2.5 shrink-0" />
+                            <span className="min-w-0 break-words">Pendiente de Telemarketing</span>
                           </span>
                         )}
                         {referralSource && (
                           <span
-                            className="inline-flex items-center gap-1 rounded-full border border-[#E5C17B] bg-[#FFF4DC] px-2.5 py-0.5 text-[10.5px] font-bold text-[#7A4610]"
-                            title={`Referido por ${referralSource.name || referralSource.code}`}
+                            className={`inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-0.5 text-[10.5px] font-bold ${
+                              referralSource.isEmbajador
+                                ? 'border-[#C8A85B]/75 bg-[#FFF4DC] text-[#6B3F0E]'
+                                : 'border-[#E5C17B] bg-[#FFF4DC] text-[#7A4610]'
+                            }`}
+                            title={
+                              referralSource.isEmbajador
+                                ? `Embajador: ${referralSource.name || referralSource.code}${
+                                    referralSource.ownerVendedorName
+                                      ? ` · de ${referralSource.ownerVendedorName}`
+                                      : ''
+                                  }`
+                                : `Referido por ${referralSource.name || referralSource.code}`
+                            }
                           >
-                            <QrCode className="h-3 w-3 shrink-0 text-[#C88A2B]" />
-                            <span>
-                              QR · {referralSource.name ? `${referralSource.name}` : referralSource.code}
+                            {referralSource.avatarUrl || referralSource.emoji ? (
+                              <AmbassadorAvatar
+                                name={referralSource.name || referralSource.code}
+                                avatarUrl={referralSource.avatarUrl}
+                                emoji={referralSource.emoji}
+                                size="xs"
+                                ring="none"
+                              />
+                            ) : (
+                              <QrCode className="h-3 w-3 shrink-0 text-[#C88A2B] ml-1" />
+                            )}
+                            <span className="min-w-0 break-words">
+                              {referralSource.isEmbajador ? '' : 'QR · '}
+                              {referralSource.name ? `${referralSource.name}` : referralSource.code}
                               {referralSource.name && referralSource.code ? ` (${referralSource.code})` : ''}
                             </span>
+                            {referralSource.isEmbajador && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full border border-[#C88A2B]/40 bg-white/75 px-1.5 py-0.25 text-[9px] font-extrabold uppercase tracking-wider text-[#8C4A19] shrink-0">
+                                <Sparkles className="h-2.5 w-2.5 shrink-0 text-[#C88A2B]" />
+                                Embajador
+                              </span>
+                            )}
                           </span>
                         )}
                         {lead.qualification && (
                           <span
-                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide border ${
+                            className={`max-w-full min-w-0 break-words leading-snug rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide border ${
                               lead.qualification.tier === 'alto'
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                 : lead.qualification.tier === 'medio'
@@ -872,10 +1275,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                         )}
                       </div>
 
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#6E5341]">
-                        <span className="font-mono tabular-nums font-medium text-[#22150E]">{lead.phone}</span>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#6E5341] min-w-0">
+                        <span className="font-mono tabular-nums font-medium text-[#22150E] break-all">
+                          {lead.phone}
+                        </span>
                         <span className="text-[#C8B29A]">·</span>
-                        <span className="font-semibold text-[#8C3318]">
+                        <span className="font-semibold text-[#8C3318] min-w-0 break-words">
                           Regalo: {lead.giftName || 'Pendiente por destapar'}
                         </span>
                         <span className="text-[#C8B29A]">·</span>
@@ -883,19 +1288,19 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                       </div>
 
                       {lead.address && (
-                        <div className="mt-1 flex items-start gap-1.5 text-xs text-[#5C4332] min-w-0">
+                        <div className="mt-1 flex items-start gap-1.5 text-xs text-[#5C4332] min-w-0 max-w-full">
                           <MapPin className="h-3.5 w-3.5 shrink-0 text-[#9E4725] mt-0.5" />
                           <span className="break-words min-w-0">{lead.address}</span>
                         </div>
                       )}
 
                       {lead.qualification && (
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] min-w-0">
                           {(() => {
                             const usCredit = getUsCreditDisplay(lead);
                             return usCredit ? (
                               <span
-                                className={`rounded-lg border px-2 py-0.5 font-semibold ${usCredit.className}`}
+                                className={`max-w-full min-w-0 break-words leading-snug rounded-lg border px-2 py-0.5 font-semibold ${usCredit.className}`}
                                 title={usCredit.csvLabel}
                               >
                                 {usCredit.badgeLabel}
@@ -904,7 +1309,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                           })()}
                           {isClientLead(lead) !== null && (
                             <span
-                              className={`rounded-lg border px-2 py-0.5 font-semibold ${
+                              className={`max-w-full min-w-0 break-words rounded-lg border px-2 py-0.5 font-semibold ${
                                 isClientLead(lead)
                                   ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                                   : 'bg-amber-50 border-amber-200 text-amber-900'
@@ -913,214 +1318,245 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                               {isClientLead(lead) ? 'Es cliente' : 'No es cliente'}
                             </span>
                           )}
-                          <span className="rounded-lg bg-[#FAF3E8] border border-[#EAD9C2] px-2 py-0.5 text-[#4E382B] font-medium">
+                          <span className="max-w-full min-w-0 break-words leading-snug rounded-lg bg-[#FAF3E8] border border-[#EAD9C2] px-2 py-0.5 text-[#4E382B] font-medium">
                             {lead.qualification.creditProfile}
                           </span>
-                          <span className="rounded-lg bg-[#FAF3E8] border border-[#EAD9C2] px-2 py-0.5 text-[#4E382B] font-medium">
+                          <span className="max-w-full min-w-0 break-words leading-snug rounded-lg bg-[#FAF3E8] border border-[#EAD9C2] px-2 py-0.5 text-[#4E382B] font-medium">
                             {lead.qualification.housingStatus}
                           </span>
-                          <span className="rounded-lg bg-[#FAF3E8] border border-[#EAD9C2] px-2 py-0.5 text-[#4E382B] font-medium">
+                          <span className="max-w-full min-w-0 break-words leading-snug rounded-lg bg-[#FAF3E8] border border-[#EAD9C2] px-2 py-0.5 text-[#4E382B] font-medium">
                             {lead.qualification.investmentPriority}
                           </span>
                         </div>
                       )}
 
                       {/* Quick contact, notes & revert bar */}
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <div className="mt-2.5 sm:mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                         <a
                           href={`tel:${cleanTel}`}
-                          className="inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-[#FAF3E8]/70 px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-[#4E382B] hover:bg-[#F3E4CE] transition-colors"
+                          className="inline-flex min-h-[40px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-[#FAF3E8]/70 px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-[#4E382B] hover:bg-[#F3E4CE] transition-colors"
                         >
-                          <Phone className="h-3.5 w-3.5 sm:h-3 sm:w-3 text-[#B84A27]" />
-                          Llamar
+                          <Phone className="h-3.5 w-3.5 sm:h-3 sm:w-3 shrink-0 text-[#B84A27]" />
+                          <span>Llamar</span>
                         </a>
                         <a
                           href={whatsappUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-emerald-200 bg-emerald-50 px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                          className="inline-flex min-h-[40px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
                         >
-                          <MessageCircle className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-                          WhatsApp
+                          <MessageCircle className="h-3.5 w-3.5 sm:h-3 sm:w-3 shrink-0" />
+                          <span>WhatsApp</span>
                         </a>
                         <button
                           type="button"
-                          disabled={isCardLocked && !lead.notes}
+                          disabled={(hasStatusLock || isVendedor) && !lead.notes}
+                          data-dsb-disabled-control={(hasStatusLock || isVendedor) && !lead.notes ? 'true' : undefined}
                           onClick={() => {
-                            if (isCardLocked && !lead.notes) return;
+                            if ((hasStatusLock || isVendedor) && !lead.notes) return;
                             setExpandedNotesId(notesOpen ? null : lead.id);
                             setNotesDraft((prev) => ({ ...prev, [lead.id]: lead.notes }));
                           }}
                           title={
-                            isCardLocked && !lead.notes
-                              ? 'Tarjeta bloqueada. Revierte el estado para agregar notas.'
-                              : isCardLocked
-                                ? 'Ver nota guardada (solo lectura)'
-                                : lead.notes
-                                  ? 'Ver o editar nota'
-                                  : 'Agregar nota'
+                            isVendedor && !lead.notes
+                              ? 'Agrega notas al avanzar a Cita, Demo u Orden.'
+                              : hasStatusLock && !lead.notes
+                                ? 'Agrega notas al avanzar el estado o revierte para editar.'
+                                : hasStatusLock || isVendedor
+                                  ? 'Ver nota guardada (solo lectura)'
+                                  : lead.notes
+                                    ? 'Ver o editar nota'
+                                    : 'Agregar nota'
                           }
-                          className={`inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold transition-colors ${
-                            isCardLocked && !lead.notes
+                          className={`inline-flex min-h-[40px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-semibold transition-colors ${
+                            (hasStatusLock || isVendedor) && !lead.notes
                               ? 'border-stone-200 bg-stone-100 text-stone-400 cursor-not-allowed'
                               : 'border-[#E6D5BF] bg-white text-[#6E5341] hover:bg-[#FAF3E8] cursor-pointer'
                           }`}
                         >
-                          <StickyNote className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-                          {lead.notes ? 'Ver nota' : 'Nota'}
+                          <StickyNote className="h-3.5 w-3.5 sm:h-3 sm:w-3 shrink-0" />
+                          <span>{lead.notes ? 'Ver nota' : 'Nota'}</span>
                         </button>
 
-                        {isCardLocked && (
+                        {((isAdmin && hasStatusLock) || (isVendedor && hasAssignedCategory)) && (
                           <button
                             type="button"
                             onClick={() => handleOpenReactivateModal(lead)}
-                            className="inline-flex min-h-[44px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-amber-300 bg-amber-50 px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-bold text-amber-900 hover:bg-amber-100 transition-colors cursor-pointer"
+                            className="inline-flex max-w-full min-h-[40px] sm:min-h-[32px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-bold text-amber-900 hover:bg-amber-100 transition-colors cursor-pointer"
                           >
-                            <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3 text-[#B84A27]" />
-                            Revertir / Reactivar código
+                            <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3 shrink-0 text-[#B84A27]" />
+                            <span className="break-words text-left">
+                              {isAdmin ? 'Revertir / Reactivar código' : 'Revertir estado'}
+                            </span>
                           </button>
                         )}
 
-                        {!isCardLocked && confirmDeleteId === lead.id ? (
-                          <span className="inline-flex min-h-[44px] sm:min-h-[32px] items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 py-1 text-xs sm:text-[11px]">
+                        {isAdmin && onDeleteLead && (
+                          !hasStatusLock && confirmDeleteId === lead.id ? (
+                            <span className="inline-flex flex-wrap max-w-full min-h-[40px] sm:min-h-[32px] items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 py-1 text-xs sm:text-[11px]">
+                              <button
+                                type="button"
+                                disabled={deletingLeadId === lead.id}
+                                onClick={() => handleDeleteLeadClick(lead.id)}
+                                className="min-h-[34px] sm:min-h-0 font-bold text-red-700 hover:underline cursor-pointer disabled:opacity-50"
+                              >
+                                {deletingLeadId === lead.id ? 'Eliminando...' : 'Confirmar eliminar'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="min-h-[34px] sm:min-h-0 text-[#6E5341] hover:text-[#22150E] cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                            </span>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => onDeleteLead(lead.id)}
-                              className="min-h-[36px] sm:min-h-0 font-bold text-red-700 hover:underline cursor-pointer"
+                              disabled={hasStatusLock}
+                              data-dsb-disabled-icon={hasStatusLock ? 'true' : undefined}
+                              onClick={() => {
+                                if (hasStatusLock) return;
+                                setConfirmDeleteId(lead.id);
+                              }}
+                              className={`inline-flex min-h-[40px] min-w-[40px] sm:min-h-[32px] sm:min-w-[32px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1 transition-colors ${
+                                hasStatusLock
+                                  ? 'text-stone-300 cursor-not-allowed'
+                                  : 'text-[#A48A77] hover:bg-red-50 hover:text-red-600 cursor-pointer'
+                              }`}
+                              title={
+                                hasStatusLock
+                                  ? 'Estado asignado. Revierte / reactiva el código con contraseña de administrador para eliminar.'
+                                  : 'Eliminar prospecto'
+                              }
+                              aria-label={`Eliminar a ${lead.name}`}
                             >
-                              Confirmar eliminar
+                              <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteId(null)}
-                              className="min-h-[36px] sm:min-h-0 text-[#6E5341] hover:text-[#22150E] cursor-pointer"
-                            >
-                              Cancelar
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={isCardLocked}
-                            onClick={() => {
-                              if (isCardLocked) return;
-                              setConfirmDeleteId(lead.id);
-                            }}
-                            className={`inline-flex min-h-[44px] min-w-[44px] sm:min-h-[32px] sm:min-w-[32px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1 transition-colors ${
-                              isCardLocked
-                                ? 'text-stone-300 cursor-not-allowed'
-                                : 'text-[#A48A77] hover:bg-red-50 hover:text-red-600 cursor-pointer'
-                            }`}
-                            title={
-                              isCardLocked
-                                ? 'Tarjeta bloqueada. Revierte el estado con clave de administrador para eliminar.'
-                                : 'Eliminar prospecto'
-                            }
-                            aria-label={`Eliminar a ${lead.name}`}
-                          >
-                            <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                          </button>
+                          )
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Right: Called Check + 3 Categories Selector */}
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 shrink-0 w-full lg:w-auto">
-                    {/* Check "Ya se llamó" */}
-                    <button
-                      type="button"
-                      disabled={isTogglingThis || isCardLocked}
-                      onClick={() => handleToggleCalled(lead)}
-                      title={
-                        isCardLocked
-                          ? 'Tarjeta bloqueada. Usa Revertir / Reactivar código con clave de administrador para modificar.'
-                          : lead.called
-                            ? 'Desmarcar llamada'
-                            : 'Marcar como llamado'
-                      }
-                      className={`inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold border transition-all ${
-                        showLockHint ? 'ring-4 ring-[#B84A27]/30' : ''
-                      } ${
-                        isCardLocked
-                          ? 'bg-stone-200/85 border-stone-300 text-stone-500 cursor-not-allowed'
-                          : lead.called
-                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm cursor-pointer disabled:opacity-65'
-                            : 'bg-[#FAF3E8] border-[#D8B994] text-[#594133] hover:bg-amber-100/70 cursor-pointer disabled:opacity-65'
-                      }`}
-                    >
-                      {isCardLocked ? (
-                        <Lock className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                      ) : (
-                        <span
-                          className={`flex h-4 w-4 items-center justify-center rounded border ${
-                            lead.called
-                              ? 'border-white bg-white/20 text-white'
-                              : 'border-[#B89D86] bg-white'
-                          }`}
-                        >
-                          {lead.called && <Check className="h-3 w-3 stroke-[3]" />}
+                  {/* Right: Called Check (Admin only) + 3 Categories Selector */}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-2.5 shrink-0 w-full lg:w-auto pt-2.5 lg:pt-0 border-t lg:border-t-0 border-[#DFCBB3]/45">
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        disabled={isTogglingThis || hasStatusLock}
+                        data-dsb-disabled-control={hasStatusLock ? 'true' : undefined}
+                        onClick={() => handleToggleCalled(lead)}
+                        title={
+                          hasStatusLock
+                            ? 'Llamada bloqueada mientras tenga un estado asignado. Usa Revertir / Reactivar código con contraseña de administrador para desmarcar.'
+                            : lead.called
+                              ? 'Desmarcar llamada'
+                              : 'Marcar como llamado / agendado'
+                        }
+                        className={`inline-flex min-h-[42px] sm:min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold border transition-all ${
+                          showLockHint ? 'ring-4 ring-[#B84A27]/30' : ''
+                        } ${
+                          hasStatusLock
+                            ? 'bg-stone-200/85 border-stone-300 text-stone-500 cursor-not-allowed'
+                            : lead.called
+                              ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm cursor-pointer disabled:opacity-65'
+                              : 'bg-[#FAF3E8] border-[#D8B994] text-[#594133] hover:bg-amber-100/70 cursor-pointer disabled:opacity-65'
+                        }`}
+                      >
+                        {hasStatusLock ? (
+                          <Lock className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        ) : (
+                          <span
+                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                              lead.called
+                                ? 'border-white bg-white/20 text-white'
+                                : 'border-[#B89D86] bg-white'
+                            }`}
+                          >
+                            {lead.called && <Check className="h-3 w-3 stroke-[3]" />}
+                          </span>
+                        )}
+                        <PhoneCall className="h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          {isTogglingThis
+                            ? 'Guardando...'
+                            : lead.called
+                              ? 'Ya se llamó'
+                              : 'Marcar llamado'}
                         </span>
-                      )}
-                      <PhoneCall className="h-3.5 w-3.5" />
-                      <span>
-                        {isTogglingThis
-                          ? 'Guardando...'
-                          : lead.called
-                            ? 'Ya se llamó'
-                            : 'Marcar llamado'}
-                      </span>
-                    </button>
+                      </button>
+                    )}
 
                     {/* 3 Categories Segmented Control */}
-                    <div className="relative w-full sm:w-auto">
+                    <div className="relative w-full sm:w-auto min-w-0">
                       <div
+                        data-dsb-segmented={canChangeStatusBase ? 'active' : 'disabled'}
                         className={`grid grid-cols-3 w-full sm:w-auto sm:inline-flex items-center rounded-xl p-1 border transition-opacity ${
-                          isCardLocked
-                            ? 'bg-stone-100 border-stone-300/80'
-                            : lead.called
-                              ? 'bg-[#FAF3E8] border-[#E3D0B8]'
-                              : 'bg-stone-100 border-stone-200 opacity-60'
+                          canChangeStatusBase
+                            ? 'bg-[#FAF3E8] border-[#E3D0B8]'
+                            : 'bg-stone-100 border-stone-200 opacity-60'
                         }`}
                       >
                         {CATEGORIES.map((cat) => {
                           const Icon = cat.icon;
-                          const isSelected = lead.category === cat.id;
+                          const targetRank = CATEGORY_RANK[cat.id];
+                          const isSelected = targetRank === currentRank;
+                          const isForward = targetRank > currentRank;
+                          const isBackward = targetRank < currentRank;
+
+                          const btnDisabled =
+                            isUpdatingCategoryThis ||
+                            (isSelected
+                              ? true
+                              : isBackward
+                                ? !(isAdmin || isVendedor)
+                                : isVendedor && !canChangeStatusBase);
+
+                          const btnTitle = isSelected
+                            ? `Estado actual: ${cat.label}`
+                            : isBackward
+                              ? `Retroceder a ${cat.label} (requiere contraseña de Administrador)`
+                              : canChangeStatusBase
+                                ? currentRank === 0
+                                  ? `Asignar a ${cat.label} (sin contraseña)`
+                                  : `Avanzar a ${cat.label} (sin contraseña)`
+                                : isVendedor
+                                  ? 'En Reposo · No disponible para clasificación'
+                                  : 'Marca primero el check de llamada para clasificar';
+
                           return (
                             <button
                               key={cat.id}
                               type="button"
-                              disabled={isCardLocked}
+                              disabled={btnDisabled}
+                              aria-current={isSelected ? 'step' : undefined}
                               onClick={() => handleCategoryClick(lead, cat.id)}
-                              title={
-                                isCardLocked
-                                  ? 'Estado confirmado y bloqueado. Usa Revertir / Reactivar código con clave de administrador.'
-                                  : lead.called
-                                    ? `Asignar a ${cat.label}`
-                                    : 'Marca primero el check de llamada para clasificar'
-                              }
-                              className={`relative inline-flex min-h-[44px] sm:min-h-[34px] items-center justify-center gap-1 rounded-lg px-2 sm:px-2.5 py-1.5 text-xs font-semibold transition-all ${
-                                isCardLocked
-                                  ? isSelected
-                                    ? 'bg-stone-700 text-stone-100 shadow-xs cursor-not-allowed'
-                                    : 'text-stone-400 opacity-50 cursor-not-allowed'
-                                  : isSelected
-                                    ? `${cat.activeClass} cursor-pointer`
-                                    : 'text-[#594133] hover:bg-white/70 cursor-pointer'
+                              title={btnTitle}
+                              className={`relative min-w-0 inline-flex min-h-[40px] sm:min-h-[34px] items-center justify-center gap-1 rounded-lg px-1.5 sm:px-2.5 py-1.5 text-[11.5px] sm:text-xs font-semibold transition-all ${
+                                isSelected
+                                  ? `${cat.activeClass} cursor-default`
+                                  : isBackward
+                                    ? isAdmin || isVendedor
+                                      ? 'text-[#6E5341] hover:bg-amber-50 hover:text-[#8C3318] cursor-pointer disabled:opacity-55'
+                                      : 'text-stone-400 opacity-55 cursor-not-allowed'
+                                    : btnDisabled
+                                      ? 'text-stone-400 cursor-not-allowed'
+                                      : isForward && canChangeStatusBase
+                                        ? 'text-[#594133] hover:bg-white/70 cursor-pointer'
+                                        : 'text-stone-500 hover:bg-white/40 cursor-pointer'
                               }`}
                             >
-                              {isCardLocked ? (
-                                isSelected ? (
-                                  <Lock className="h-3 w-3 shrink-0" />
-                                ) : (
-                                  <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                                )
-                              ) : !lead.called ? (
+                              {isSelected ? (
+                                <Icon className="h-3.5 w-3.5 shrink-0" />
+                              ) : isBackward ? (
+                                <Lock className="h-3 w-3 shrink-0 opacity-75" />
+                              ) : !canChangeStatusBase ? (
                                 <Lock className="h-3 w-3 opacity-70 shrink-0" />
                               ) : (
                                 <Icon className="h-3.5 w-3.5 shrink-0" />
                               )}
-                              <span>{cat.label}</span>
+                              <span className="truncate">{cat.label}</span>
                             </button>
                           );
                         })}
@@ -1134,7 +1570,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                             exit={{ opacity: 0 }}
                             className="mt-1.5 sm:mt-0 sm:absolute sm:right-0 sm:-bottom-8 z-20 rounded-lg bg-[#22150E] px-2.5 py-1.5 sm:py-1 text-[10px] font-semibold text-amber-200 shadow-lg text-center sm:whitespace-nowrap"
                           >
-                            Primero marca el check “Ya se llamó”
+                            {isVendedor
+                              ? 'Prospecto en Reposo · No disponible para clasificación'
+                              : 'Primero marca el check “Ya se llamó”'}
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -1145,12 +1583,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 {/* Order amount bar when category === 'orden' */}
                 {lead.category === 'orden' &&
                   (isOrderAmountLocked ? (
-                    <div className="mt-3 pt-3 border-t border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-stone-100/90 rounded-xl px-3.5 py-2.5">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-stone-600">
+                    <div className="mt-3 pt-2.5 sm:pt-3 border-t border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-stone-100/90 rounded-xl px-3 sm:px-3.5 py-2.5 min-w-0 max-w-full">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-stone-600 min-w-0">
                         <Lock className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                        <span>Monto de la orden confirmado y bloqueado:</span>
+                        <span className="min-w-0 break-words">Monto de la orden confirmado y bloqueado:</span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <span className="inline-flex items-center gap-1 rounded-lg border border-stone-300 bg-white/80 px-3 py-1 font-mono text-xs font-bold text-stone-700 tabular-nums">
                           ${Number(lead.orderAmount).toLocaleString('en-US')} USD
                         </span>
@@ -1161,30 +1599,32 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-3 pt-3 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-amber-50/70 rounded-xl px-3 py-2.5">
-                      <span className="text-xs font-semibold text-[#594133]">
+                    <div className="mt-3 pt-2.5 sm:pt-3 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-amber-50/70 rounded-xl px-3 py-2.5 min-w-0 max-w-full">
+                      <span className="text-xs font-semibold text-[#594133] min-w-0 break-words">
                         Monto de la orden (al guardar quedará bloqueado):
                       </span>
-                      <div className="flex items-center gap-2 w-full sm:w-auto">
-                        <span className="text-sm sm:text-xs font-bold text-[#6E5341]">$</span>
-                        <input
-                          type="number"
-                          min={0}
-                          disabled={isSavingAmountThis}
-                          value={amountDraft[lead.id] ?? String(defaultTicketAmount)}
-                          onChange={(e) =>
-                            setAmountDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
-                          }
-                          className="flex-1 sm:flex-none sm:w-28 min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-[#DFCBB3] bg-white px-3 py-1.5 text-base sm:text-xs font-mono font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#C88A2B]/40 disabled:opacity-60"
-                        />
+                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto min-w-0">
+                        <div className="flex items-center gap-1.5 flex-1 min-w-[110px] sm:flex-none">
+                          <span className="text-sm sm:text-xs font-bold text-[#6E5341] shrink-0">$</span>
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={isSavingAmountThis}
+                            value={amountDraft[lead.id] ?? String(defaultTicketAmount)}
+                            onChange={(e) =>
+                              setAmountDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
+                            }
+                            className="w-full min-w-0 sm:w-28 min-h-[42px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-[#DFCBB3] bg-white px-3 py-1.5 text-base sm:text-xs font-mono font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#C88A2B]/40 disabled:opacity-60"
+                          />
+                        </div>
                         <button
                           type="button"
                           disabled={isSavingAmountThis}
                           onClick={() => handleSaveOrderAmount(lead)}
-                          className="min-h-[44px] sm:min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-xl sm:rounded-lg bg-[#22150E] px-4 sm:px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#3A2418] transition-colors cursor-pointer shrink-0 disabled:opacity-60"
+                          className="min-h-[42px] sm:min-h-[34px] flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-xl sm:rounded-lg bg-[#22150E] px-3.5 sm:px-3 py-1.5 text-xs font-semibold text-white whitespace-nowrap hover:bg-[#3A2418] transition-colors cursor-pointer shrink-0 disabled:opacity-60"
                         >
                           <Lock className="h-3 w-3 shrink-0" />
-                          {isSavingAmountThis ? 'Guardando...' : 'Guardar y bloquear'}
+                          <span>{isSavingAmountThis ? 'Guardando...' : 'Guardar y bloquear'}</span>
                         </button>
                       </div>
                     </div>
@@ -1199,15 +1639,15 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
                     >
-                      {isCardLocked ? (
-                        <div className="mt-3 pt-3 border-t border-stone-200 flex items-start gap-2 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-600">
+                      {hasStatusLock || isVendedor ? (
+                        <div className="mt-3 pt-2.5 sm:pt-3 border-t border-stone-200 flex items-start gap-2 rounded-xl bg-stone-100/80 px-3 sm:px-3.5 py-2.5 text-xs text-stone-600 min-w-0 max-w-full">
                           <Lock className="h-3.5 w-3.5 shrink-0 text-stone-400 mt-0.5" />
-                          <p className="break-words leading-relaxed">
+                          <p className="min-w-0 break-words leading-relaxed">
                             {lead.notes || 'Sin nota registrada.'}
                           </p>
                         </div>
                       ) : (
-                        <div className="mt-3 pt-3 border-t border-[#EFE3D2] flex flex-col sm:flex-row gap-2">
+                        <div className="mt-3 pt-2.5 sm:pt-3 border-t border-[#EFE3D2] flex flex-col sm:flex-row gap-2 min-w-0">
                           <input
                             type="text"
                             value={notesDraft[lead.id] ?? ''}
@@ -1215,12 +1655,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                               setNotesDraft((prev) => ({ ...prev, [lead.id]: e.target.value }))
                             }
                             placeholder="Escribe notas de la llamada, dirección o fecha de cita..."
-                            className="flex-1 min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-xs text-[#22150E] focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                            className="flex-1 min-w-0 w-full min-h-[42px] sm:min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-xs text-[#22150E] focus:bg-white focus:border-[#B84A27] focus:outline-none"
                           />
                           <button
                             type="button"
                             onClick={() => handleSaveNotes(lead)}
-                            className="min-h-[44px] rounded-xl bg-[#22150E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#3A2418] cursor-pointer shrink-0"
+                            className="min-h-[42px] sm:min-h-[44px] w-full sm:w-auto rounded-xl bg-[#22150E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#3A2418] cursor-pointer shrink-0"
                           >
                             Guardar nota
                           </button>
@@ -1234,6 +1674,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
           })
         )}
       </div>
+    </section>
 
       {/* Modal 1: Security Confirmation before assigning category (invalidates promo code) */}
       <AnimatePresence>
@@ -1253,19 +1694,23 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-[24px] sm:rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-5 sm:p-6 shadow-2xl space-y-4"
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-[24px] sm:rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-4 sm:p-6 shadow-2xl space-y-3.5 sm:space-y-4"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-100 border border-amber-300 text-[#8C3318]">
+              <div className="flex items-start justify-between gap-2.5 sm:gap-3">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                  <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl bg-amber-100 border border-amber-300 text-[#8C3318]">
                     <ShieldAlert className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-[#B84A27] block">
-                      Confirmación de Seguridad
+                      {confirmCategoryModal.lead.category !== 'none'
+                        ? 'Avance de Estado · Sin Contraseña'
+                        : 'Confirmación de Estado'}
                     </span>
-                    <h3 id="confirm-category-title" className="font-serif text-lg sm:text-xl font-bold text-[#22150E]">
-                      ¿Asignar a {CATEGORY_LABELS[confirmCategoryModal.targetCategory]}?
+                    <h3 id="confirm-category-title" className="font-serif text-base sm:text-xl font-bold text-[#22150E] leading-snug">
+                      {confirmCategoryModal.lead.category !== 'none'
+                        ? `¿Avanzar de ${CATEGORY_LABELS[confirmCategoryModal.lead.category]} a ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]}?`
+                        : `¿Asignar a ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]}?`}
                     </h3>
                   </div>
                 </div>
@@ -1274,41 +1719,47 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   disabled={confirmLoading}
                   onClick={() => setConfirmCategoryModal(null)}
                   aria-label="Cerrar confirmación"
-                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-[#7B5D4A] hover:bg-[#FAF3E8] cursor-pointer"
+                  className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full text-[#7B5D4A] hover:bg-[#FAF3E8] cursor-pointer"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="rounded-2xl border border-[#E6D5BF] bg-[#FAF3E8]/75 p-3.5 space-y-2 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[#6E5341]">Prospecto:</span>
-                  <strong className="text-[#22150E] text-right">{confirmCategoryModal.lead.name}</strong>
+              <div className="rounded-2xl border border-[#E6D5BF] bg-[#FAF3E8]/75 p-3 sm:p-3.5 space-y-2 text-xs">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-[#6E5341] shrink-0">Prospecto:</span>
+                  <strong className="text-[#22150E] text-right min-w-0 break-words">
+                    {confirmCategoryModal.lead.name}
+                  </strong>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[#6E5341]">Número de orden / cupón:</span>
-                  <span className="rounded-md bg-white border border-[#E6C99E] px-2 py-0.5 font-mono font-bold text-[#8C4A19]">
+                  <span className="text-[#6E5341] shrink-0">Número de orden / cupón:</span>
+                  <span className="rounded-md bg-white border border-[#E6C99E] px-2 py-0.5 font-mono font-bold text-[#8C4A19] break-all">
                     {confirmCategoryModal.lead.claimCode}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[#6E5341]">Nueva clasificación:</span>
-                  <strong className="text-[#8C3318]">
-                    {CATEGORY_LABELS[confirmCategoryModal.targetCategory]}
+                  <span className="text-[#6E5341] shrink-0">
+                    {confirmCategoryModal.lead.category !== 'none' ? 'Progresión:' : 'Nueva clasificación:'}
+                  </span>
+                  <strong className="text-[#8C3318] text-right">
+                    {confirmCategoryModal.lead.category !== 'none'
+                      ? `${CATEGORY_LABELS[confirmCategoryModal.lead.category]} → ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]}`
+                      : CATEGORY_LABELS[confirmCategoryModal.targetCategory]}
                   </strong>
                 </div>
               </div>
 
               {confirmCategoryModal.targetCategory === 'orden' && (
-                <div className="rounded-2xl border border-[#DFCBB3] bg-[#FFF8EC] p-3.5 space-y-2">
+                <div className="rounded-2xl border border-[#DFCBB3] bg-[#FFF8EC] p-3 sm:p-3.5 space-y-2">
                   <label
                     htmlFor="confirm-order-amount-input"
                     className="block text-xs font-bold text-[#22150E]"
                   >
                     Monto final de la orden ($ USD)
                   </label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-[#6E5341]">$</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-bold text-[#6E5341] shrink-0">$</span>
                     <input
                       id="confirm-order-amount-input"
                       type="number"
@@ -1320,9 +1771,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                         setConfirmOrderAmount(e.target.value);
                         setConfirmError(null);
                       }}
-                      className="flex-1 min-h-[44px] rounded-xl border border-[#DFCBB3] bg-white px-3.5 py-2 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums focus:border-[#B84A27] focus:outline-none"
+                      className="flex-1 min-w-0 min-h-[44px] rounded-xl border border-[#DFCBB3] bg-white px-3.5 py-2 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums focus:border-[#B84A27] focus:outline-none"
                     />
-                    <span className="text-xs font-semibold text-[#7B5D4A]">USD</span>
+                    <span className="text-xs font-semibold text-[#7B5D4A] shrink-0">USD</span>
                   </div>
                   <p className="text-[11px] text-[#7B5D4A] leading-relaxed">
                     Actualiza el Ticket Promedio y las ventas del QR embajador. Al confirmar quedará guardado y bloqueado.
@@ -1330,26 +1781,57 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 </div>
               )}
 
-              <div className="rounded-2xl border border-rose-200 bg-rose-50/90 p-3.5 text-xs text-rose-900 space-y-1.5">
-                <p className="font-bold flex items-center gap-1.5 text-rose-800">
-                  <Lock className="h-3.5 w-3.5 shrink-0" />
-                  Bloqueo de tarjeta e invalidación de código
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="confirm-category-notes"
+                  className="block text-xs font-semibold text-[#594133]"
+                >
+                  Nota opcional
+                </label>
+                <input
+                  id="confirm-category-notes"
+                  type="text"
+                  disabled={confirmLoading}
+                  value={confirmNotes}
+                  onChange={(e) => setConfirmNotes(e.target.value)}
+                  placeholder="Ej. Demostración realizada en domicilio..."
+                  className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-base sm:text-xs text-[#22150E] focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/90 p-3 sm:p-3.5 text-xs text-amber-950 space-y-1.5">
+                <p className="font-bold flex items-center gap-1.5 text-[#8C3318]">
+                  <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {confirmCategoryModal.targetCategory === 'orden'
+                      ? 'Cierre en Orden · Protección contra retroceso'
+                      : 'Avance libre hacia adelante · Retroceso protegido'}
+                  </span>
                 </p>
+                {confirmCategoryModal.targetCategory === 'orden' ? (
+                  <p className="leading-relaxed">
+                    Al confirmar, el prospecto pasará a <strong>Orden</strong> sin contraseña y el código{' '}
+                    <strong className="font-mono break-all">{confirmCategoryModal.lead.claimCode}</strong> quedará{' '}
+                    <strong>invalidado</strong>.
+                  </p>
+                ) : (
+                  <p className="leading-relaxed">
+                    Podrás seguir avanzando <strong>sin contraseña</strong> (
+                    {confirmCategoryModal.targetCategory === 'cita' ? 'Cita → Demo → Orden' : 'Demo → Orden'}) cuando el prospecto progrese. El código{' '}
+                    <strong className="font-mono break-all">{confirmCategoryModal.lead.claimCode}</strong> quedará{' '}
+                    <strong>invalidado</strong>.
+                  </p>
+                )}
                 <p className="leading-relaxed">
-                  Al confirmar, el código{' '}
-                  <strong className="font-mono">{confirmCategoryModal.lead.claimCode}</strong> quedará{' '}
-                  <strong>invalidado</strong> y <strong>toda la tarjeta quedará bloqueada</strong> para evitar manipulaciones o cambios accidentales.
-                </p>
-                <p className="leading-relaxed">
-                  Desbloquear esta tarjeta, revertir el estado o reactivar el código{' '}
-                  <strong>solo será posible con la contraseña de Administrador</strong>.
+                  <strong>Retroceder a un estado anterior</strong> o reactivar el código{' '}
+                  <strong>solo será posible con contraseña de Administrador</strong>.
                 </p>
               </div>
 
               {confirmError && (
                 <div className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
-                  <span>{confirmError}</span>
+                  <span className="min-w-0 break-words">{confirmError}</span>
                 </div>
               )}
 
@@ -1366,12 +1848,16 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   type="button"
                   disabled={confirmLoading}
                   onClick={handleConfirmCategoryAssign}
-                  className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#22150E] to-[#8C3318] px-5 py-2 text-xs font-bold text-[#FFFDF9] shadow hover:brightness-110 transition-all cursor-pointer disabled:opacity-60"
+                  className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#22150E] to-[#8C3318] px-4 sm:px-5 py-2 text-xs font-bold text-[#FFFDF9] text-center shadow hover:brightness-110 transition-all cursor-pointer disabled:opacity-60"
                 >
-                  <Lock className="h-3.5 w-3.5" />
-                  {confirmLoading
-                    ? 'Bloqueando...'
-                    : `Confirmar ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]} y bloquear`}
+                  <Check className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {confirmLoading
+                      ? 'Guardando...'
+                      : confirmCategoryModal.lead.category !== 'none'
+                        ? `Avanzar a ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]}`
+                        : `Confirmar ${CATEGORY_LABELS[confirmCategoryModal.targetCategory]}`}
+                  </span>
                 </button>
               </div>
             </motion.div>
@@ -1399,12 +1885,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
               onClick={(e) => e.stopPropagation()}
               onSubmit={handleSubmitAdminRevert}
               autoComplete="off"
-              className="relative w-full max-w-[440px] max-h-[90dvh] overflow-y-auto rounded-[24px] sm:rounded-[28px] border border-[#C88A2B]/55 bg-gradient-to-b from-[#23140D] via-[#1A0E08] to-[#120804] p-5 sm:p-6 text-[#FFFDF9] shadow-[0_32px_80px_-14px_rgba(0,0,0,0.85)] space-y-4"
+              className="relative w-full max-w-[440px] max-h-[90dvh] overflow-y-auto rounded-[24px] sm:rounded-[28px] border border-[#C88A2B]/55 bg-gradient-to-b from-[#23140D] via-[#1A0E08] to-[#120804] p-4 sm:p-6 text-[#FFFDF9] shadow-[0_32px_80px_-14px_rgba(0,0,0,0.85)] space-y-3.5 sm:space-y-4"
             >
               <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#8C3318] via-[#F4CA73] to-[#C88A2B]" />
 
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-start justify-between gap-2.5 sm:gap-3">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                   <div className="flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-[#F4CA73]/40 bg-[#F4CA73]/15 text-[#F4CA73]">
                     <KeyRound className="h-5 w-5" />
                   </div>
@@ -1412,9 +1898,9 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                     <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#F4CA73] block">
                       Autorización de Administrador
                     </span>
-                    <h3 id="admin-revert-title" className="font-serif text-lg sm:text-xl font-bold text-white leading-snug">
+                    <h3 id="admin-revert-title" className="font-serif text-base sm:text-xl font-bold text-white leading-snug">
                       {adminRevertModal.mode === 'downgrade'
-                        ? `Cambiar a ${CATEGORY_LABELS[adminRevertModal.targetCategory]}`
+                        ? `Retroceder estado a ${CATEGORY_LABELS[adminRevertModal.targetCategory]}`
                         : 'Revertir y reactivar código'}
                     </h3>
                   </div>
@@ -1431,24 +1917,26 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 </button>
               </div>
 
-              <div className="rounded-2xl border border-[#F4CA73]/25 bg-white/[0.04] p-3.5 text-xs space-y-1.5 text-[#E8D5BE]">
-                <div className="flex items-center justify-between gap-2">
-                  <span>Prospecto:</span>
-                  <strong className="text-white text-right">{adminRevertModal.lead.name}</strong>
+              <div className="rounded-2xl border border-[#F4CA73]/25 bg-white/[0.04] p-3 sm:p-3.5 text-xs space-y-1.5 text-[#E8D5BE]">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="shrink-0">Prospecto:</span>
+                  <strong className="text-white text-right min-w-0 break-words">
+                    {adminRevertModal.lead.name}
+                  </strong>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span>Número de orden:</span>
-                  <span className="font-mono font-bold text-[#F4CA73]">
+                  <span className="shrink-0">Número de orden:</span>
+                  <span className="font-mono font-bold text-[#F4CA73] break-all">
                     {adminRevertModal.lead.claimCode}
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span>Acción:</span>
-                  <strong className="text-white text-right">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="shrink-0">Acción:</span>
+                  <strong className="text-white text-right min-w-0 break-words">
                     {adminRevertModal.mode === 'unmark_called'
                       ? 'Quitar llamado, clasificación y reactivar código'
                       : adminRevertModal.mode === 'downgrade'
-                        ? `Cambiar de ${CATEGORY_LABELS[adminRevertModal.lead.category]} a ${CATEGORY_LABELS[adminRevertModal.targetCategory]}`
+                        ? `${CATEGORY_LABELS[adminRevertModal.lead.category]} → ${CATEGORY_LABELS[adminRevertModal.targetCategory]} requiere tu contraseña de Administrador`
                         : 'Quitar clasificación y reactivar código'}
                   </strong>
                 </div>
@@ -1490,7 +1978,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
               {adminError && (
                 <div className="flex items-start gap-2 rounded-xl border border-rose-400/40 bg-rose-950/65 px-3.5 py-2.5 text-xs font-semibold text-rose-200">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
-                  <span>{adminError}</span>
+                  <span className="min-w-0 break-words">{adminError}</span>
                 </div>
               )}
 
@@ -1506,10 +1994,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 <button
                   type="submit"
                   disabled={adminLoading}
+                  data-preserve-surface="true"
                   className="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] px-5 py-2 text-xs font-bold text-[#1A0E08] shadow-lg hover:brightness-105 transition-all cursor-pointer disabled:opacity-60"
                 >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  {adminLoading ? 'Verificando...' : 'Autorizar cambio'}
+                  <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+                  <span>{adminLoading ? 'Verificando...' : 'Autorizar cambio'}</span>
                 </button>
               </div>
             </motion.form>
@@ -1525,7 +2014,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/55 backdrop-blur-xs sm:backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
-            onClick={() => setManualOpen(false)}
+            onClick={() => !manualSubmitting && setManualOpen(false)}
           >
             <motion.form
               initial={{ opacity: 0, scale: 0.94, y: 12 }}
@@ -1533,20 +2022,21 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
               exit={{ opacity: 0, scale: 0.96 }}
               onClick={(e) => e.stopPropagation()}
               onSubmit={handleManualSubmit}
-              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-5 sm:p-6 shadow-2xl space-y-4"
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-[24px] sm:rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-4 sm:p-6 shadow-2xl space-y-3.5 sm:space-y-4"
             >
               <div className="flex items-center justify-between gap-2">
                 <h3 className="font-serif text-lg sm:text-xl font-bold text-[#22150E]">Nuevo prospecto manual</h3>
                 <button
                   type="button"
+                  disabled={manualSubmitting}
                   onClick={() => setManualOpen(false)}
                   aria-label="Cerrar modal"
-                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full p-1 text-[#7B5D4A] hover:bg-[#FAF3E8] cursor-pointer"
+                  className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full p-1 text-[#7B5D4A] hover:bg-[#FAF3E8] cursor-pointer"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="block text-xs font-semibold text-[#594133] mb-1">Nombre completo</label>
                 <input
                   type="text"
@@ -1557,7 +2047,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="block text-xs font-semibold text-[#594133] mb-1">Teléfono</label>
                 <input
                   type="tel"
@@ -1568,7 +2058,7 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="block text-xs font-semibold text-[#594133] mb-1">Dirección</label>
                 <input
                   type="text"
@@ -1578,23 +2068,94 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                   className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="block text-xs font-semibold text-[#594133] mb-1">Regalo asignado</label>
                 <select
-                  value={manualGiftId || gifts[0]?.id || ''}
+                  value={manualGiftId}
                   onChange={(e) => setManualGiftId(e.target.value)}
                   className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
                 >
-                  {gifts.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
+                  {gifts.length === 0 ? (
+                    <option value="">Sin regalo asignado</option>
+                  ) : (
+                    <>
+                      {gifts.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}{g.active ? '' : ' (Inactivo)'}
+                        </option>
+                      ))}
+                      <option value="">Sin regalo asignado</option>
+                    </>
+                  )}
                 </select>
               </div>
+              <div className="min-w-0">
+                <label className="block text-xs font-semibold text-[#594133] mb-1">
+                  {isVendedor ? 'Canal de atribución' : 'Vendedor / Embajador (opcional)'}
+                </label>
+                <select
+                  value={manualReferrerKey}
+                  onChange={(e) => setManualReferrerKey(e.target.value)}
+                  className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2.5 text-base sm:text-sm focus:bg-white focus:border-[#B84A27] focus:outline-none"
+                >
+                  {isVendedor ? (
+                    <>
+                      <option value="">
+                        Mi canal directo{vendedorOwnTag ? ` (${vendedorOwnTag})` : ''}
+                      </option>
+                      {manualEmbajadorOptions.length > 0 && (
+                        <optgroup label="Mis Embajadores activos">
+                          {manualEmbajadorOptions.map((opt) => (
+                            <option key={opt.code} value={opt.code}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <option value="">Orgánico / Sin vendedor asignado</option>
+                      {manualEmbajadorOptions.length > 0 ? (
+                        <>
+                          {manualVendedorOptions.length > 0 && (
+                            <optgroup label="Vendedores">
+                              {manualVendedorOptions.map((opt) => (
+                                <option key={opt.code} value={opt.code}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <optgroup label="Embajadores">
+                            {manualEmbajadorOptions.map((opt) => (
+                              <option key={opt.code} value={opt.code}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </>
+                      ) : (
+                        manualVendedorOptions.map((opt) => (
+                          <option key={opt.code} value={opt.code}>
+                            {opt.label}
+                          </option>
+                        ))
+                      )}
+                    </>
+                  )}
+                </select>
+              </div>
+              {manualError && (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                  <span className="min-w-0 break-words">{manualError}</span>
+                </div>
+              )}
               <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
                 <button
                   type="button"
+                  disabled={manualSubmitting}
                   onClick={() => setManualOpen(false)}
                   className="min-h-[44px] w-full sm:w-auto rounded-full px-4 py-2 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF3E8] cursor-pointer"
                 >
@@ -1602,15 +2163,16 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="min-h-[44px] w-full sm:w-auto rounded-full bg-[#22150E] px-5 py-2 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] cursor-pointer"
+                  disabled={manualSubmitting}
+                  className="min-h-[44px] w-full sm:w-auto rounded-full border border-[#C88A2B]/45 bg-[#22150E] px-5 py-2 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
                 >
-                  Guardar prospecto
+                  {manualSubmitting ? 'Guardando...' : 'Guardar prospecto'}
                 </button>
               </div>
             </motion.form>
           </motion.div>
         )}
       </AnimatePresence>
-    </section>
+    </>
   );
 };

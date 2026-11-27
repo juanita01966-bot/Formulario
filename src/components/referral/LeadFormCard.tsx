@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   AlertCircle,
@@ -17,15 +17,19 @@ import { resolveBoxPalette } from '../../shared/giftThemes';
 import { OTHER_CITY_VALUE, US_STATES } from '../../shared/usLocations';
 import { LocationDropdown } from './LocationDropdown';
 import { TermsModal } from './TermsModal';
+import { getPublicLandingUrl, playDopamineChime } from './shareQrCard';
+import { AmbassadorAvatar } from '../shared/AmbassadorAvatar';
 
 export interface ActiveReferralInfo {
   code: string;
   name: string;
+  avatarUrl?: string | null;
 }
 
 interface LeadFormCardProps {
   settings: AppSettings;
   referralPartner?: ActiveReferralInfo | null;
+  referralCode?: string | null;
   onSubmit: (data: {
     name: string;
     phone: string;
@@ -174,8 +178,10 @@ function StylizedHeroGift3D({
 export const LeadFormCard: React.FC<LeadFormCardProps> = ({
   settings,
   referralPartner = null,
+  referralCode = null,
   onSubmit,
 }) => {
+  const prefersReduced = Boolean(useReducedMotion());
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [selectedStateCode, setSelectedStateCode] = useState('');
@@ -193,7 +199,16 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
-  const [shareCopied, setShareCopied] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const shareTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (shareTimerRef.current !== null) {
+        window.clearTimeout(shareTimerRef.current);
+      }
+    };
+  }, []);
 
   const selectedState = useMemo(
     () => US_STATES.find((s) => s.code === selectedStateCode) || null,
@@ -283,24 +298,53 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({
     }
   };
 
+  const showShareToast = (message: string) => {
+    setShareFeedback(message);
+    playDopamineChime(2, prefersReduced);
+    if (shareTimerRef.current !== null) {
+      window.clearTimeout(shareTimerRef.current);
+    }
+    shareTimerRef.current = window.setTimeout(() => {
+      setShareFeedback(null);
+    }, 3000);
+  };
+
   const handleShareInvite = async () => {
-    const url = window.location.origin + '/';
+    const shareUrl = getPublicLandingUrl(referralPartner?.code || referralCode);
     const text =
-      'Reclama tu obsequio exclusivo y comparte este enlace para participar por hasta $2,000 USD en productos Royal Prestige con The Ciprian Company.';
-    if (navigator.share) {
+      'Reclama tu obsequio exclusivo y comparte este acceso para participar por hasta $2,000 USD en productos Royal Prestige con The Ciprian Company.';
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: 'The Ciprian Company · Premio Royal Prestige', text, url });
+        await navigator.share({
+          title: 'The Ciprian Company · Premio Royal Prestige',
+          text,
+          url: shareUrl,
+        });
+        showShareToast('¡Invitación VIP compartida!');
         return;
-      } catch {
-        // Fallback to copy below
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
+        // Fallback to clipboard below
       }
     }
     try {
-      await navigator.clipboard.writeText(url);
-      setShareCopied(true);
-      window.setTimeout(() => setShareCopied(false), 2400);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = shareUrl;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      showShareToast('¡Enlace VIP copiado!');
     } catch {
-      setShareCopied(false);
+      setShareFeedback(null);
     }
   };
 
@@ -350,9 +394,15 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({
                 <div
                   role="status"
                   aria-live="polite"
-                  className="inline-flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-full border border-[#D8B274]/75 bg-gradient-to-r from-[#FAF0DF] via-[#FFF9EE] to-[#FAF0DF] px-3.5 py-1.5 text-[11.5px] sm:text-xs text-[#5C4332] shadow-[0_6px_18px_-10px_rgba(140,51,24,0.35)] text-center leading-snug"
+                  className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full border border-[#D8B274]/75 bg-gradient-to-r from-[#FAF0DF] via-[#FFF9EE] to-[#FAF0DF] pl-2 pr-3.5 py-1.5 text-[11.5px] sm:text-xs text-[#5C4332] shadow-[0_6px_18px_-10px_rgba(140,51,24,0.35)] text-center leading-snug"
                 >
-                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#B8791F]" aria-hidden="true" />
+                  <AmbassadorAvatar
+                    name={referralPartner.name}
+                    avatarUrl={referralPartner.avatarUrl}
+                    size="xs"
+                    ring="gold"
+                    className="h-7 w-7 text-[11px] shrink-0"
+                  />
                   <span>
                     Invitación especial de{' '}
                     <strong className="font-semibold text-[#3D2114]">
@@ -363,7 +413,7 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({
                     ·
                   </span>
                   <span className="font-mono text-[10.5px] sm:text-[11px] font-semibold tracking-wider text-[#8C3318] uppercase">
-                    Código {referralPartner.code}
+                    Tag {referralPartner.code}
                   </span>
                 </div>
               </motion.div>
@@ -676,28 +726,49 @@ export const LeadFormCard: React.FC<LeadFormCardProps> = ({
             </AnimatePresence>
           </form>
 
-          {/* Subtle QR / Referral Share Strip */}
-          <div className="relative z-10 mt-5 pt-4 border-t border-[#E6D5BF]/70 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 sm:gap-3">
-            <p className="text-[11.5px] text-[#5C4332] leading-snug">
-              Comparte este acceso QR para participar por hasta <strong className="text-[#8C3318]">$2,000 USD</strong>.
-            </p>
-            <button
-              type="button"
-              onClick={handleShareInvite}
-              className="shrink-0 min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FAF3E8] px-4 py-2 text-xs font-semibold text-[#4E382B] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
-            >
-              {shareCopied ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-700" />
-                  <span>Enlace copiado</span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="h-3.5 w-3.5 text-[#8C3318]" />
-                  <span>Compartir</span>
-                </>
-              )}
-            </button>
+          {/* Masterized QR / VIP Ambassador Invite Share Strip */}
+          <div className="relative z-10 mt-5 pt-4 border-t border-[#E6D5BF]/75">
+            <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 sm:gap-3 rounded-2xl border border-[#E5C17B]/65 bg-gradient-to-r from-[#FAF1E0] via-[#FFF9EE] to-[#FAF1E0] px-3.5 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
+              <div className="min-w-0">
+                <p className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#9E4725] inline-flex items-center gap-1">
+                  <Sparkles className="h-3 w-3 text-[#C88A2B]" />
+                  Comparte y multiplica tus oportunidades
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-[#5C4332] leading-snug">
+                  Comparte este acceso QR y participa por hasta{' '}
+                  <strong className="text-[#8C3318]">$2,000 USD</strong>.
+                </p>
+              </div>
+              <motion.button
+                type="button"
+                onClick={handleShareInvite}
+                whileHover={prefersReduced ? undefined : { scale: 1.03, y: -1 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.96 }}
+                className="relative w-full sm:w-auto shrink-0 min-h-[44px] overflow-hidden inline-flex items-center justify-center gap-1.5 rounded-full border border-[#D4942A]/75 bg-gradient-to-r from-[#26150C] via-[#4D2612] to-[#7A3516] px-4 py-2 text-xs font-bold text-[#FEF08A] shadow-[0_8px_20px_-8px_rgba(92,41,24,0.55)] hover:brightness-110 transition-all cursor-pointer"
+              >
+                {!prefersReduced && (
+                  <motion.span
+                    aria-hidden="true"
+                    animate={{ x: ['-140%', '260%'] }}
+                    transition={{ duration: 2.3, repeat: Infinity, repeatDelay: 2.6, ease: 'easeInOut' }}
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                  />
+                )}
+                <span className="relative inline-flex items-center gap-1.5">
+                  {shareFeedback ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-emerald-300" />
+                      <span className="text-emerald-200">{shareFeedback}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="h-3.5 w-3.5 text-[#FDE047]" />
+                      <span>Compartir invitación</span>
+                    </>
+                  )}
+                </span>
+              </motion.button>
+            </div>
           </div>
         </div>
       </motion.div>

@@ -51,6 +51,7 @@ create table if not exists public.gifts (
 );
 
 alter table public.gifts add column if not exists usage_tip text not null default '';
+alter table public.gifts add column if not exists custom_image_url text;
 alter table public.gifts add column if not exists probability numeric not null default 11.1;
 
 create index if not exists gifts_sort_order_idx on public.gifts (sort_order asc, created_at asc);
@@ -70,12 +71,18 @@ create table if not exists public.leads (
   claim_code text not null,
   called boolean not null default false,
   called_at timestamptz,
+  call_outcome text not null default 'pending',
+  called_by text,
+  scheduled_at timestamptz,
   category text not null default 'none',
   order_amount numeric,
   notes text not null default '',
   qualification jsonb,
   promo_code_invalidated boolean not null default false,
   promo_code_invalidated_at timestamptz,
+  seller_locked boolean not null default false,
+  seller_confirmed_at timestamptz,
+  seller_confirmed_by text,
   referral_code text,
   referrer_id text,
   referrer_name text,
@@ -87,6 +94,12 @@ alter table public.leads add column if not exists promo_code_invalidated_at time
 alter table public.leads add column if not exists referral_code text;
 alter table public.leads add column if not exists referrer_id text;
 alter table public.leads add column if not exists referrer_name text;
+alter table public.leads add column if not exists call_outcome text not null default 'pending';
+alter table public.leads add column if not exists called_by text;
+alter table public.leads add column if not exists scheduled_at timestamptz;
+alter table public.leads add column if not exists seller_locked boolean not null default false;
+alter table public.leads add column if not exists seller_confirmed_at timestamptz;
+alter table public.leads add column if not exists seller_confirmed_by text;
 
 update public.leads
 set promo_code_invalidated = true,
@@ -94,9 +107,16 @@ set promo_code_invalidated = true,
 where category in ('cita', 'demo', 'orden')
   and promo_code_invalidated = false;
 
+update public.leads
+set call_outcome = 'scheduled',
+    scheduled_at = coalesce(scheduled_at, called_at, created_at, now())
+where called = true
+  and coalesce(call_outcome, 'pending') = 'pending';
+
 create index if not exists leads_created_at_idx on public.leads (created_at desc);
 create index if not exists leads_referral_code_idx on public.leads (referral_code);
 create index if not exists leads_referrer_id_idx on public.leads (referrer_id);
+create index if not exists leads_call_outcome_idx on public.leads (call_outcome);
 
 -- ----------------------------------------------------------------------------
 -- 4. Bóveda de autenticación 2FA del DSB (acceso exclusivo vía RPC SECURITY DEFINER)
@@ -104,10 +124,15 @@ create index if not exists leads_referrer_id_idx on public.leads (referrer_id);
 create table if not exists public.dsb_auth (
   id text primary key default 'default',
   username text not null,
+  display_name text not null default '',
   role text not null default 'admin',
+  tag text,
+  avatar_url text,
+  active boolean not null default true,
   password_hash text not null,
-  pin_hash text not null,
-  master_hash text not null,
+  pin_hash text,
+  master_hash text default '',
+  token_version int not null default 1,
   failed_login_attempts int not null default 0,
   login_locked_until timestamptz,
   failed_pin_attempts int not null default 0,
@@ -118,10 +143,88 @@ create table if not exists public.dsb_auth (
   pre_auth_expires_at timestamptz,
   session_token text,
   session_expires_at timestamptz,
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.dsb_auth add column if not exists role text not null default 'admin';
+alter table public.dsb_auth add column if not exists display_name text not null default '';
+alter table public.dsb_auth add column if not exists tag text;
+alter table public.dsb_auth add column if not exists avatar_url text;
+alter table public.dsb_auth add column if not exists active boolean not null default true;
+alter table public.dsb_auth add column if not exists token_version int not null default 1;
+alter table public.dsb_auth add column if not exists pre_auth_token text;
+alter table public.dsb_auth add column if not exists pre_auth_expires_at timestamptz;
+alter table public.dsb_auth add column if not exists created_at timestamptz not null default now();
+alter table public.dsb_auth add column if not exists updated_at timestamptz not null default now();
+alter table public.dsb_auth alter column pin_hash drop not null;
+alter table public.dsb_auth alter column master_hash drop not null;
+alter table public.dsb_auth alter column master_hash set default '';
+
+-- Migrate any legacy 'caller' role rows to 'telemarketing' (collision-safe)
+update public.dsb_auth
+set id = 'telemarketing',
+    username = 'Telemarketing',
+    display_name = case when coalesce(display_name, '') = '' then 'Telemarketing' else display_name end,
+    role = 'telemarketing',
+    tag = coalesce(nullif(btrim(tag), ''), 'TELEMARKETING'),
+    pin_hash = null,
+    active = true
+where id = 'caller'
+  and not exists (
+    select 1
+    from public.dsb_auth
+    where id = 'telemarketing'
+       or lower(username) = 'telemarketing'
+       or upper(coalesce(tag, '')) = 'TELEMARKETING'
+  );
+
+delete from public.dsb_auth where id = 'caller';
+
+update public.dsb_auth
+set role = 'telemarketing',
+    pin_hash = null
+where role = 'caller';
+
+update public.dsb_auth
+set display_name = case when id = 'default' then 'Administrador Ciprian' else username end
+where coalesce(btrim(display_name), '') = '';
+
+-- Backfill missing tags without colliding with existing tags or other rows in the same batch
+with candidates as (
+  select
+    d.id,
+    case
+      when d.id = 'default' then 'ADMIN-CIPRIAN'
+      else coalesce(nullif(btrim(upper(regexp_replace(d.username, '[^A-Za-z0-9-]+', '-', 'g')), '-'), ''), 'USER')
+    end as base_tag,
+    row_number() over (
+      partition by case
+        when d.id = 'default' then 'ADMIN-CIPRIAN'
+        else coalesce(nullif(btrim(upper(regexp_replace(d.username, '[^A-Za-z0-9-]+', '-', 'g')), '-'), ''), 'USER')
+      end
+      order by d.created_at asc, d.id asc
+    ) as rn
+  from public.dsb_auth d
+  where coalesce(btrim(d.tag), '') = ''
+)
+update public.dsb_auth d
+set tag = case
+  when c.rn = 1
+    and not exists (
+      select 1
+      from public.dsb_auth o
+      where o.id <> d.id
+        and upper(coalesce(btrim(o.tag), '')) = c.base_tag
+    )
+    then c.base_tag
+  else c.base_tag || '-' || upper(left(md5(d.id), 4))
+end
+from candidates c
+where d.id = c.id;
+
+create unique index if not exists dsb_auth_username_lower_idx on public.dsb_auth (lower(username));
+create unique index if not exists dsb_auth_tag_upper_idx on public.dsb_auth (upper(tag)) where tag is not null and btrim(tag) <> '';
 
 -- ----------------------------------------------------------------------------
 -- 4b. Códigos QR del Estudio QR (acceso exclusivo admin / service_role)
@@ -138,21 +241,31 @@ create table if not exists public.qr_codes (
   frame_text text not null default '',
   referral_code text,
   referrer_id text,
+  account_id text,
   created_at timestamptz not null default now()
 );
 
 alter table public.qr_codes add column if not exists referral_code text;
 alter table public.qr_codes add column if not exists referrer_id text;
+alter table public.qr_codes add column if not exists account_id text;
 
 create index if not exists qr_codes_created_at_idx on public.qr_codes (created_at desc);
+create index if not exists qr_codes_account_id_idx on public.qr_codes (account_id);
 
 -- ----------------------------------------------------------------------------
 -- 4c. Embajadores / Referidos QR (acceso exclusivo admin / service_role)
 -- ----------------------------------------------------------------------------
 create table if not exists public.referrers (
   id text primary key,
+  account_id text,
+  partner_type text not null default 'vendedor',
+  owner_vendedor_account_id text,
+  owner_vendedor_name text,
+  owner_vendedor_tag text,
   name text not null,
   code text not null unique,
+  emoji text,
+  avatar_url text,
   phone text,
   notes text,
   active boolean not null default true,
@@ -163,8 +276,100 @@ create table if not exists public.referrers (
   created_at timestamptz not null default now()
 );
 
+alter table public.referrers add column if not exists account_id text;
+alter table public.referrers add column if not exists avatar_url text;
+alter table public.referrers add column if not exists partner_type text not null default 'vendedor';
+alter table public.referrers add column if not exists owner_vendedor_account_id text;
+alter table public.referrers add column if not exists owner_vendedor_name text;
+alter table public.referrers add column if not exists owner_vendedor_tag text;
+alter table public.referrers add column if not exists emoji text;
+alter table public.referrers add column if not exists visits_count int not null default 0;
+alter table public.referrers add column if not exists unique_visits_count int not null default 0;
+alter table public.referrers add column if not exists last_visit_at timestamptz;
+alter table public.referrers add column if not exists qr_style_id text not null default 'classic-gold';
+
 create unique index if not exists referrers_code_upper_idx on public.referrers (upper(code));
 create index if not exists referrers_created_at_idx on public.referrers (created_at desc);
+create index if not exists referrers_account_id_idx on public.referrers (account_id);
+create index if not exists referrers_partner_type_idx on public.referrers (partner_type);
+create index if not exists referrers_owner_vendedor_account_id_idx on public.referrers (owner_vendedor_account_id);
+
+-- ----------------------------------------------------------------------------
+-- 4d. Registro histórico de visitas a QRs por fecha (acceso exclusivo service_role)
+-- ----------------------------------------------------------------------------
+create table if not exists public.referral_visits (
+  id text primary key,
+  referrer_id text,
+  referral_code text not null,
+  visitor_id text not null,
+  visited_at timestamptz not null default now()
+);
+
+create index if not exists referral_visits_visited_at_idx on public.referral_visits (visited_at desc);
+create index if not exists referral_visits_code_idx on public.referral_visits (referral_code);
+create index if not exists referral_visits_referrer_id_idx on public.referral_visits (referrer_id);
+
+-- ----------------------------------------------------------------------------
+-- 4e. Centro de Seguridad y Alertas Antifraude (acceso exclusivo service_role)
+-- ----------------------------------------------------------------------------
+create table if not exists public.security_alerts (
+  id text primary key,
+  code text not null,
+  severity text not null default 'medium',
+  category text not null default 'qr_abuse',
+  status text not null default 'open',
+  title text not null,
+  description text not null default '',
+  actor_role text not null default 'system',
+  actor_name text,
+  actor_tag text,
+  lead_id text,
+  lead_name text,
+  claim_code text,
+  phone_masked text,
+  referral_code text,
+  ip_masked text,
+  metadata jsonb not null default '{}'::jsonb,
+  reviewed_by text,
+  reviewed_at timestamptz,
+  review_note text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists security_alerts_created_at_idx on public.security_alerts (created_at desc);
+create index if not exists security_alerts_status_idx on public.security_alerts (status);
+create index if not exists security_alerts_severity_idx on public.security_alerts (severity);
+create index if not exists security_alerts_category_idx on public.security_alerts (category);
+create index if not exists security_alerts_code_idx on public.security_alerts (code);
+create index if not exists security_alerts_lead_id_idx on public.security_alerts (lead_id);
+
+-- ----------------------------------------------------------------------------
+-- 4f. Registro de Actividad Operativa (acceso exclusivo service_role)
+-- ----------------------------------------------------------------------------
+create table if not exists public.activity_logs (
+  id text primary key,
+  action text not null,
+  category text not null default 'system',
+  actor_role text not null default 'system',
+  actor_id text,
+  actor_name text not null default 'Sistema',
+  actor_username text,
+  actor_tag text,
+  summary text not null default '',
+  from_state text,
+  to_state text,
+  target_type text not null default 'system',
+  target_id text,
+  target_label text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists activity_logs_created_at_idx on public.activity_logs (created_at desc);
+create index if not exists activity_logs_category_idx on public.activity_logs (category);
+create index if not exists activity_logs_action_idx on public.activity_logs (action);
+create index if not exists activity_logs_actor_role_idx on public.activity_logs (actor_role);
+create index if not exists activity_logs_target_id_idx on public.activity_logs (target_id);
 
 -- ----------------------------------------------------------------------------
 -- 5. Row Level Security (RLS)
@@ -175,13 +380,18 @@ alter table public.leads enable row level security;
 alter table public.dsb_auth enable row level security;
 alter table public.qr_codes enable row level security;
 alter table public.referrers enable row level security;
+alter table public.referral_visits enable row level security;
+alter table public.security_alerts enable row level security;
+alter table public.activity_logs enable row level security;
 
 -- Revocar acceso directo desde cliente a tablas sensibles
 revoke all on table public.dsb_auth from anon, authenticated, public;
-revoke all on table public.leads from anon, public;
-revoke all on table public.qr_codes from anon, public;
-revoke all on table public.qr_codes from authenticated;
+revoke all on table public.leads from anon, authenticated, public;
+revoke all on table public.qr_codes from anon, authenticated, public;
 revoke all on table public.referrers from anon, authenticated, public;
+revoke all on table public.referral_visits from anon, authenticated, public;
+revoke all on table public.security_alerts from anon, authenticated, public;
+revoke all on table public.activity_logs from anon, authenticated, public;
 
 drop policy if exists "app_settings_public_access" on public.app_settings;
 create policy "app_settings_public_access"
@@ -200,8 +410,17 @@ create policy "gifts_public_access"
   with check (true);
 
 drop policy if exists "leads_public_access" on public.leads;
+drop policy if exists "leads_service_only" on public.leads;
 create policy "leads_service_only"
   on public.leads
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+drop policy if exists "dsb_auth_service_only" on public.dsb_auth;
+create policy "dsb_auth_service_only"
+  on public.dsb_auth
   for all
   to service_role
   using (true)
@@ -223,9 +442,33 @@ create policy "referrers_service_only"
   using (true)
   with check (true);
 
+drop policy if exists "referral_visits_service_only" on public.referral_visits;
+create policy "referral_visits_service_only"
+  on public.referral_visits
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+drop policy if exists "security_alerts_service_only" on public.security_alerts;
+create policy "security_alerts_service_only"
+  on public.security_alerts
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+drop policy if exists "activity_logs_service_only" on public.activity_logs;
+create policy "activity_logs_service_only"
+  on public.activity_logs
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
 grant usage on schema public to anon, authenticated, service_role;
 grant select on public.app_settings, public.gifts to anon, authenticated;
-grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth, public.qr_codes, public.referrers to service_role;
+grant all on public.app_settings, public.gifts, public.leads, public.dsb_auth, public.qr_codes, public.referrers, public.referral_visits, public.security_alerts, public.activity_logs to service_role;
 
 -- ----------------------------------------------------------------------------
 -- 6. Funciones RPC de seguridad (2FA: Usuario/Clave + PIN Caja Fuerte + Llave Maestra)
@@ -273,7 +516,9 @@ declare
 begin
   select * into v_auth
   from public.dsb_auth
-  where id = 'default' and coalesce(role, 'admin') = 'admin';
+  where id = 'default'
+    and coalesce(role, 'admin') = 'admin'
+    and coalesce(active, true) = true;
 
   if not found then
     return false;
@@ -312,6 +557,10 @@ begin
   select * into v_auth from public.dsb_auth where lower(username) = lower(v_clean_user);
   if not found then
     return jsonb_build_object('ok', false, 'error', 'Credenciales incorrectas.', 'remainingAttempts', 4);
+  end if;
+
+  if coalesce(v_auth.active, true) = false then
+    return jsonb_build_object('ok', false, 'error', 'Cuenta desactivada. Contacta al administrador.');
   end if;
 
   if v_auth.login_locked_until is not null and v_auth.login_locked_until > now() then
@@ -567,7 +816,8 @@ begin
     v_auth.failed_master_attempts := 0;
   end if;
 
-  if v_auth.master_hash <> crypt(coalesce(p_master_password, ''), v_auth.master_hash) then
+  if coalesce(v_auth.master_hash, '') = ''
+     or not public.dsb_verify_secret_hash(coalesce(p_master_password, ''), v_auth.master_hash) then
     v_auth.failed_master_attempts := v_auth.failed_master_attempts + 1;
     if v_auth.failed_master_attempts >= v_max_attempts then
       update public.dsb_auth
@@ -626,6 +876,7 @@ begin
   set username = v_next_username,
       password_hash = v_next_pass_hash,
       pin_hash = v_next_pin_hash,
+      token_version = coalesce(token_version, 1) + 1,
       failed_master_attempts = 0,
       master_locked_until = null,
       updated_at = now()
@@ -839,32 +1090,42 @@ on conflict (id) do update set
   probability = excluded.probability,
   sort_order = excluded.sort_order;
 
+-- Idempotente y sin pérdida de datos: respeta cualquier contraseña/PIN/usuario personalizado existente
+-- (incluyendo AdminCiprian, KevinyKaren, Vendedores y Telemarketing) y evita colisiones por índices únicos.
 insert into public.dsb_auth (
   id,
   username,
+  display_name,
   role,
+  tag,
+  active,
   password_hash,
   pin_hash,
-  master_hash
+  master_hash,
+  token_version
 )
 values (
   'default',
   'AdminCiprian',
+  'Administrador Ciprian',
   'admin',
+  'ADMIN-CIPRIAN',
+  true,
   '$2a$10$4uVKRgYY9yuM1KgBWCsAEuADvJEoaLNZwbjb0vCOih5MqnTCEdh.G',
   '$2a$10$Ht.aqXlB7b3GzsEpA5x6zuv7c/QE8vF1rDd2cn48lZeEk/os2bZ3y',
-  '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2'
+  '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2',
+  1
 ),
 (
-  'caller',
-  'Caller',
-  'caller',
+  'telemarketing',
+  'Telemarketing',
+  'Telemarketing',
+  'telemarketing',
+  'TELEMARKETING',
+  true,
   'sha256$caller_pwd_s1$619d4db488230618b7cae0edb9032dbaa4e5817d3b1cc1cf079a76f07c5f3295',
-  'sha256$caller_pin_s1$a0fd4eb49c0feef1123ea3d135bc07021a688893377d9c79d7eefa5cd8b427c3',
-  '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2'
+  null,
+  '$2a$10$p0RyMN7tmRgzKJoZRKjAY./8t6TFXwXcZ2riAbOAR0DbgPTH4IgX2',
+  1
 )
-on conflict (id) do update set
-  username = excluded.username,
-  role = excluded.role,
-  password_hash = excluded.password_hash,
-  pin_hash = excluded.pin_hash;
+on conflict do nothing;

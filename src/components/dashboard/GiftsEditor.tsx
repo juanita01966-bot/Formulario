@@ -29,6 +29,8 @@ import {
   resolveShowcaseTokens,
 } from '../gifts/GiftIllustration';
 import type { UpsertGiftPayload } from '../../services/storeClient';
+import { SecretKeyModal } from './SecretKeyModal';
+import { getRoleTheme } from './roleTheme';
 
 /**
  * Normalizes Google Drive share URLs into direct embeddable thumbnail URLs
@@ -143,16 +145,30 @@ interface GiftsEditorProps {
   customBoxColor?: string;
   showcaseStyle?: ShowcaseStyleId;
   randomizeGifts?: boolean;
-  onUpdateGiftTheme?: (giftTheme: GiftThemeId, customBoxColor?: string) => Promise<void>;
-  onUpdateShowcaseSettings?: (updates: {
-    showcaseStyle?: ShowcaseStyleId;
-    randomizeGifts?: boolean;
-  }) => Promise<void>;
-  onCreateGift: (payload: UpsertGiftWithProbability) => Promise<void>;
-  onUpdateGift: (id: string, updates: Partial<UpsertGiftWithProbability>) => Promise<void>;
-  onSaveGiftProbabilities?: (updates: Array<{ id: string; probability: number }>) => Promise<void>;
-  onDeleteGift: (id: string) => Promise<void>;
-  onResetGifts: () => Promise<void>;
+  onUpdateGiftTheme?: (
+    giftTheme: GiftThemeId,
+    customBoxColor: string | undefined,
+    masterPassword: string
+  ) => Promise<void>;
+  onUpdateShowcaseSettings?: (
+    updates: {
+      showcaseStyle?: ShowcaseStyleId;
+      randomizeGifts?: boolean;
+    },
+    masterPassword: string
+  ) => Promise<void>;
+  onCreateGift: (payload: UpsertGiftWithProbability, masterPassword: string) => Promise<void>;
+  onUpdateGift: (
+    id: string,
+    updates: Partial<UpsertGiftWithProbability>,
+    masterPassword: string
+  ) => Promise<void>;
+  onSaveGiftProbabilities?: (
+    updates: Array<{ id: string; probability: number }>,
+    masterPassword: string
+  ) => Promise<void>;
+  onDeleteGift: (id: string, masterPassword: string) => Promise<void>;
+  onResetGifts: (masterPassword: string) => Promise<void>;
   onBusyChange?: (busy: boolean) => void;
 }
 
@@ -186,7 +202,7 @@ interface GiftCatalogCardProps {
   showcaseStyle?: ShowcaseStyleId;
   confirmDeleteId: string | null;
   onToggleActive: (gift: GiftItem) => void;
-  onSaveCardProbability: (giftId: string, probability: number) => Promise<void>;
+  onSaveCardProbability: (giftId: string, probability: number) => Promise<boolean>;
   onEdit: (gift: GiftItem) => void;
   onRequestDelete: (id: string) => void;
   onConfirmDelete: (id: string) => void;
@@ -226,12 +242,14 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
     const nextProb = parseWeightInput(inlineProbInput);
     setSavingInlineProb(true);
     try {
-      await onSaveCardProbability(gift.id, nextProb);
-      setEditingInlineProb(false);
-      setInlineProbSaved(true);
-      window.setTimeout(() => setInlineProbSaved(false), 2200);
+      const savedOk = await onSaveCardProbability(gift.id, nextProb);
+      if (savedOk) {
+        setEditingInlineProb(false);
+        setInlineProbSaved(true);
+        window.setTimeout(() => setInlineProbSaved(false), 2200);
+      }
     } catch {
-      // Error banner handled by parent GiftsEditor
+      // Error banner handled by parent GiftsEditor / SecretKeyModal
     } finally {
       setSavingInlineProb(false);
     }
@@ -285,10 +303,11 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.94 }}
-      className={`group/card relative rounded-[24px] border p-3.5 sm:p-4 flex flex-col justify-between transition-all ${
+      data-dsb-card={!gift.active ? 'locked' : undefined}
+      className={`group/card relative rounded-[24px] border p-3.5 sm:p-4 flex flex-col justify-between backdrop-blur-lg transition-all duration-200 ${
         gift.active
-          ? 'border-[#DFC9AB]/90 bg-gradient-to-b from-[#FFFDF9] to-[#FCF7EE] shadow-[0_14px_30px_-14px_rgba(34,21,14,0.14),inset_0_1px_0_rgba(255,255,255,0.95)] hover:border-[#C88A2B]/65 hover:shadow-[0_20px_38px_-14px_rgba(140,74,25,0.2)]'
-          : 'border-stone-200/90 bg-stone-50/85 opacity-80'
+          ? 'dsb-glass-subtle bg-white/72 hover:-translate-y-1 hover:bg-white/86 hover:border-[#C88A2B]/60 hover:shadow-[0_20px_38px_-14px_rgba(139,0,24,0.16)]'
+          : 'border-stone-200/80 bg-stone-50/65 opacity-80'
       }`}
     >
       <div>
@@ -296,7 +315,7 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
         <div
           onMouseMove={handleStageMouseMove}
           onMouseLeave={handleStageMouseLeave}
-          className={`relative h-44 sm:h-48 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-end pb-3 pt-4 ${
+          className={`relative h-40 sm:h-48 w-full overflow-hidden rounded-2xl border perspective-1000 flex flex-col items-center justify-end pb-3 pt-4 ${
             gift.active
               ? `${tokens.stageBorder} shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_12px_26px_-14px_rgba(15,8,4,0.6)]`
               : 'border-stone-300 opacity-70 grayscale-[0.4]'
@@ -414,7 +433,7 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
                   : `${formatProbabilityPercent(effectivePercent)} · p:${formatWeightNumber(weight)}`}
             </span>
           </div>
-          <h3 className="mt-1 font-serif text-lg font-bold text-[#22150E] leading-snug">
+          <h3 className="mt-1 font-serif text-base sm:text-lg font-bold text-[#22150E] leading-snug">
             {gift.name}
           </h3>
           <p className="mt-1 text-xs text-[#6E5341] leading-relaxed line-clamp-2">
@@ -434,12 +453,12 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
         </div>
       </div>
 
-      <div className="mt-4 pt-3 border-t border-[#EFE3D2] space-y-2.5">
+      <div className="mt-3.5 sm:mt-4 pt-3 border-t border-[#EFE3D2] space-y-2.5">
         {editingInlineProb ? (
           <form onSubmit={handleInlineProbSubmit} className="flex flex-wrap items-center gap-1.5">
             <label
               htmlFor={`card-prob-${gift.id}`}
-              className="text-[11px] font-bold text-[#8C4A19] mr-auto"
+              className="w-full sm:w-auto text-[11px] font-bold text-[#8C4A19] sm:mr-auto"
             >
               Probabilidad / Peso (%):
             </label>
@@ -458,13 +477,13 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
                   setInlineProbInput(String(weight));
                 }
               }}
-              className="w-20 min-h-[44px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-[#C88A2B] bg-white px-2.5 py-1 text-right font-mono text-base sm:text-xs font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#C88A2B]/30"
+              className="flex-1 sm:flex-none min-w-[72px] sm:w-20 min-h-[42px] sm:min-h-[34px] rounded-xl sm:rounded-lg border border-[#C88A2B] bg-white px-2.5 py-1 text-right font-mono text-base sm:text-xs font-bold text-[#22150E] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#C88A2B]/30"
             />
             <button
               type="submit"
               disabled={savingInlineProb}
               aria-label={`Guardar probabilidad de ${gift.name}`}
-              className="inline-flex min-h-[44px] sm:min-h-[34px] items-center justify-center gap-1 rounded-xl sm:rounded-lg bg-[#22150E] px-3 py-1.5 text-xs font-semibold text-[#F4CA73] hover:bg-[#3A2418] transition-colors cursor-pointer disabled:opacity-50"
+              className="inline-flex min-h-[42px] sm:min-h-[34px] items-center justify-center gap-1 rounded-xl sm:rounded-lg bg-[#22150E] px-3 py-1.5 text-xs font-semibold text-[#F4CA73] hover:bg-[#3A2418] transition-colors cursor-pointer disabled:opacity-50"
             >
               <Check className="h-3.5 w-3.5" />
               <span>{savingInlineProb ? '...' : 'Guardar'}</span>
@@ -477,13 +496,13 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
                 setInlineProbInput(String(weight));
               }}
               aria-label="Cancelar edición de porcentaje"
-              className="inline-flex min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-[34px] items-center justify-center rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-white text-[#6E5341] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
+              className="inline-flex min-h-[42px] min-w-[42px] sm:min-h-[34px] sm:min-w-[34px] shrink-0 items-center justify-center rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-white text-[#6E5341] hover:bg-[#FAF3E8] transition-colors cursor-pointer"
             >
               <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
             </button>
           </form>
         ) : (
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-[11px] font-medium text-[#8B6F5B] truncate">{gift.stockLabel}</span>
               {inlineProbSaved && (
@@ -494,7 +513,7 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -503,7 +522,7 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
                 }}
                 title={`Editar probabilidad / peso (${formatWeightNumber(weight)}%)`}
                 aria-label={`Editar probabilidad de ${gift.name}: ${formatWeightNumber(weight)}%`}
-                className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-1 rounded-xl sm:rounded-lg border border-[#E6C99E] bg-[#FAF0E0] px-2.5 py-1.5 text-xs font-bold text-[#8C4A19] hover:bg-[#F3DFC0] transition-colors cursor-pointer tabular-nums"
+                className="inline-flex flex-1 sm:flex-none min-h-[40px] sm:min-h-[34px] items-center justify-center gap-1 rounded-xl sm:rounded-lg border border-[#E6C99E] bg-[#FAF0E0] px-2.5 py-1.5 text-xs font-bold text-[#8C4A19] hover:bg-[#F3DFC0] transition-colors cursor-pointer tabular-nums"
               >
                 <Percent className="h-3 w-3 shrink-0 text-[#B84A27]" />
                 <span>{formatWeightNumber(weight)}%</span>
@@ -512,14 +531,14 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
               <button
                 type="button"
                 onClick={() => onEdit(gift)}
-                className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-[#FAF3E8] px-3 sm:px-2.5 py-1.5 text-xs font-semibold text-[#22150E] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
+                className="inline-flex flex-1 sm:flex-none min-h-[40px] sm:min-h-[34px] items-center justify-center gap-1.5 rounded-xl sm:rounded-lg border border-[#E6D5BF] bg-[#FAF3E8] px-3 sm:px-2.5 py-1.5 text-xs font-semibold text-[#22150E] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
               >
-                <Edit3 className="h-3.5 w-3.5 text-[#B84A27]" />
+                <Edit3 className="h-3.5 w-3.5 text-[#B84A27] shrink-0" />
                 Editar
               </button>
 
               {confirmDeleteId === gift.id ? (
-                <div className="inline-flex min-h-[44px] sm:min-h-[34px] items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 sm:px-2.5 py-1.5 text-xs sm:text-[11px]">
+                <div className="inline-flex min-h-[40px] sm:min-h-[34px] shrink-0 items-center gap-2 rounded-xl sm:rounded-lg bg-red-50 border border-red-200 px-3 sm:px-2.5 py-1.5 text-xs sm:text-[11px]">
                   <button
                     type="button"
                     onClick={() => onConfirmDelete(gift.id)}
@@ -539,7 +558,7 @@ const GiftCatalogCard: React.FC<GiftCatalogCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onRequestDelete(gift.id)}
-                  className="inline-flex min-h-[44px] min-w-[44px] sm:min-h-[34px] sm:min-w-[34px] items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1.5 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
+                  className="inline-flex min-h-[40px] min-w-[40px] sm:min-h-[34px] sm:min-w-[34px] shrink-0 items-center justify-center rounded-xl sm:rounded-lg p-2 sm:p-1.5 text-[#A48A77] hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
                   title="Eliminar regalo"
                   aria-label={`Eliminar ${gift.name}`}
                 >
@@ -579,12 +598,35 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [savingShowcase, setSavingShowcase] = useState(false);
   const [driveDetected, setDriveDetected] = useState(false);
+  const [customColorDraft, setCustomColorDraft] = useState(customBoxColor || '#B84A27');
+  const [pendingSecretAction, setPendingSecretAction] = useState<{
+    title: string;
+    description: string;
+    confirmLabel: string;
+    run: (masterPassword: string) => Promise<void>;
+    onCancel?: () => void;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    onBusyChange?.(modalOpen || savingShowcase);
+    setCustomColorDraft(customBoxColor || '#B84A27');
+  }, [customBoxColor]);
+
+  useEffect(() => {
+    onBusyChange?.(modalOpen || savingShowcase || Boolean(pendingSecretAction));
     return () => onBusyChange?.(false);
-  }, [modalOpen, savingShowcase, onBusyChange]);
+  }, [modalOpen, savingShowcase, pendingSecretAction, onBusyChange]);
+
+  const requestSecretAuth = (
+    title: string,
+    description: string,
+    confirmLabel: string,
+    run: (masterPassword: string) => Promise<void>,
+    onCancel?: () => void
+  ) => {
+    setErrorMsg(null);
+    setPendingSecretAction({ title, description, confirmLabel, run, onCancel });
+  };
 
   const previewUid = useId().replace(/:/g, '');
   const activeCount = gifts.filter((g) => g.active).length;
@@ -596,14 +638,26 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     }
   }
 
-  const handleQuickSaveCardProbability = async (giftId: string, probability: number) => {
-    setErrorMsg(null);
-    try {
-      await onUpdateGift(giftId, { probability });
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'No se pudo actualizar la probabilidad.');
-      throw err;
-    }
+  const handleQuickSaveCardProbability = (giftId: string, probability: number): Promise<boolean> => {
+    const targetGift = gifts.find((g) => g.id === giftId);
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+      requestSecretAuth(
+        'Actualizar probabilidad del regalo',
+        `Ingresa tu contraseña de Administrador para guardar la nueva probabilidad (${probability}%) de "${targetGift?.name || 'este regalo'}".`,
+        'Autorizar y guardar',
+        async (masterPassword) => {
+          await onUpdateGift(giftId, { probability }, masterPassword);
+          finish(true);
+        },
+        () => finish(false)
+      );
+    });
   };
 
   const openCreateModal = () => {
@@ -649,35 +703,44 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
       probability: sanitizeProbabilityValue(modalWeightInput, draft.probability ?? 10),
     };
 
-    try {
-      if (editingGiftId) {
-        await onUpdateGift(editingGiftId, sanitizedPayload);
-      } else {
-        await onCreateGift(sanitizedPayload);
+    const currentEditingId = editingGiftId;
+    requestSecretAuth(
+      currentEditingId ? 'Guardar cambios del regalo' : 'Crear nuevo regalo',
+      `Ingresa tu contraseña de Administrador para ${currentEditingId ? 'actualizar' : 'añadir'} "${sanitizedPayload.name.trim()}" en el catálogo.`,
+      currentEditingId ? 'Autorizar y guardar' : 'Autorizar y crear',
+      async (masterPassword) => {
+        if (currentEditingId) {
+          await onUpdateGift(currentEditingId, sanitizedPayload, masterPassword);
+        } else {
+          await onCreateGift(sanitizedPayload, masterPassword);
+        }
+        setModalOpen(false);
       }
-      setModalOpen(false);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'No se pudo guardar el regalo.');
-    }
+    );
   };
 
   const handleToggleActive = async (gift: GiftItem) => {
-    setErrorMsg(null);
-    try {
-      await onUpdateGift(gift.id, { active: !gift.active });
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'No se pudo cambiar el estado.');
-    }
+    requestSecretAuth(
+      gift.active ? 'Ocultar regalo del sorteo' : 'Activar regalo en el sorteo',
+      `Ingresa tu contraseña de Administrador para cambiar el estado de "${gift.name}".`,
+      'Autorizar cambio',
+      async (masterPassword) => {
+        await onUpdateGift(gift.id, { active: !gift.active }, masterPassword);
+      }
+    );
   };
 
   const handleDelete = async (id: string) => {
-    setErrorMsg(null);
-    try {
-      await onDeleteGift(id);
-      setConfirmDeleteId(null);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'No se pudo eliminar el regalo.');
-    }
+    const targetGift = gifts.find((g) => g.id === id);
+    requestSecretAuth(
+      'Eliminar regalo del catálogo',
+      `Ingresa tu contraseña de Administrador para eliminar "${targetGift?.name || 'este regalo'}".`,
+      'Autorizar y eliminar',
+      async (masterPassword) => {
+        await onDeleteGift(id, masterPassword);
+        setConfirmDeleteId(null);
+      }
+    );
   };
 
   const handleShowcaseUpdate = async (updates: {
@@ -685,15 +748,31 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
     randomizeGifts?: boolean;
   }) => {
     if (!onUpdateShowcaseSettings || savingShowcase) return;
-    setErrorMsg(null);
-    setSavingShowcase(true);
-    try {
-      await onUpdateShowcaseSettings(updates);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'No se pudo actualizar la visualización.');
-    } finally {
-      setSavingShowcase(false);
-    }
+    requestSecretAuth(
+      'Actualizar configuración de vitrina',
+      'Ingresa tu contraseña de Administrador para aplicar el cambio de visualización o sorteo.',
+      'Autorizar cambio',
+      async (masterPassword) => {
+        setSavingShowcase(true);
+        try {
+          await onUpdateShowcaseSettings(updates, masterPassword);
+        } finally {
+          setSavingShowcase(false);
+        }
+      }
+    );
+  };
+
+  const handleRequestThemeUpdate = (nextTheme: GiftThemeId, nextColor?: string) => {
+    if (!onUpdateGiftTheme) return;
+    requestSecretAuth(
+      'Cambiar temática de cajas 3D',
+      'Ingresa tu contraseña de Administrador para guardar la nueva temática o color de las cajas 3D.',
+      'Autorizar y aplicar',
+      async (masterPassword) => {
+        await onUpdateGiftTheme(nextTheme, nextColor, masterPassword);
+      }
+    );
   };
 
   const previewPalette = resolveBoxPalette(giftTheme, customBoxColor, 0);
@@ -712,19 +791,26 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
       ? (modalWeightNumber / modalTotalActiveWeight) * 100
       : 0;
 
+  const adminTheme = getRoleTheme('admin');
+
   return (
     <section className="space-y-5">
-      <div className="rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-3.5 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
+      <div className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-3.5 sm:p-6">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-1"
+          style={{ background: adminTheme.headerStrip }}
+        />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4">
           <div className="min-w-0">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FAF0E0] border border-[#E6C99E] px-3 py-0.5 text-[11px] font-semibold text-[#8C4A19] mb-2">
-              <Sparkles className="h-3 w-3 text-[#C88A2B] shrink-0" />
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/75 border border-[#8B0018]/20 px-3 py-0.5 text-[11px] font-semibold text-[#8B0018] mb-2">
+              <Sparkles className="h-3 w-3 text-[#B91C1C] shrink-0" />
               {activeCount} {activeCount === 1 ? 'regalo activo' : 'regalos activos'} en tarjetas ocultas
             </span>
             <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E]">
               Catálogo de Regalos de Cocina
             </h2>
-            <p className="text-xs sm:text-sm text-[#7B5D4A] mt-0.5">
+            <p className="text-xs sm:text-sm text-[#594133] mt-0.5">
               Añade, edita, oculta o ajusta las probabilidades de los regalos que se revelan en las 9 cajas doradas.
             </p>
           </div>
@@ -734,9 +820,16 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
               <div className="inline-flex min-h-[44px] w-full sm:w-auto flex-wrap items-center justify-center gap-2 rounded-2xl sm:rounded-full bg-amber-50 border border-amber-300 px-3.5 py-2 text-xs">
                 <button
                   type="button"
-                  onClick={async () => {
-                    await onResetGifts();
-                    setConfirmReset(false);
+                  onClick={() => {
+                    requestSecretAuth(
+                      'Restaurar 9 regalos oficiales',
+                      'Ingresa tu contraseña de Administrador para restaurar el catálogo original de 9 regalos Royal Prestige.',
+                      'Autorizar y restaurar',
+                      async (masterPassword) => {
+                        await onResetGifts(masterPassword);
+                        setConfirmReset(false);
+                      }
+                    );
                   }}
                   className="font-bold text-[#8C3318] hover:underline cursor-pointer"
                 >
@@ -764,7 +857,8 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
             <button
               type="button"
               onClick={openCreateModal}
-              className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#22150E] to-[#8C3318] px-4 py-2 text-xs font-semibold text-[#FFFDF9] shadow hover:brightness-110 transition-all cursor-pointer"
+              style={{ background: adminTheme.heroGradient }}
+              className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold text-white shadow-md hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer"
             >
               <Plus className="h-4 w-4 shrink-0" />
               Añadir regalo
@@ -773,13 +867,13 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
         </div>
 
         {errorMsg && (
-          <div className="mt-4 rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-700">
+          <div className="mt-4 rounded-xl bg-red-50/90 backdrop-blur-sm border border-red-200 px-4 py-2.5 text-xs font-semibold text-red-700">
             {errorMsg}
           </div>
         )}
 
         {/* Thematic & Custom Color Selector for 3D Gift Boxes */}
-        <div className="mt-5 rounded-2xl border border-[#E6D5BF] bg-[#FAF3E8]/75 p-3.5 sm:p-5">
+        <div className="mt-5 dsb-glass-subtle rounded-2xl p-3.5 sm:p-5">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
             <div className="flex items-center gap-3 sm:gap-3.5 min-w-0">
               {/* Live Floating 3D Box Mini Preview */}
@@ -824,16 +918,17 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
             </div>
 
             {/* Custom Color Picker Control */}
-            <div className="flex items-center justify-between sm:justify-start gap-2.5 w-full lg:w-auto rounded-xl border border-[#DFCBB3] bg-white px-3 py-2 min-h-[44px]">
+            <div className="flex flex-wrap sm:flex-nowrap items-center justify-between sm:justify-start gap-2.5 w-full lg:w-auto rounded-xl border border-[#DFCBB3] bg-white px-3 py-2 min-h-[44px]">
               <div className="flex items-center gap-2.5">
                 <label className="text-xs font-semibold text-[#4E382B] whitespace-nowrap">
                   Color libre:
                 </label>
                 <input
                   type="color"
-                  value={customBoxColor || '#B84A27'}
+                  data-preserve-surface="true"
+                  value={customColorDraft}
                   onChange={(e) => {
-                    onUpdateGiftTheme?.('custom', e.target.value);
+                    setCustomColorDraft(e.target.value);
                   }}
                   className="h-8 w-10 cursor-pointer rounded border border-[#DFCBB3] bg-transparent p-0.5"
                   title="Elegir color personalizado para las cajas 3D"
@@ -841,14 +936,14 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => onUpdateGiftTheme?.('custom', customBoxColor || '#B84A27')}
+                onClick={() => handleRequestThemeUpdate('custom', customColorDraft)}
                 className={`min-h-[38px] sm:min-h-[32px] rounded-lg px-3 py-1 text-[11px] font-bold transition-colors cursor-pointer ${
                   giftTheme === 'custom'
                     ? 'bg-[#22150E] text-[#F4CA73]'
                     : 'bg-[#FAF3E8] text-[#594133] hover:bg-[#EFE2D0]'
                 }`}
               >
-                {giftTheme === 'custom' ? 'Color activo' : 'Usar color'}
+                {giftTheme === 'custom' ? 'Aplicar color' : 'Usar color'}
               </button>
             </div>
           </div>
@@ -860,7 +955,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 <button
                   key={theme.id}
                   type="button"
-                  onClick={() => onUpdateGiftTheme?.(theme.id, customBoxColor)}
+                  onClick={() => handleRequestThemeUpdate(theme.id, customColorDraft)}
                   className={`flex min-h-[72px] flex-col justify-between rounded-xl border p-2.5 sm:p-3 text-left transition-all cursor-pointer ${
                     active
                       ? 'border-[#B84A27] bg-white ring-2 ring-[#B84A27]/25 shadow-sm'
@@ -892,7 +987,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
         </div>
 
         {/* Showcase Plinth Lighting Selector */}
-        <div className="mt-4 rounded-2xl border border-[#E6D5BF] bg-gradient-to-br from-[#FFFDF9] to-[#FAF3E8] p-3.5 sm:p-5">
+        <div className="mt-4 dsb-glass-subtle rounded-2xl p-3.5 sm:p-5">
           <div>
             <div className="flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-[#C88A2B] shrink-0" />
@@ -954,7 +1049,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
         </div>
 
         {/* Selección Aleatoria Anti-Abuso */}
-        <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[#E6D5BF] bg-[#FAF3E8]/70 p-3.5 sm:px-5 sm:py-3.5">
+        <div className="mt-4 dsb-glass-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl p-3.5 sm:px-5 sm:py-3.5">
           <div className="flex items-center gap-2.5 min-w-0">
             <span
               className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
@@ -979,7 +1074,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
             type="button"
             disabled={savingShowcase || !onUpdateShowcaseSettings}
             onClick={() => handleShowcaseUpdate({ randomizeGifts: !randomizeGifts })}
-            className={`inline-flex min-h-[44px] sm:min-h-[36px] shrink-0 items-center justify-center gap-2 rounded-xl sm:rounded-full border px-4 py-2 sm:py-1.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-60 ${
+            className={`inline-flex min-h-[42px] sm:min-h-[36px] w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl sm:rounded-full border px-4 py-2 sm:py-1.5 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-60 ${
               randomizeGifts
                 ? 'border-emerald-300 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700'
                 : 'border-[#DFCBB3] bg-white text-[#4E382B] hover:bg-[#FAF3E8]'
@@ -1024,7 +1119,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/60 backdrop-blur-xs sm:backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/60 backdrop-blur-xs sm:backdrop-blur-sm p-3 sm:p-4 overflow-y-auto"
             onClick={() => setModalOpen(false)}
           >
             <motion.form
@@ -1033,7 +1128,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
               exit={{ opacity: 0, scale: 0.96 }}
               onClick={(e) => e.stopPropagation()}
               onSubmit={handleSaveModal}
-              className="w-full max-w-xl max-h-[90dvh] overflow-y-auto rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-4 sm:p-6 shadow-2xl space-y-4"
+              className="w-full max-w-xl max-h-[90dvh] overflow-y-auto rounded-[22px] sm:rounded-3xl bg-[#FFFDF9] border border-[#E6D5BF] p-4 sm:p-6 shadow-2xl space-y-4"
             >
               <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#EFE3D2]">
                 <h3 className="font-serif text-lg sm:text-xl font-bold text-[#22150E]">
@@ -1043,7 +1138,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                   type="button"
                   onClick={() => setModalOpen(false)}
                   aria-label="Cerrar modal"
-                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full p-1 text-[#7B5D4A] hover:bg-[#FAF3E8] cursor-pointer"
+                  className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full p-1 text-[#7B5D4A] hover:bg-[#FAF3E8] cursor-pointer"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -1051,10 +1146,10 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
 
               {/* Live Floating Luminous Base Preview Strip */}
               <div
-                className="flex flex-col sm:flex-row sm:items-center gap-4 rounded-2xl border border-[#DFCBB3] bg-[#FAF3E8]/70 p-3.5 shadow-inner"
+                className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 rounded-2xl border border-[#DFCBB3] bg-[#FAF3E8]/70 p-3 sm:p-3.5 shadow-inner"
               >
                 <div
-                  className={`relative flex h-28 w-full sm:w-28 shrink-0 flex-col items-center justify-end overflow-hidden rounded-2xl border pb-2 pt-2 ${activeShowcaseTokens.stageBorder} shadow-[0_12px_26px_-10px_rgba(15,8,4,0.55)]`}
+                  className={`relative flex h-24 sm:h-28 w-full sm:w-28 shrink-0 flex-col items-center justify-end overflow-hidden rounded-2xl border pb-2 pt-2 ${activeShowcaseTokens.stageBorder} shadow-[0_12px_26px_-10px_rgba(15,8,4,0.55)]`}
                   style={{ background: activeShowcaseTokens.miniStageBg }}
                 >
                   <div
@@ -1166,6 +1261,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3">
                   <input
                     type="range"
+                    data-preserve-surface="true"
                     min={0}
                     max={Math.max(100, Math.ceil(modalWeightNumber / 25) * 25)}
                     step={0.1}
@@ -1179,7 +1275,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                       setModalWeightInput(String(clean));
                       setDraft((prev) => ({ ...prev, probability: clean }));
                     }}
-                    className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-[#E6D5BF] accent-[#B84A27]"
+                    className="w-full sm:flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-[#E6D5BF] accent-[#B84A27]"
                   />
                   <div className="flex items-center justify-between sm:justify-end gap-2">
                     <span className="text-[11px] font-semibold text-[#6E5341]">Peso:</span>
@@ -1267,7 +1363,10 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                               className="h-9 w-9 object-contain bg-transparent select-none drop-shadow-[0_6px_10px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover/png:scale-110"
                             />
                             {isSelected && (
-                              <span className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#E5AE4E] text-[#1E110A]">
+                              <span
+                                data-preserve-surface="true"
+                                className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#E5AE4E] text-[#1E110A]"
+                              >
                                 <Check className="h-2.5 w-2.5" />
                               </span>
                             )}
@@ -1314,7 +1413,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                     {uploadingImage ? 'Procesando...' : 'Subir desde escritorio'}
                   </button>
 
-                  <div className="relative">
+                  <div className="relative min-w-0">
                     <Link2 className="w-3.5 h-3.5 text-[#8A6D5B] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
@@ -1417,6 +1516,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                     >
                       <input
                         type="color"
+                        data-preserve-surface="true"
                         value={draft.accentColor || '#C88A2B'}
                         onChange={(e) => setDraft((prev) => ({ ...prev, accentColor: e.target.value }))}
                         className="h-5 w-5 sm:h-4 sm:w-4 cursor-pointer border-0 bg-transparent p-0"
@@ -1449,7 +1549,7 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="min-h-[44px] w-full sm:w-auto rounded-full bg-[#22150E] px-5 py-2.5 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] cursor-pointer"
+                  className="min-h-[44px] w-full sm:w-auto rounded-full border border-[#C88A2B]/45 bg-[#22150E] px-5 py-2.5 text-xs font-semibold text-[#FAF3E8] hover:bg-[#3A2418] cursor-pointer"
                 >
                   {editingGiftId ? 'Guardar cambios' : 'Crear regalo'}
                 </button>
@@ -1458,6 +1558,21 @@ export const GiftsEditor: React.FC<GiftsEditorProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <SecretKeyModal
+        open={Boolean(pendingSecretAction)}
+        title={pendingSecretAction?.title || 'Autorizar cambio'}
+        description={pendingSecretAction?.description}
+        confirmLabel={pendingSecretAction?.confirmLabel}
+        onClose={() => {
+          pendingSecretAction?.onCancel?.();
+          setPendingSecretAction(null);
+        }}
+        onAuthorize={async (masterPassword) => {
+          if (!pendingSecretAction) return;
+          await pendingSecretAction.run(masterPassword);
+        }}
+      />
     </section>
   );
 };

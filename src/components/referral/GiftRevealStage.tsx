@@ -9,6 +9,7 @@ import {
 } from 'framer-motion';
 import {
   Check,
+  Copy,
   Download,
   Loader2,
   MapPin,
@@ -18,6 +19,7 @@ import {
   RotateCcw,
   Sparkles,
   User,
+  Zap,
 } from 'lucide-react';
 import type { GiftItem, GiftThemeId, ShowcaseStyleId } from '../../types/app';
 import { normalizeReferralCode } from '../../services/storeClient';
@@ -31,11 +33,15 @@ import {
 } from '../gifts/GiftIllustration';
 import { saveCouponInvoicePng } from './couponInvoice';
 import {
+  BOOST_TIERS,
   generateShareQrAssets,
   getPublicLandingUrl,
+  playDopamineChime,
+  resolveBoostTier,
   triggerQrDownload,
   type ShareQrAssets,
 } from './shareQrCard';
+import { AmbassadorAvatar } from '../shared/AmbassadorAvatar';
 
 interface GiftRevealStageProps {
   leadName: string;
@@ -48,6 +54,7 @@ interface GiftRevealStageProps {
   showcaseStyle?: ShowcaseStyleId;
   referralCode?: string | null;
   referrerName?: string | null;
+  referrerAvatarUrl?: string | null;
   onStartAnother: () => void;
 }
 
@@ -519,12 +526,14 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   showcaseStyle = 'luminous-gold',
   referralCode = null,
   referrerName = null,
+  referrerAvatarUrl = null,
   onStartAnother,
 }) => {
   const prefersReduced = Boolean(useReducedMotion());
   const effectiveReferralCode =
     normalizeReferralCode(referralCode) || getStoredReferralCode() || null;
   const cleanReferrerName = referrerName?.trim() || null;
+  const cleanReferrerAvatarUrl = referrerAvatarUrl?.trim() || null;
   const expectedLandingUrl = getPublicLandingUrl(effectiveReferralCode);
   const [phase, setPhase] = useState<RevealPhase>(() => (prefersReduced ? 'revealed' : 'floating'));
   const [climaxFlash, setClimaxFlash] = useState(false);
@@ -533,29 +542,37 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [qrAssets, setQrAssets] = useState<ShareQrAssets | null>(null);
   const [sharingQr, setSharingQr] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [shareCount, setShareCount] = useState(0);
+  const [pulseWave, setPulseWave] = useState(0);
   const [qrSharedFeedback, setQrSharedFeedback] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const phaseRef = useRef<RevealPhase>(phase);
+  const boostBurstRef = useRef<(() => void) | null>(null);
   const invoiceTimerRef = useRef<number | null>(null);
   const qrTimerRef = useRef<number | null>(null);
+  const copiedTimerRef = useRef<number | null>(null);
+
+  const currentTier = resolveBoostTier(shareCount);
 
   useEffect(() => {
     let active = true;
     generateShareQrAssets(expectedLandingUrl, {
       referralCode: effectiveReferralCode,
       referrerName: cleanReferrerName,
+      referrerAvatarUrl: cleanReferrerAvatarUrl,
     })
       .then((assets) => {
         if (active) setQrAssets(assets);
       })
       .catch(() => {
-        // Non-blocking: generated on demand if needed
+        // Non-blocking: generated lazily on click
       });
 
     return () => {
       active = false;
     };
-  }, [expectedLandingUrl, effectiveReferralCode, cleanReferrerName]);
+  }, [expectedLandingUrl, effectiveReferralCode, cleanReferrerName, cleanReferrerAvatarUrl]);
 
   useEffect(() => {
     return () => {
@@ -564,6 +581,9 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       }
       if (qrTimerRef.current !== null) {
         window.clearTimeout(qrTimerRef.current);
+      }
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
       }
     };
   }, []);
@@ -800,8 +820,34 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
       rafId = requestAnimationFrame(render);
     };
 
+    boostBurstRef.current = () => {
+      const cx = width / 2;
+      const cy = height * 0.74;
+      const count = width < 480 ? 48 : 74;
+      for (let i = 0; i < count; i++) {
+        const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.45;
+        const speed = 2.8 + Math.random() * 8.2;
+        const roll = Math.random();
+        particles.push({
+          x: cx + (Math.random() - 0.5) * 90,
+          y: cy + (Math.random() - 0.5) * 26,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1.5,
+          size: roll > 0.45 ? 4.6 + Math.random() * 4.8 : 2.2 + Math.random() * 3,
+          alpha: 1,
+          decay: 0.011 + Math.random() * 0.01,
+          color: SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)],
+          kind: roll > 0.7 ? 'leaf' : roll > 0.25 ? 'starburst' : 'spark',
+          rotation: Math.random() * Math.PI * 2,
+          vr: (Math.random() - 0.5) * 0.2,
+          gravity: 0.09,
+        });
+      }
+    };
+
     rafId = requestAnimationFrame(render);
     return () => {
+      boostBurstRef.current = null;
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', resize);
     };
@@ -815,32 +861,46 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
     qrAssets && qrAssets.targetUrl === expectedLandingUrl
       ? qrAssets.targetUrl
       : expectedLandingUrl;
-  const whatsappQrMessage = `¡Hola! Participa en la experiencia exclusiva de The Ciprian Company y descubre tu cajita sorpresa de cocina aquí: ${publicLandingUrl}`;
+  const whatsappQrMessage = `¡Hola! Participa en la experiencia exclusiva de The Ciprian Company, destapa tu regalo de cocina y participa por hasta $2,000 USD aquí: ${publicLandingUrl}`;
   const whatsappQrHref = `https://wa.me/?text=${encodeURIComponent(whatsappQrMessage)}`;
 
-  const showQrFeedback = (msg: string) => {
+  const triggerBoostCelebration = (msg: string) => {
+    setShareCount((prev) => {
+      const next = prev + 1;
+      const nextTier = resolveBoostTier(next);
+      playDopamineChime(nextTier.level, prefersReduced);
+      return next;
+    });
+    setPulseWave((prev) => prev + 1);
+    boostBurstRef.current?.();
     setQrSharedFeedback(msg);
     if (qrTimerRef.current !== null) {
       window.clearTimeout(qrTimerRef.current);
     }
     qrTimerRef.current = window.setTimeout(() => {
       setQrSharedFeedback(null);
-    }, 4500);
+    }, 4400);
+  };
+
+  const ensureQrAssets = async (): Promise<ShareQrAssets> => {
+    if (qrAssets && qrAssets.targetUrl === expectedLandingUrl) {
+      return qrAssets;
+    }
+    const fresh = await generateShareQrAssets(expectedLandingUrl, {
+      referralCode: effectiveReferralCode,
+      referrerName: cleanReferrerName,
+      referrerAvatarUrl: cleanReferrerAvatarUrl,
+    });
+    setQrAssets(fresh);
+    return fresh;
   };
 
   const handleShareQrWhatsApp = async () => {
     if (sharingQr) return;
     setSharingQr(true);
     try {
-      const assets =
-        qrAssets && qrAssets.targetUrl === expectedLandingUrl
-          ? qrAssets
-          : await generateShareQrAssets(expectedLandingUrl, {
-              referralCode: effectiveReferralCode,
-              referrerName: cleanReferrerName,
-            });
-      if (!qrAssets || qrAssets.targetUrl !== expectedLandingUrl) setQrAssets(assets);
-      const shareMessage = `¡Hola! Participa en la experiencia exclusiva de The Ciprian Company y descubre tu cajita sorpresa de cocina aquí: ${assets.targetUrl}`;
+      const assets = await ensureQrAssets();
+      const shareMessage = `¡Hola! Participa en la experiencia exclusiva de The Ciprian Company, destapa tu regalo de cocina y participa por hasta $2,000 USD aquí: ${assets.targetUrl}`;
       const shareWhatsappHref = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
 
       const nav = navigator as Navigator & {
@@ -854,7 +914,7 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
               text: shareMessage,
               files: [assets.file],
             });
-            showQrFeedback('QR compartido · ¡Tus probabilidades han subido!');
+            triggerBoostCelebration('¡QR VIP compartido! Tu multiplicador dorado subió.');
             return;
           }
         } catch (err) {
@@ -864,12 +924,50 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
         }
       }
 
-      // Desktop / fallback: save the QR card PNG and open WhatsApp with the direct link
       triggerQrDownload(assets);
       window.open(shareWhatsappHref, '_blank', 'noopener,noreferrer');
-      showQrFeedback('QR descargado · Adjúntalo en tu chat de WhatsApp');
+      triggerBoostCelebration('¡Tarjeta QR HD descargada y lista en WhatsApp!');
     } catch {
       window.open(whatsappQrHref, '_blank', 'noopener,noreferrer');
+    } finally {
+      setSharingQr(false);
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(publicLandingUrl);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = publicLandingUrl;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      setCopiedLink(true);
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+      copiedTimerRef.current = window.setTimeout(() => setCopiedLink(false), 2600);
+      triggerBoostCelebration('¡Enlace VIP copiado! Compártelo para subir de nivel.');
+    } catch {
+      setQrSharedFeedback('No se pudo copiar el enlace en este navegador.');
+    }
+  };
+
+  const handleDownloadQrCard = async () => {
+    if (sharingQr) return;
+    setSharingQr(true);
+    try {
+      const assets = await ensureQrAssets();
+      triggerQrDownload(assets);
+      triggerBoostCelebration('¡Tarjeta QR HD guardada! Compártela para multiplicar oportunidades.');
+    } catch {
+      setQrSharedFeedback('No se pudo generar la tarjeta QR. Intenta nuevamente.');
     } finally {
       setSharingQr(false);
     }
@@ -1127,52 +1225,157 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </p>
               </div>
 
-              {/* Bonus Probability Boost & Share QR Card */}
-              <div className="mt-4 w-full rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#1A261C]/75 via-[#181B14]/82 to-[#160B06]/85 backdrop-blur-md p-3.5 sm:p-4 text-left shadow-[inset_0_1px_0_rgba(167,243,208,0.16)]">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#F4CA73]/45 bg-[#FFF9ED] p-1 shadow-sm">
+              {/* Masterized Post-Reveal Dopamine QR Booster Card ($2,000 USD) */}
+              <div className="mt-4 w-full rounded-[22px] border border-[#F4CA73]/45 bg-gradient-to-br from-[#2B170C]/90 via-[#1B130B]/92 to-[#130905]/95 backdrop-blur-md p-3.5 sm:p-4 text-left shadow-[0_18px_40px_-14px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(254,240,138,0.2)]">
+                {/* Booster Header + Pulsing Multiplier Pill */}
+                <div className="flex items-center justify-between gap-2.5 mb-2.5">
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-400/35 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300 mb-1">
+                      <Zap className="h-2.5 w-2.5 fill-emerald-300/40" />
+                      Multiplica tus probabilidades · Hasta $2,000 USD
+                    </div>
+                    <p className="text-[11.5px] leading-snug text-[#EFE2D0]">
+                      {currentTier.message}
+                    </p>
+                  </div>
+
+                  <div className="relative shrink-0">
+                    {!prefersReduced && pulseWave > 0 && (
+                      <motion.span
+                        key={`reveal-ring-${pulseWave}`}
+                        aria-hidden="true"
+                        initial={{ scale: 0.85, opacity: 0.9 }}
+                        animate={{ scale: 1.65, opacity: 0 }}
+                        transition={{ duration: 0.65, ease: 'easeOut' }}
+                        className="pointer-events-none absolute inset-0 rounded-xl border-2 border-[#FEF08A]"
+                      />
+                    )}
+                    <motion.div
+                      key={`reveal-tier-${currentTier.level}-${shareCount}`}
+                      initial={prefersReduced ? undefined : { scale: 0.82, rotate: -3 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: 'spring', stiffness: 420, damping: 16 }}
+                      className={`rounded-xl border px-2.5 py-1 text-center ${
+                        currentTier.level >= 4
+                          ? 'border-[#FEF08A] bg-gradient-to-br from-[#FEF08A] via-[#E5AE4E] to-[#B45309] text-[#1A0D06]'
+                          : currentTier.level >= 2
+                            ? 'border-[#FDE68A]/70 bg-[#4A2710] text-[#FEF08A]'
+                            : 'border-[#C88A2B]/45 bg-[#1B0D06] text-[#F4CA73]'
+                      }`}
+                    >
+                      <span className="block font-mono text-xs sm:text-sm font-extrabold leading-none">
+                        {currentTier.badge}
+                      </span>
+                      <span className="block mt-0.5 text-[8.5px] font-bold uppercase tracking-wider opacity-90">
+                        Nivel {currentTier.level}
+                      </span>
+                    </motion.div>
+                  </div>
+                </div>
+
+                {/* 4-Tier Interactive Progress Meter */}
+                <div className="mb-3">
+                  <div className="relative h-2 w-full overflow-hidden rounded-full bg-[#120703] border border-[#C88A2B]/30">
+                    <motion.div
+                      initial={false}
+                      animate={{ width: `${currentTier.progress}%` }}
+                      transition={
+                        prefersReduced
+                          ? { duration: 0.15 }
+                          : { type: 'spring', stiffness: 210, damping: 22 }
+                      }
+                      className="h-full rounded-full bg-gradient-to-r from-[#B84A27] via-[#E5AE4E] to-[#FEF08A] shadow-[0_0_12px_rgba(253,224,71,0.65)]"
+                    />
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-4 gap-1 text-center">
+                    {BOOST_TIERS.map((tier) => (
+                      <span
+                        key={tier.level}
+                        className={`text-[9.5px] font-semibold truncate ${
+                          currentTier.level === tier.level
+                            ? 'text-[#FEF08A]'
+                            : currentTier.level > tier.level
+                              ? 'text-[#E5AE4E]'
+                              : 'text-[#8B6F56]'
+                        }`}
+                      >
+                        {tier.shortLabel}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live Miniature QR Share Card Preview + Attribution */}
+                <div className="flex items-center gap-3 rounded-xl border border-[#C88A2B]/30 bg-[#140905]/80 p-2.5">
+                  <motion.button
+                    type="button"
+                    onClick={handleDownloadQrCard}
+                    disabled={sharingQr}
+                    whileHover={prefersReduced ? undefined : { scale: 1.05 }}
+                    whileTap={prefersReduced ? undefined : { scale: 0.95 }}
+                    aria-label="Descargar tarjeta QR HD"
+                    className="relative flex h-20 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#F4CA73]/55 bg-[#0F0603] p-1 shadow-md cursor-pointer"
+                  >
                     {qrAssets?.previewDataUrl ? (
                       <img
                         src={qrAssets.previewDataUrl}
-                        alt="Código QR para compartir por WhatsApp"
+                        alt="Vista previa de Tarjeta QR para compartir por WhatsApp"
                         className="h-full w-full rounded-lg object-cover"
                       />
                     ) : (
-                      <QrCode className="h-8 w-8 text-[#22150E]" />
+                      <QrCode className="h-7 w-7 text-[#F4CA73]" />
                     )}
-                  </div>
+                    <span className="absolute bottom-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#1B0E07]/90 border border-[#F4CA73]/60 text-[#FEF08A]">
+                      <Download className="h-2.5 w-2.5" />
+                    </span>
+                  </motion.button>
+
                   <div className="min-w-0 flex-1">
-                    <div className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300 mb-1">
-                      <Sparkles className="h-2.5 w-2.5" />
-                      Aumenta tus probabilidades
-                    </div>
                     <p className="text-xs leading-snug text-[#EFE2D0]">
-                      Al <strong className="text-[#FFFDF9]">compartir este QR por WhatsApp</strong> aumentas tus probabilidades de ganar{' '}
-                      <strong className="text-[#F4CA73]">mejores premios</strong>.
+                      Al <strong className="text-[#FFFDF9]">compartir este QR por WhatsApp</strong> con
+                      amigos o familiares aumentas tus probabilidades de ganar{' '}
+                      <strong className="text-[#FDE047]">hasta $2,000 USD</strong>.
                     </p>
                     {effectiveReferralCode && (
-                      <p className="mt-1.5 inline-flex flex-wrap items-center gap-1 rounded-full border border-[#E5AE4E]/40 bg-[#E5AE4E]/12 px-2.5 py-0.5 text-[10.5px] font-medium text-[#F4CA73]">
+                      <div className="mt-1.5 inline-flex flex-wrap items-center gap-1.5 rounded-full border border-[#E5AE4E]/40 bg-[#E5AE4E]/14 pl-1.5 pr-2.5 py-0.5 text-[10.5px] font-medium text-[#F4CA73]">
+                        <AmbassadorAvatar
+                          name={cleanReferrerName || effectiveReferralCode}
+                          avatarUrl={cleanReferrerAvatarUrl}
+                          size="xs"
+                          ring="gold"
+                          className="h-6 w-6 shrink-0 ring-offset-[#140905]"
+                        />
                         <span>
-                          QR vinculado{' '}
+                          Invitación VIP{' '}
                           {cleanReferrerName ? (
                             <>
-                              a <strong className="text-[#FFFDF9]">{cleanReferrerName}</strong> ·{' '}
+                              de <strong className="text-[#FFFDF9]">{cleanReferrerName}</strong> ·{' '}
                             </>
                           ) : null}
-                          <span className="font-mono font-bold tracking-wider text-[#FDE68A]">
+                          Tag{' '}
+                          <span className="font-mono font-bold tracking-wider text-[#FEF08A]">
                             {effectiveReferralCode}
                           </span>
                         </span>
-                      </p>
+                      </div>
                     )}
                   </div>
                 </div>
-                {qrSharedFeedback && (
-                  <p className="mt-2.5 flex items-center gap-1.5 rounded-xl border border-emerald-400/35 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-200">
-                    <Check className="h-3.5 w-3.5 shrink-0" />
-                    {qrSharedFeedback}
-                  </p>
-                )}
+
+                <AnimatePresence>
+                  {qrSharedFeedback && (
+                    <motion.p
+                      key={qrSharedFeedback}
+                      initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="mt-2.5 flex items-center gap-1.5 rounded-xl border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-200"
+                    >
+                      <Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                      {qrSharedFeedback}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
               </div>
 
               {invoiceError && (
@@ -1207,28 +1410,60 @@ export const GiftRevealStage: React.FC<GiftRevealStageProps> = ({
                 </button>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
-                  <button
+                  <motion.button
                     type="button"
                     onClick={handleShareQrWhatsApp}
                     disabled={sharingQr}
-                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-emerald-400/50 bg-emerald-700/85 px-5 py-3 text-sm font-bold text-[#FFFDF9] shadow-[0_10px_24px_-8px_rgba(16,185,129,0.45)] hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-75"
+                    whileHover={prefersReduced ? undefined : { scale: 1.015, y: -1 }}
+                    whileTap={prefersReduced ? undefined : { scale: 0.975 }}
+                    className="relative w-full min-h-[48px] overflow-hidden inline-flex items-center justify-center gap-2 rounded-full border border-emerald-300/55 bg-gradient-to-r from-emerald-700 via-emerald-600 to-emerald-700 px-4 py-3 text-sm font-bold text-[#FFFDF9] shadow-[0_12px_26px_-8px_rgba(16,185,129,0.55)] hover:brightness-110 transition-all cursor-pointer disabled:opacity-75"
                   >
-                    {sharingQr ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <MessageCircle className="h-4 w-4" />
+                    {!prefersReduced && (
+                      <motion.span
+                        aria-hidden="true"
+                        animate={{ x: ['-140%', '260%'] }}
+                        transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 2.2, ease: 'easeInOut' }}
+                        className="pointer-events-none absolute inset-y-0 left-0 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                      />
                     )}
-                    Compartir QR
-                  </button>
-                  <button
+                    <span className="relative inline-flex items-center gap-2">
+                      {sharingQr ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <MessageCircle className="h-4 w-4" />
+                      )}
+                      Compartir QR por WhatsApp
+                    </span>
+                  </motion.button>
+
+                  <motion.button
                     type="button"
-                    onClick={onStartAnother}
-                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-[#C88A2B]/35 bg-transparent px-5 py-3 text-sm font-medium text-[#E8D5BE] hover:bg-white/5 transition-colors cursor-pointer"
+                    onClick={handleCopyInviteLink}
+                    whileTap={prefersReduced ? undefined : { scale: 0.97 }}
+                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-full border border-[#F4CA73]/45 bg-[#2A170D]/85 px-4 py-3 text-sm font-semibold text-[#FEF08A] hover:bg-[#3A2012] transition-colors cursor-pointer"
                   >
-                    <RotateCcw className="h-4 w-4" />
-                    Nuevo registro
-                  </button>
+                    {copiedLink ? (
+                      <>
+                        <Check className="h-4 w-4 text-emerald-300" />
+                        <span className="text-emerald-200">¡Enlace VIP copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-4 w-4" />
+                        <span>Copiar enlace</span>
+                      </>
+                    )}
+                  </motion.button>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={onStartAnother}
+                  className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 rounded-full border border-[#C88A2B]/35 bg-transparent px-5 py-2.5 text-sm font-medium text-[#E8D5BE] hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Nuevo registro
+                </button>
               </div>
             </motion.div>
           )}

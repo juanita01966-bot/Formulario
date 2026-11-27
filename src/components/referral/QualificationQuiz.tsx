@@ -1,11 +1,7 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowLeft, Check } from 'lucide-react';
+import { ArrowLeft, Check, Gift, Share2, Sparkles } from 'lucide-react';
 import type { CreditTier, LeadQualification } from '../../types/app';
-
-type ExtendedLeadQualification = LeadQualification & {
-  cedeGoldenTicket?: boolean;
-};
 
 interface QualificationQuizProps {
   leadName: string;
@@ -17,8 +13,8 @@ type QuizStage =
   | 'yes_is_client'
   | 'yes_rating'
   | 'yes_future_product'
-  | 'no_healthy_eating'
   | 'no_golden_ticket'
+  | 'no_healthy_eating'
   | 'no_future_product'
   | 'us_credit';
 
@@ -155,19 +151,21 @@ const HEALTHY_EATING_OPTIONS: OptionItem[] = [
   },
 ];
 
-const GOLDEN_TICKET_OPTIONS: Array<OptionItem & { action: 'use' | 'cede' }> = [
+const GOLDEN_TICKET_OPTIONS: Array<OptionItem & { action: 'use' | 'cede'; badge: string }> = [
   {
     id: 'use-ticket',
     action: 'use',
-    label: 'Sí, lo utilizaría con un producto de nuestro catálogo exclusivo',
-    sublabel: 'Me gustaría conocer las líneas de cocina y descubrir mi obsequio directo.',
+    badge: 'Regalo Directo',
+    label: 'Usar mi Boleto Dorado ahora',
+    sublabel: 'Quiero descubrir mi obsequio directo de cocina y conocer las líneas de nuestro catálogo exclusivo.',
     points: 35,
   },
   {
     id: 'cede-ticket',
     action: 'cede',
-    label: 'Prefiero cederlo a un amigo o familiar',
-    sublabel: 'Quiero ver el instructivo del programa y compartir mi código QR para participar.',
+    badge: 'Hasta $2,000 USD',
+    label: 'Ceder mi Boleto Dorado a un amigo/familiar y compartir QR ($2,000 USD)',
+    sublabel: 'Abre el Folleto Dorado interactivo 3D, comparte tu código QR y multiplica tus probabilidades de ganar.',
     points: 30,
   },
 ];
@@ -215,10 +213,8 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
   const progressRatio = (() => {
     if (stage === 'knows_brand') return 0.16;
-    if (stage === 'yes_is_client') return 0.34;
-    if (stage === 'yes_rating') return 0.54;
-    if (stage === 'no_golden_ticket') return 0.38;
-    if (stage === 'no_healthy_eating') return knowsBrand ? 0.54 : 0.38;
+    if (stage === 'yes_is_client' || stage === 'no_golden_ticket') return 0.34;
+    if (stage === 'yes_rating' || stage === 'no_healthy_eating') return 0.54;
     if (stage === 'yes_future_product' || stage === 'no_future_product') return 0.76;
     if (stage === 'us_credit') return 0.95;
     return 0.95;
@@ -282,13 +278,13 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
     advanceWithDelay(opt.id, () => {
       if (opt.action === 'use') {
         setSelectedProduct(null);
-        setStage('no_future_product');
+        setStage('no_healthy_eating');
         return;
       }
 
       const score = 55;
       const tier: CreditTier = score >= 75 ? 'alto' : score >= 45 ? 'medio' : 'basico';
-      const payload: ExtendedLeadQualification = {
+      const payload: LeadQualification = {
         creditProfile: 'No conocía Royal Prestige · Cede Boleto Dorado',
         housingStatus: 'Prefiere ceder el Boleto Dorado a un amigo/familiar',
         investmentPriority: 'Compartir QR · Programa de Anfitrión',
@@ -325,7 +321,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
         engagementRatio = Math.min(1, Math.max(0, (rawEngagement - 80) / 40));
       } else {
         const basePoints = knows ? 25 : 15;
-        const secondaryPts = knows ? (healthyInterest?.points ?? 25) : 35;
+        const secondaryPts = healthyInterest?.points ?? 25;
         const rawEngagement = basePoints + secondaryPts + productPoints;
         engagementRatio = Math.min(1, Math.max(0, (rawEngagement - 65) / 40));
       }
@@ -341,7 +337,7 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
 
       if (client) {
         const rated = rating ?? 8;
-        const payload: ExtendedLeadQualification = {
+        const payload: LeadQualification = {
           creditProfile: 'Conoce Royal Prestige · Es cliente',
           housingStatus: `Calificación productos: ${rated}/10`,
           investmentPriority: productLabel,
@@ -359,20 +355,18 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
         return;
       }
 
-      const payload: ExtendedLeadQualification = {
+      const payload: LeadQualification = {
         creditProfile: knows
           ? 'Conoce Royal Prestige · No es cliente'
           : 'No conocía Royal Prestige · Usaría Boleto Dorado',
-        housingStatus: knows
-          ? healthyInterest?.label || 'Interés en alimentación saludable'
-          : 'Interés en catálogo con Boleto Dorado',
+        housingStatus: healthyInterest?.label || 'Interés en catálogo con Boleto Dorado',
         investmentPriority: productLabel,
         score,
         tier,
         knowsBrand: knows,
         isClient: false,
         productRating: null,
-        ...(knows && healthyInterest?.label ? { healthyEatingInterest: healthyInterest.label } : {}),
+        ...(healthyInterest?.label ? { healthyEatingInterest: healthyInterest.label } : {}),
         desiredProduct: productLabel,
         usCreditEstablished: opt.value,
         usCreditLabel: opt.shortLabel,
@@ -387,13 +381,13 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
     if (stage === 'yes_is_client' || stage === 'no_golden_ticket') {
       setStage('knows_brand');
     } else if (stage === 'no_healthy_eating') {
-      setStage(knowsBrand ? 'yes_is_client' : 'knows_brand');
+      setStage(knowsBrand ? 'yes_is_client' : 'no_golden_ticket');
     } else if (stage === 'yes_rating') {
       setStage('yes_is_client');
     } else if (stage === 'yes_future_product') {
       setStage('yes_rating');
     } else if (stage === 'no_future_product') {
-      setStage(knowsBrand ? 'no_healthy_eating' : 'no_golden_ticket');
+      setStage('no_healthy_eating');
     } else if (stage === 'us_credit') {
       setStage(knowsBrand && isClient ? 'yes_future_product' : 'no_future_product');
     }
@@ -663,42 +657,121 @@ export const QualificationQuiz: React.FC<QualificationQuizProps> = ({ leadName, 
           {stage === 'no_golden_ticket' && (
             <motion.div
               key="stage-no-golden-ticket"
-              initial={{ opacity: 0, x: 24 }}
+              initial={prefersReduced ? { opacity: 0 } : { opacity: 0, x: 24 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -24 }}
-              transition={{ duration: 0.28 }}
+              exit={prefersReduced ? { opacity: 0 } : { opacity: 0, x: -24 }}
+              transition={{ duration: 0.3 }}
               className="relative z-10"
             >
+              {/* Gleaming Metallic Mini-Ticket VIP Header Badge */}
+              <motion.div
+                initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.92 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 340, damping: 22 }}
+                className="relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-[#E5AE4E] bg-gradient-to-r from-[#2A150A] via-[#593112] to-[#2A150A] px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-[#FEF08A] shadow-[0_10px_24px_-10px_rgba(140,74,25,0.65)] mb-3"
+              >
+                {!prefersReduced && (
+                  <motion.span
+                    aria-hidden="true"
+                    animate={{ x: ['-140%', '260%'] }}
+                    transition={{ duration: 2.1, repeat: Infinity, repeatDelay: 2.2, ease: 'easeInOut' }}
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                  />
+                )}
+                <Sparkles className="relative h-3.5 w-3.5 text-[#FDE047]" />
+                <span className="relative">Boleto Dorado VIP · Beneficio Exclusivo</span>
+              </motion.div>
+
               <h2 className="font-serif text-[19px] sm:text-[24px] font-semibold text-[#22150E] leading-snug">
-                Si en un futuro usted tuviera la oportunidad de utilizar el bono especial: nuestro Boleto Dorado, ¿lo utilizaría con algún producto de nuestro catálogo exclusivo o prefiere cederlo a un amigo o familiar?
+                Si en un futuro usted tuviera la oportunidad de utilizar el bono especial: nuestro{' '}
+                <span className="gold-foil-text font-bold">Boleto Dorado</span>, ¿lo utilizaría con
+                algún producto de nuestro catálogo exclusivo o prefiere cederlo a un amigo o
+                familiar?
               </h2>
               <p className="mt-1.5 text-xs sm:text-sm text-[#5C4332]">
-                Elige cómo prefieres aprovechar este beneficio especial.
+                Elige cómo deseas activar tu Boleto Dorado hoy.
               </p>
 
-              <div className="mt-4 sm:mt-5 space-y-2.5 sm:space-y-3">
-                {GOLDEN_TICKET_OPTIONS.map((opt) => {
+              <div className="mt-4 sm:mt-5 space-y-3">
+                {GOLDEN_TICKET_OPTIONS.map((opt, idx) => {
                   const selected = pickedId === opt.id;
+                  const isCede = opt.action === 'cede';
                   return (
                     <motion.button
                       key={opt.id}
                       type="button"
-                      whileHover={{ y: -2 }}
-                      whileTap={{ scale: 0.985 }}
+                      initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        type: 'spring',
+                        stiffness: 320,
+                        damping: 24,
+                        delay: prefersReduced ? 0 : idx * 0.08,
+                      }}
+                      whileHover={prefersReduced ? undefined : { y: -2.5, scale: 1.01 }}
+                      whileTap={prefersReduced ? undefined : { scale: 0.975 }}
                       onClick={() => handleSelectGoldenTicket(opt)}
-                      className={`min-h-[56px] w-full rounded-2xl border p-3.5 sm:p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      className={`group relative overflow-hidden min-h-[64px] w-full rounded-2xl border p-3.5 sm:p-4 text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         selected
-                          ? 'border-[#8C3318] bg-[#FAF0E0] ring-2 ring-[#C88A2B]/35'
-                          : 'border-[#DFCBB3] bg-[#FCF8F2]/90 hover:border-[#C88A2B] hover:bg-white'
+                          ? 'border-[#B8791F] bg-gradient-to-r from-[#FFF6E0] via-[#FAF0DC] to-[#FFF6E0] ring-2 ring-[#E5AE4E]/55 shadow-[0_12px_28px_-10px_rgba(200,138,43,0.45)]'
+                          : isCede
+                            ? 'border-[#D8A54B]/80 bg-gradient-to-r from-[#2A150B] via-[#3A1E10] to-[#231108] text-[#FFFDF9] shadow-[0_14px_30px_-12px_rgba(34,21,14,0.65)] hover:border-[#FEF08A]'
+                            : 'border-[#DFCBB3] bg-[#FCF8F2]/95 hover:border-[#C88A2B] hover:bg-white hover:shadow-[0_10px_24px_-12px_rgba(200,138,43,0.35)]'
                       }`}
                     >
-                      <div>
-                        <p className="text-sm sm:text-[15px] font-semibold text-[#22150E]">{opt.label}</p>
-                        {opt.sublabel && <p className="mt-1 text-xs text-[#6E5341]">{opt.sublabel}</p>}
+                      {isCede && !prefersReduced && (
+                        <motion.span
+                          aria-hidden="true"
+                          animate={{ x: ['-140%', '260%'] }}
+                          transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 2.8, ease: 'easeInOut' }}
+                          className="pointer-events-none absolute inset-y-0 left-0 w-1/4 -skew-x-12 bg-gradient-to-r from-transparent via-[#FEF08A]/18 to-transparent"
+                        />
+                      )}
+                      <div className="relative flex items-start gap-3 min-w-0">
+                        <span
+                          className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${
+                            isCede && !selected
+                              ? 'border-[#F4CA73]/50 bg-[#E5AE4E]/15 text-[#FEF08A]'
+                              : 'border-[#E5C17B] bg-[#FFF4DC] text-[#8C4A19]'
+                          }`}
+                        >
+                          {isCede ? <Share2 className="h-4 w-4" /> : <Gift className="h-4 w-4" />}
+                        </span>
+                        <div className="min-w-0">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] mb-1 ${
+                              isCede && !selected
+                                ? 'bg-[#E5AE4E]/20 border border-[#FDE68A]/45 text-[#FEF08A]'
+                                : 'bg-[#FAF0E0] border border-[#E5C17B]/75 text-[#8C4A19]'
+                            }`}
+                          >
+                            {opt.badge}
+                          </span>
+                          <p
+                            className={`text-sm sm:text-[15px] font-semibold leading-snug ${
+                              isCede && !selected ? 'text-[#FFFDF9]' : 'text-[#22150E]'
+                            }`}
+                          >
+                            {opt.label}
+                          </p>
+                          {opt.sublabel && (
+                            <p
+                              className={`mt-1 text-xs leading-relaxed ${
+                                isCede && !selected ? 'text-[#E3CEB6]' : 'text-[#6E5341]'
+                              }`}
+                            >
+                              {opt.sublabel}
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <span
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
-                          selected ? 'border-[#8C3318] bg-[#8C3318] text-white' : 'border-[#C6A787] bg-white'
+                        className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                          selected
+                            ? 'border-[#8C3318] bg-[#8C3318] text-white'
+                            : isCede
+                              ? 'border-[#F4CA73]/60 bg-[#1B0E07]/70'
+                              : 'border-[#C6A787] bg-white'
                         }`}
                       >
                         {selected && <Check className="h-3.5 w-3.5" />}

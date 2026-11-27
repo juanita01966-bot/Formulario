@@ -1,7 +1,11 @@
 import defaultStoreJson from '../shared/defaultStore.json';
 import type {
+  ActivityLogCategory,
+  ActivityLogEntry,
   AppSettings,
   AppState,
+  AuthSessionInfo,
+  CallOutcome,
   GiftItem,
   GiftVisualKey,
   Lead,
@@ -12,18 +16,37 @@ import type {
   QrStyleId,
   ReferralMetricKey,
   ReferralPartner,
+  ReferralPartnerType,
   ReferralPrizeRule,
+  ReferralVisitEvent,
+  SecurityAlert,
+  SecurityAlertCategory,
+  SecurityAlertSeverity,
+  SecurityAlertStatus,
   ShowcaseStyleId,
+  UserAccount,
+  UserRole,
 } from '../types/app';
 
 const STORAGE_KEY = 'royal_konverta_autumn_store_v1';
 const CHANNEL_NAME = 'royal_konverta_sync';
 const DSB_SESSION_TOKEN_KEY = 'cipriano_dsb_session_token';
+export const DSB_ROLE_KEY = 'cipriano_dsb_role';
+const DSB_USER_KEY = 'cipriano_dsb_user';
 
 const channel =
   typeof window !== 'undefined' && 'BroadcastChannel' in window
     ? new BroadcastChannel(CHANNEL_NAME)
     : null;
+
+export interface StoredSessionUser {
+  userId: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  tag: string;
+  avatarUrl?: string | null;
+}
 
 function getDsbSessionToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -34,11 +57,171 @@ function getDsbSessionToken(): string | null {
   }
 }
 
-function isDsbAdminSession(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (!getDsbSessionToken()) return false;
+function getDsbRole(): UserRole | null {
+  if (typeof window === 'undefined') return null;
   try {
-    return window.sessionStorage.getItem(DSB_ROLE_KEY) === 'admin';
+    const raw = window.sessionStorage.getItem(DSB_ROLE_KEY);
+    if (raw === 'caller') return 'telemarketing';
+    if (raw === 'admin' || raw === 'telemarketing' || raw === 'vendedor') return raw;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function getStoredSessionUser(): StoredSessionUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(DSB_USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredSessionUser>;
+    if (!parsed.username || !parsed.role) return null;
+    return {
+      userId: parsed.userId || '',
+      username: parsed.username,
+      displayName: parsed.displayName || parsed.username,
+      role: parsed.role,
+      tag: parsed.tag || '',
+      avatarUrl: typeof parsed.avatarUrl === 'string' && parsed.avatarUrl.trim() ? parsed.avatarUrl.trim() : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionStorage(sessionToken: string, user: StoredSessionUser): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(DSB_SESSION_TOKEN_KEY, sessionToken);
+    window.sessionStorage.setItem(DSB_ROLE_KEY, user.role);
+    window.sessionStorage.setItem(DSB_USER_KEY, JSON.stringify(user));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function clearSessionStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
+    window.sessionStorage.removeItem(DSB_ROLE_KEY);
+    window.sessionStorage.removeItem(DSB_USER_KEY);
+    window.sessionStorage.removeItem('konverta_dsb_unlocked');
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function decodeBase64UrlJson<T = Record<string, unknown>>(segment: string): T | null {
+  try {
+    const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+    const padLen = (4 - (normalized.length % 4)) % 4;
+    const padded = normalized + '='.repeat(padLen);
+    const binary = window.atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const jsonText =
+      typeof TextDecoder !== 'undefined'
+        ? new TextDecoder().decode(bytes)
+        : decodeURIComponent(escape(binary));
+    const parsed = JSON.parse(jsonText) as T;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verifies that sessionStorage role/user metadata matches the signed HMAC/JWT
+ * token payload. Detects DevTools -> Session Storage tampering (e.g. changing
+ * `cipriano_dsb_role` from `vendedor` to `admin` or spoofing `cipriano_dsb_user`).
+ */
+export function verifySessionStorageIntegrity(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const token = window.sessionStorage.getItem(DSB_SESSION_TOKEN_KEY);
+    const rawRole = window.sessionStorage.getItem(DSB_ROLE_KEY);
+    const rawUser = window.sessionStorage.getItem(DSB_USER_KEY);
+
+    // No session data present -> nothing tampered.
+    if (!token && !rawRole && !rawUser) {
+      return true;
+    }
+
+    // Role or user metadata injected without a signed token -> tampered.
+    if (!token) {
+      return false;
+    }
+
+    // Support both 2-part HMAC (`payload.sig`, used by server/index.js) and
+    // 3-part JWT (`header.payload.sig`).
+    const parts = token.split('.');
+    let payloadSegment = '';
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      payloadSegment = parts[0];
+    } else if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+      payloadSegment = parts[1];
+    } else {
+      return false;
+    }
+
+    const payload = decodeBase64UrlJson<{
+      scope?: string;
+      userId?: string;
+      user?: string;
+      username?: string;
+      role?: string;
+      exp?: number;
+    }>(payloadSegment);
+
+    if (!payload) return false;
+    if (payload.scope && payload.scope !== 'dsb_session') return false;
+
+    const tokenRoleRaw = payload.role === 'caller' ? 'telemarketing' : payload.role;
+    if (
+      tokenRoleRaw !== 'admin' &&
+      tokenRoleRaw !== 'telemarketing' &&
+      tokenRoleRaw !== 'vendedor'
+    ) {
+      return false;
+    }
+
+    const tokenUsername = String(payload.user || payload.username || '').trim();
+    if (!tokenUsername) return false;
+
+    // Must match stored role key strictly.
+    const storedRoleNormalized = rawRole === 'caller' ? 'telemarketing' : rawRole;
+    if (!storedRoleNormalized || storedRoleNormalized !== tokenRoleRaw) {
+      return false;
+    }
+
+    // Must match stored user JSON strictly.
+    if (!rawUser) return false;
+    const parsedUser = JSON.parse(rawUser) as Partial<StoredSessionUser> | null;
+    if (!parsedUser || typeof parsedUser !== 'object') return false;
+
+    const storedUserRole =
+      (parsedUser.role as string) === 'caller' ? 'telemarketing' : parsedUser.role;
+    if (!storedUserRole || storedUserRole !== tokenRoleRaw) {
+      return false;
+    }
+
+    const storedUsername = String(parsedUser.username || '').trim();
+    if (!storedUsername || storedUsername.toLowerCase() !== tokenUsername.toLowerCase()) {
+      return false;
+    }
+
+    if (
+      payload.userId &&
+      parsedUser.userId &&
+      String(parsedUser.userId).trim() !== String(payload.userId).trim()
+    ) {
+      return false;
+    }
+
+    return true;
   } catch {
     return false;
   }
@@ -64,6 +247,135 @@ const VALID_REFERRAL_METRICS = new Set<ReferralMetricKey>([
   'ordenes',
   'points',
 ]);
+
+const VALID_QR_STYLE_IDS = new Set<QrStyleId>([
+  'classic-gold',
+  'obsidian-dots',
+  'ivory-rounded',
+  'emerald-heritage',
+  'ruby-atelier',
+]);
+
+const VALID_CALL_OUTCOMES = new Set<CallOutcome>(['pending', 'scheduled', 'not_scheduled']);
+
+const VALID_ALERT_SEVERITIES = new Set<SecurityAlertSeverity>(['critical', 'high', 'medium', 'info']);
+const VALID_ALERT_CATEGORIES = new Set<SecurityAlertCategory>([
+  'qr_abuse',
+  'vendedor',
+  'telemarketing',
+  'access',
+  'audit',
+]);
+const VALID_ALERT_STATUSES = new Set<SecurityAlertStatus>(['open', 'reviewed', 'dismissed']);
+
+const VALID_ACTIVITY_CATEGORIES = new Set<ActivityLogCategory>([
+  'leads',
+  'telemarketing',
+  'status',
+  'accounts',
+  'qr',
+  'catalog',
+  'security',
+  'system',
+]);
+
+const VALID_ACTIVITY_ACTOR_ROLES = new Set<ActivityLogEntry['actorRole']>([
+  'admin',
+  'telemarketing',
+  'vendedor',
+  'public',
+  'system',
+]);
+
+const VALID_ACTIVITY_TARGET_TYPES = new Set<NonNullable<ActivityLogEntry['targetType']>>([
+  'lead',
+  'account',
+  'qr',
+  'referrer',
+  'gift',
+  'settings',
+  'security',
+  'system',
+]);
+
+function normalizeActivityLogEntry(entry: ActivityLogEntry): ActivityLogEntry {
+  const category: ActivityLogCategory = VALID_ACTIVITY_CATEGORIES.has(entry.category)
+    ? entry.category
+    : 'system';
+  const rawActorRole = (entry.actorRole as string) === 'caller' ? 'telemarketing' : entry.actorRole;
+  const actorRole: ActivityLogEntry['actorRole'] = VALID_ACTIVITY_ACTOR_ROLES.has(
+    rawActorRole as ActivityLogEntry['actorRole']
+  )
+    ? (rawActorRole as ActivityLogEntry['actorRole'])
+    : 'system';
+  const targetType =
+    entry.targetType && VALID_ACTIVITY_TARGET_TYPES.has(entry.targetType)
+      ? entry.targetType
+      : undefined;
+
+  return {
+    id: String(entry.id || ''),
+    action: String(entry.action || 'activity'),
+    category,
+    actorRole,
+    actorId: entry.actorId ?? null,
+    actorName: String(entry.actorName || '').trim() || 'Sistema',
+    actorUsername: entry.actorUsername ?? null,
+    actorTag: entry.actorTag ?? null,
+    summary: String(entry.summary || ''),
+    fromState: entry.fromState ?? null,
+    toState: entry.toState ?? null,
+    ...(targetType ? { targetType } : {}),
+    targetId: entry.targetId ?? null,
+    targetLabel: entry.targetLabel ?? null,
+    ...(entry.metadata && typeof entry.metadata === 'object' ? { metadata: entry.metadata } : {}),
+    createdAt: entry.createdAt || new Date().toISOString(),
+  };
+}
+
+export function normalizePhoneKey(raw: unknown): string {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return digits.slice(1);
+  }
+  return digits;
+}
+
+function normalizeSecurityAlert(alert: SecurityAlert): SecurityAlert {
+  const severity: SecurityAlertSeverity = VALID_ALERT_SEVERITIES.has(alert.severity)
+    ? alert.severity
+    : 'info';
+  const category: SecurityAlertCategory = VALID_ALERT_CATEGORIES.has(alert.category)
+    ? alert.category
+    : 'audit';
+  const status: SecurityAlertStatus = VALID_ALERT_STATUSES.has(alert.status)
+    ? alert.status
+    : 'open';
+  return {
+    id: String(alert.id || ''),
+    code: String(alert.code || 'security_event'),
+    severity,
+    category,
+    status,
+    title: String(alert.title || 'Evento de seguridad'),
+    description: String(alert.description || ''),
+    ...(alert.actorRole ? { actorRole: alert.actorRole } : {}),
+    actorName: alert.actorName ?? null,
+    actorTag: alert.actorTag ?? null,
+    leadId: alert.leadId ?? null,
+    leadName: alert.leadName ?? null,
+    claimCode: alert.claimCode ?? null,
+    phoneMasked: alert.phoneMasked ?? null,
+    referralCode: alert.referralCode ?? null,
+    ipMasked: alert.ipMasked ?? null,
+    ...(alert.metadata && typeof alert.metadata === 'object' ? { metadata: alert.metadata } : {}),
+    reviewedBy: alert.reviewedBy ?? null,
+    reviewedAt: alert.reviewedAt ?? null,
+    reviewNote: alert.reviewNote ?? null,
+    createdAt: alert.createdAt || new Date().toISOString(),
+  };
+}
 
 export function normalizeReferralCode(raw: unknown): string {
   if (typeof raw !== 'string') return '';
@@ -158,10 +470,37 @@ function normalizeReferralPartner(partner: ReferralPartner): ReferralPartner {
     String(partner.code || '')
       .trim()
       .toUpperCase();
+  const partnerType: ReferralPartnerType =
+    partner.partnerType === 'embajador' ? 'embajador' : 'vendedor';
+  const ownerVendedorAccountId =
+    typeof partner.ownerVendedorAccountId === 'string' && partner.ownerVendedorAccountId.trim()
+      ? partner.ownerVendedorAccountId.trim()
+      : null;
+  const ownerVendedorName =
+    typeof partner.ownerVendedorName === 'string' && partner.ownerVendedorName.trim()
+      ? partner.ownerVendedorName.trim()
+      : null;
+  const ownerVendedorTag =
+    typeof partner.ownerVendedorTag === 'string' && partner.ownerVendedorTag.trim()
+      ? normalizeReferralCode(partner.ownerVendedorTag) || partner.ownerVendedorTag.trim().toUpperCase()
+      : null;
+  const emoji =
+    typeof partner.emoji === 'string' && partner.emoji.trim() ? partner.emoji.trim() : null;
+
   return {
     id: String(partner.id || ''),
+    accountId: partnerType === 'embajador' ? null : partner.accountId ?? null,
+    partnerType,
+    ownerVendedorAccountId,
+    ownerVendedorName,
+    ownerVendedorTag,
     name: String(partner.name || '').trim(),
     code,
+    emoji,
+    avatarUrl:
+      typeof partner.avatarUrl === 'string' && partner.avatarUrl.trim()
+        ? partner.avatarUrl.trim()
+        : null,
     ...(typeof partner.phone === 'string' && partner.phone.trim()
       ? { phone: partner.phone.trim() }
       : {}),
@@ -176,6 +515,16 @@ function normalizeReferralPartner(partner: ReferralPartner): ReferralPartner {
       ? { qrStyleId: partner.qrStyleId }
       : {}),
     createdAt: partner.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizeVisitEvent(entry: ReferralVisitEvent): ReferralVisitEvent {
+  return {
+    id: String(entry.id || ''),
+    referrerId: entry.referrerId ?? null,
+    referralCode: normalizeReferralCode(entry.referralCode) || String(entry.referralCode || '').toUpperCase(),
+    visitorId: String(entry.visitorId || 'anon'),
+    visitedAt: entry.visitedAt || new Date().toISOString(),
   };
 }
 
@@ -213,12 +562,19 @@ function normalizeGift(gift: GiftItem): GiftItem {
 
 function normalizeLead(lead: Lead): Lead {
   const category = lead.category || 'none';
+  const callOutcome: CallOutcome = VALID_CALL_OUTCOMES.has(lead.callOutcome)
+    ? lead.callOutcome
+    : lead.called
+      ? 'scheduled'
+      : 'pending';
+  const called = Boolean(lead.called) || callOutcome !== 'pending';
+  const sellerLocked = Boolean(lead.sellerLocked);
   const promoCodeInvalidated =
     typeof lead.promoCodeInvalidated === 'boolean'
-      ? lead.promoCodeInvalidated || category !== 'none'
-      : category !== 'none';
+      ? lead.promoCodeInvalidated || category !== 'none' || sellerLocked
+      : category !== 'none' || sellerLocked;
   const promoCodeInvalidatedAt = promoCodeInvalidated
-    ? lead.promoCodeInvalidatedAt ?? lead.calledAt ?? lead.createdAt ?? null
+    ? lead.promoCodeInvalidatedAt ?? lead.sellerConfirmedAt ?? lead.calledAt ?? lead.createdAt ?? null
     : null;
   const referralCode =
     typeof lead.referralCode === 'string' && lead.referralCode.trim()
@@ -230,11 +586,20 @@ function normalizeLead(lead: Lead): Lead {
     typeof lead.referrerName === 'string' && lead.referrerName.trim()
       ? lead.referrerName.trim()
       : null;
+
   return {
     ...lead,
+    called,
+    calledAt: called ? lead.calledAt ?? null : null,
+    callOutcome,
+    calledBy: lead.calledBy ?? null,
+    scheduledAt: callOutcome === 'scheduled' ? lead.scheduledAt ?? lead.calledAt ?? null : null,
     category,
     promoCodeInvalidated,
     promoCodeInvalidatedAt,
+    sellerLocked,
+    sellerConfirmedAt: sellerLocked ? lead.sellerConfirmedAt ?? promoCodeInvalidatedAt : null,
+    sellerConfirmedBy: sellerLocked ? lead.sellerConfirmedBy ?? null : null,
     referralCode,
     referrerId,
     referrerName,
@@ -242,17 +607,29 @@ function normalizeLead(lead: Lead): Lead {
 }
 
 function normalizeAppState(state: AppState): AppState {
-  const role = (state as AppState & { role?: string }).role;
-  if (role === 'caller') {
+  const hasDsbSession = Boolean(getDsbSessionToken());
+  const role = state.role;
+  const effectiveRole = role ?? getDsbRole();
+  const isAdmin = hasDsbSession && effectiveRole === 'admin';
+  if (role === 'telemarketing') {
     return {
       ...state,
       settings: {
         ...state.settings,
+        pinCode: '',
         referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
       },
+      gifts: [],
+      leads: Array.isArray(state.leads) ? state.leads.map(normalizeLead) : [],
+      qrHistory: [],
       referrers: Array.isArray(state.referrers)
         ? state.referrers.map(normalizeReferralPartner)
         : [],
+      accounts: [],
+      visitLog: [],
+      securityAlerts: [],
+      activityLogs: [],
+      role: 'telemarketing',
     };
   }
   return {
@@ -268,9 +645,21 @@ function normalizeAppState(state: AppState): AppState {
     },
     gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
     leads: Array.isArray(state.leads) ? state.leads.map(normalizeLead) : [],
+    qrHistory: Array.isArray(state.qrHistory) ? state.qrHistory : [],
     referrers: Array.isArray(state.referrers)
       ? state.referrers.map(normalizeReferralPartner)
       : [],
+    accounts: Array.isArray(state.accounts) ? state.accounts : [],
+    visitLog: Array.isArray(state.visitLog) ? state.visitLog.map(normalizeVisitEvent) : [],
+    securityAlerts:
+      isAdmin && Array.isArray(state.securityAlerts)
+        ? state.securityAlerts.map(normalizeSecurityAlert)
+        : [],
+    activityLogs:
+      isAdmin && Array.isArray(state.activityLogs)
+        ? state.activityLogs.map(normalizeActivityLogEntry)
+        : [],
+    ...(role ? { role } : {}),
   };
 }
 
@@ -315,65 +704,164 @@ function cloneDefaults(): AppState {
     leads: [],
     qrHistory: [],
     referrers: [],
+    accounts: [],
+    visitLog: [],
+    securityAlerts: [],
+    activityLogs: [],
   };
 }
+
+interface PublicCatalogStorage {
+  settings: AppSettings;
+  gifts: GiftItem[];
+}
+
+const LEGACY_PII_STORAGE_KEYS = [
+  'leads',
+  'qrHistory',
+  'referrers',
+  'accounts',
+  'visitLog',
+  'securityAlerts',
+  'activityLogs',
+] as const;
+
+function buildPublicCatalogSnapshot(
+  source?: Partial<AppState> | null
+): PublicCatalogStorage {
+  const defaults = cloneDefaults();
+  const rawGifts =
+    Array.isArray(source?.gifts) && source.gifts.length > 0 ? source.gifts : defaults.gifts;
+  const mergedSettings: AppSettings = {
+    ...defaults.settings,
+    ...(source?.settings || {}),
+    pinCode: '',
+    referralPrizeRule: normalizeReferralPrizeRule(
+      source?.settings?.referralPrizeRule ?? defaults.settings.referralPrizeRule
+    ),
+  };
+  if (typeof mergedSettings.randomizeGifts !== 'boolean') {
+    mergedSettings.randomizeGifts =
+      typeof defaults.settings.randomizeGifts === 'boolean'
+        ? defaults.settings.randomizeGifts
+        : true;
+  }
+  return {
+    settings: mergedSettings,
+    gifts: rawGifts.map(normalizeGift),
+  };
+}
+
+function hasLegacyPiiKeys(parsed: Record<string, unknown>): boolean {
+  const parsedSettings = parsed.settings as Record<string, unknown> | undefined;
+  return (
+    LEGACY_PII_STORAGE_KEYS.some((key) => key in parsed) ||
+    'role' in parsed ||
+    Boolean(
+      parsedSettings &&
+        typeof parsedSettings.pinCode === 'string' &&
+        parsedSettings.pinCode.length > 0
+    )
+  );
+}
+
+function scrubLegacyLocalStoragePii(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, unknown> | null;
+    if (!parsed || typeof parsed !== 'object') {
+      window.localStorage.removeItem(STORAGE_KEY);
+      lastWrittenLocalJson = '';
+      return;
+    }
+    if (!hasLegacyPiiKeys(parsed)) return;
+    const cleanCatalog = buildPublicCatalogSnapshot(parsed as Partial<AppState>);
+    const serialized = JSON.stringify(cleanCatalog);
+    window.localStorage.setItem(STORAGE_KEY, serialized);
+    lastWrittenLocalJson = serialized;
+  } catch {
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+      lastWrittenLocalJson = '';
+    } catch {
+      // Ignore storage cleanup error
+    }
+  }
+}
+
+scrubLegacyLocalStoragePii();
 
 function readLocalState(): AppState {
   if (typeof window === 'undefined') return cloneDefaults();
   const hasDsbSession = Boolean(getDsbSessionToken());
-  const isAdmin = isDsbAdminSession();
+  const role = getDsbRole();
+  const isAdmin = hasDsbSession && role === 'admin';
+  const canSeeQr = hasDsbSession && (role === 'admin' || role === 'vendedor');
+  const inMemory = latestCommittedState;
+
+  let catalog: PublicCatalogStorage;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      const initial = cloneDefaults();
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
-      return initial;
+      catalog = buildPublicCatalogSnapshot(inMemory);
+      const serialized = JSON.stringify(catalog);
+      window.localStorage.setItem(STORAGE_KEY, serialized);
+      lastWrittenLocalJson = serialized;
+    } else {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      catalog = buildPublicCatalogSnapshot(parsed as Partial<AppState>);
+      if (parsed && typeof parsed === 'object' && hasLegacyPiiKeys(parsed)) {
+        const serialized = JSON.stringify(catalog);
+        window.localStorage.setItem(STORAGE_KEY, serialized);
+        lastWrittenLocalJson = serialized;
+      }
     }
-    const parsed = JSON.parse(raw) as Partial<AppState>;
-    const defaults = cloneDefaults();
-    const rawGifts =
-      Array.isArray(parsed.gifts) && parsed.gifts.length > 0 ? parsed.gifts : defaults.gifts;
-    const mergedSettings: AppSettings = {
-      ...defaults.settings,
-      ...(parsed.settings || {}),
-      pinCode: '',
-      referralPrizeRule: normalizeReferralPrizeRule(
-        parsed.settings?.referralPrizeRule ?? defaults.settings.referralPrizeRule
-      ),
-    };
-    if (typeof mergedSettings.randomizeGifts !== 'boolean') {
-      mergedSettings.randomizeGifts =
-        typeof defaults.settings.randomizeGifts === 'boolean'
-          ? defaults.settings.randomizeGifts
-          : true;
-    }
-    return {
-      settings: mergedSettings,
-      gifts: rawGifts.map(normalizeGift),
-      leads: hasDsbSession && Array.isArray(parsed.leads) ? parsed.leads.map(normalizeLead) : [],
-      qrHistory: isAdmin && Array.isArray(parsed.qrHistory) ? parsed.qrHistory : [],
-      referrers:
-        hasDsbSession && Array.isArray(parsed.referrers)
-          ? parsed.referrers.map(normalizeReferralPartner)
-          : [],
-    };
   } catch {
-    return cloneDefaults();
+    catalog = buildPublicCatalogSnapshot(inMemory);
   }
+
+  return {
+    settings: catalog.settings,
+    gifts: catalog.gifts,
+    // Keep all PII & operational records strictly in memory (never persisted to localStorage).
+    leads: Array.isArray(inMemory?.leads) ? inMemory.leads.map(normalizeLead) : [],
+    qrHistory: canSeeQr && Array.isArray(inMemory?.qrHistory) ? inMemory.qrHistory : [],
+    referrers:
+      hasDsbSession && Array.isArray(inMemory?.referrers)
+        ? inMemory.referrers.map(normalizeReferralPartner)
+        : [],
+    accounts: isAdmin && Array.isArray(inMemory?.accounts) ? inMemory.accounts : [],
+    visitLog:
+      canSeeQr && Array.isArray(inMemory?.visitLog)
+        ? inMemory.visitLog.map(normalizeVisitEvent)
+        : [],
+    securityAlerts:
+      isAdmin && Array.isArray(inMemory?.securityAlerts)
+        ? inMemory.securityAlerts.map(normalizeSecurityAlert)
+        : [],
+    activityLogs:
+      isAdmin && Array.isArray(inMemory?.activityLogs)
+        ? inMemory.activityLogs.map(normalizeActivityLogEntry)
+        : [],
+    ...(inMemory?.role ? { role: inMemory.role } : {}),
+  };
 }
 
 function writeLocalState(state: AppState, broadcast = true): void {
   if (typeof window === 'undefined') return;
   const hasDsbSession = Boolean(getDsbSessionToken());
-  const stateRole = (state as AppState & { role?: string }).role;
-  const isAdmin =
-    hasDsbSession && (stateRole ? stateRole === 'admin' : isDsbAdminSession());
+  const role = state.role ?? getDsbRole();
+  const isAdmin = hasDsbSession && role === 'admin';
+  const canSeeQr = hasDsbSession && (role === 'admin' || role === 'vendedor');
+
   const sanitizedState: AppState = {
     settings: {
       ...state.settings,
       pinCode: '',
       referralPrizeRule: normalizeReferralPrizeRule(state.settings?.referralPrizeRule),
-      ...(stateRole === 'caller'
+      ...(role === 'telemarketing'
         ? {}
         : {
             randomizeGifts:
@@ -383,21 +871,54 @@ function writeLocalState(state: AppState, broadcast = true): void {
           }),
     },
     gifts: Array.isArray(state.gifts) ? state.gifts.map(normalizeGift) : [],
-    // Never persist other people's leads, admin QR history, or private referrers into browser LocalStorage on public routes
-    leads: hasDsbSession
-      ? stateRole === 'caller'
-        ? state.leads
-        : (state.leads || []).map(normalizeLead)
-      : [],
-    qrHistory: isAdmin && Array.isArray(state.qrHistory) ? state.qrHistory : [],
+    leads: hasDsbSession ? (state.leads || []).map(normalizeLead) : [],
+    qrHistory: canSeeQr && Array.isArray(state.qrHistory) ? state.qrHistory : [],
     referrers:
       hasDsbSession && Array.isArray(state.referrers)
         ? state.referrers.map(normalizeReferralPartner)
         : [],
+    accounts: isAdmin && Array.isArray(state.accounts) ? state.accounts : [],
+    visitLog:
+      canSeeQr && Array.isArray(state.visitLog)
+        ? state.visitLog.map(normalizeVisitEvent)
+        : [],
+    securityAlerts:
+      isAdmin && Array.isArray(state.securityAlerts)
+        ? state.securityAlerts.map(normalizeSecurityAlert)
+        : [],
+    activityLogs:
+      isAdmin && Array.isArray(state.activityLogs)
+        ? state.activityLogs.map(normalizeActivityLogEntry)
+        : [],
+    ...(role ? { role } : {}),
   };
 
   try {
-    const serialized = JSON.stringify(sanitizedState);
+    // Persist ONLY non-PII public catalog (settings without pinCode + gifts) in localStorage.
+    let giftsToPersist = sanitizedState.gifts;
+    if (role === 'telemarketing' && giftsToPersist.length === 0) {
+      try {
+        const existingRaw = window.localStorage.getItem(STORAGE_KEY);
+        if (existingRaw) {
+          const existingParsed = JSON.parse(existingRaw) as Partial<AppState>;
+          if (Array.isArray(existingParsed.gifts) && existingParsed.gifts.length > 0) {
+            giftsToPersist = existingParsed.gifts.map(normalizeGift);
+          }
+        }
+      } catch {
+        // Ignore parse failure
+      }
+    }
+
+    const publicCatalog: PublicCatalogStorage = {
+      settings: {
+        ...sanitizedState.settings,
+        pinCode: '',
+      },
+      gifts: giftsToPersist,
+    };
+
+    const serialized = JSON.stringify(publicCatalog);
     if (serialized !== lastWrittenLocalJson) {
       window.localStorage.setItem(STORAGE_KEY, serialized);
       lastWrittenLocalJson = serialized;
@@ -460,37 +981,69 @@ export function pickWeightedGift(gifts: GiftItem[]): GiftItem | null {
   return gifts[0] ?? null;
 }
 
-class ApiValidationError extends Error {
-  constructor(message: string) {
+export class ApiValidationError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status = 400, code?: string) {
     super(message);
     this.name = 'ApiValidationError';
+    this.status = status;
+    this.code = code;
   }
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const token = getDsbSessionToken();
-  const res = await fetch(url, {
-    ...init,
-    cache: init?.cache ?? 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      cache: init?.cache ?? 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers || {}),
+      },
+    });
+  } catch {
+    throw new Error('No se pudo conectar con el servidor. Verifica tu conexión e intenta de nuevo.');
+  }
 
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  const data = (await res.json().catch(() => ({}))) as T & AuthErrorResponse;
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 429) {
+      throw new DsbAuthError({
+        ...data,
+        error:
+          data.error ||
+          (res.status === 429
+            ? 'Demasiados intentos fallidos. Intenta de nuevo más tarde.'
+            : 'Autorización requerida o credenciales incorrectas.'),
+      });
+    }
+    if (
+      res.status === 403 &&
+      (data.locked !== undefined ||
+        data.remainingAttempts !== undefined ||
+        data.retryAfterSeconds !== undefined)
+    ) {
+      throw new DsbAuthError({
+        ...data,
+        error: data.error || 'Autorización denegada o contraseña de administrador incorrecta.',
+      });
+    }
     if (res.status === 404 && !data.error) {
       throw new Error(`HTTP ${res.status}`);
     }
     if (res.status >= 400 && res.status < 500) {
-      throw new ApiValidationError(data.error || 'Solicitud inválida.');
+      const errCode = typeof data.code === 'string' ? data.code : undefined;
+      throw new ApiValidationError(data.error || 'Solicitud inválida.', res.status, errCode);
     }
-    throw new Error(data.error || `HTTP ${res.status}`);
+    throw new Error(data.error || `Error del servidor (HTTP ${res.status}). Intenta de nuevo.`);
   }
 
   return data;
@@ -523,7 +1076,7 @@ export async function fetchAppState(): Promise<{
     writeLocalState(state, false);
     return { state, mode: 'api', stale: false };
   } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
+    if (err instanceof ApiValidationError || err instanceof DsbAuthError) throw err;
     if (activeMutationCount > 0 || stateMutationEpoch !== startEpoch || mySeq !== latestFetchSeq) {
       return {
         state: latestCommittedState ?? readLocalState(),
@@ -537,6 +1090,12 @@ export async function fetchAppState(): Promise<{
   }
 }
 
+export const fetchWorkspaceState = fetchAppState;
+
+// ----------------------------------------------------------------------------
+// Leads API
+// ----------------------------------------------------------------------------
+
 export interface CreateLeadPayload {
   name: string;
   phone: string;
@@ -549,6 +1108,8 @@ export interface CreateLeadPayload {
   notes?: string;
   qualification?: LeadQualification | null;
   referralCode?: string | null;
+  referrerId?: string | null;
+  visitorId?: string | null;
 }
 
 export async function createLead(
@@ -563,9 +1124,22 @@ export async function createLead(
     const normalizedState = commitMutatedState(res.state, Boolean(getDsbSessionToken()));
     return { lead: normalizeLead(res.lead), state: normalizedState, mode: 'api' };
   } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
+    if (err instanceof ApiValidationError || err instanceof DsbAuthError) throw err;
 
     const state = readLocalState();
+    const incomingPhoneKey = normalizePhoneKey(payload.phone);
+    if (incomingPhoneKey.length >= 7) {
+      const hasDuplicatePhone = state.leads.some(
+        (existing) => normalizePhoneKey(existing.phone) === incomingPhoneKey
+      );
+      if (hasDuplicatePhone) {
+        throw new ApiValidationError(
+          'Este número de teléfono ya está registrado. Solo se permite un registro por número.',
+          409
+        );
+      }
+    }
+
     const activeGifts = state.gifts.filter((g) => g.active);
     const chosenGift =
       state.gifts.find((g) => g.id === payload.giftId) ||
@@ -580,7 +1154,7 @@ export async function createLead(
       ? (state.referrers || []).find((r) => r.code === normalizedRefCode) || null
       : null;
 
-    const lead: Lead = {
+    const lead: Lead = normalizeLead({
       id: generateLocalId('lead'),
       name: payload.name.trim(),
       phone: payload.phone.trim(),
@@ -592,17 +1166,23 @@ export async function createLead(
       claimCode: payload.claimCode || generateClaimCode(),
       called: false,
       calledAt: null,
+      callOutcome: 'pending',
+      calledBy: null,
+      scheduledAt: null,
       category: 'none',
       orderAmount: null,
       notes: payload.notes?.trim() || '',
       qualification: payload.qualification ?? null,
       promoCodeInvalidated: false,
       promoCodeInvalidatedAt: null,
+      sellerLocked: false,
+      sellerConfirmedAt: null,
+      sellerConfirmedBy: null,
       referralCode: normalizedRefCode || null,
       referrerId: matchedReferrer ? matchedReferrer.id : null,
       referrerName: matchedReferrer ? matchedReferrer.name : null,
       createdAt: new Date().toISOString(),
-    };
+    });
 
     const nextState = commitMutatedState(
       {
@@ -623,6 +1203,7 @@ export interface UpdateLeadPayload {
   address?: string;
   called?: boolean;
   calledAt?: string | null;
+  callOutcome?: CallOutcome;
   category?: LeadCategory;
   orderAmount?: number | null;
   notes?: string;
@@ -633,6 +1214,8 @@ export interface UpdateLeadPayload {
   qualification?: LeadQualification | null;
   promoCodeInvalidated?: boolean;
   promoCodeInvalidatedAt?: string | null;
+  sellerLocked?: boolean;
+  confirmLock?: boolean;
   adminPassword?: string;
 }
 
@@ -642,72 +1225,12 @@ export async function updateLead(
 ): Promise<{ lead: Lead; state: AppState }> {
   beginMutation();
   try {
-    const res = await requestJson<{ lead: Lead; state: AppState }>(`/api/leads/${id}`, {
+    const res = await requestJson<{ lead: Lead; state: AppState }>(`/api/leads/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
     const normalizedState = commitMutatedState(res.state, Boolean(getDsbSessionToken()));
     return { lead: normalizeLead(res.lead), state: normalizedState };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-
-    const state = readLocalState();
-    const index = state.leads.findIndex((l) => l.id === id);
-    if (index === -1) throw new Error('Prospecto no encontrado.');
-
-    const currentLead = normalizeLead(state.leads[index]);
-    const nextLead: Lead = { ...currentLead };
-    const nowIso = new Date().toISOString();
-
-    if (updates.name !== undefined) nextLead.name = updates.name.trim();
-    if (updates.phone !== undefined) nextLead.phone = updates.phone.trim();
-    if (updates.address !== undefined) nextLead.address = updates.address.trim();
-    if (updates.notes !== undefined) nextLead.notes = updates.notes;
-    if (updates.giftId !== undefined) nextLead.giftId = updates.giftId;
-    if (updates.giftName !== undefined) nextLead.giftName = updates.giftName;
-    if (updates.giftVisualKey !== undefined) nextLead.giftVisualKey = updates.giftVisualKey;
-    if (updates.claimCode !== undefined) nextLead.claimCode = updates.claimCode;
-    if (updates.qualification !== undefined) nextLead.qualification = updates.qualification;
-
-    if (updates.called !== undefined) {
-      nextLead.called = updates.called;
-      nextLead.calledAt = updates.called ? updates.calledAt || nowIso : null;
-      if (!updates.called) {
-        nextLead.category = 'none';
-        nextLead.orderAmount = null;
-        nextLead.promoCodeInvalidated = false;
-        nextLead.promoCodeInvalidatedAt = null;
-      }
-    }
-
-    if (updates.promoCodeInvalidated === false || updates.category === 'none') {
-      nextLead.category = 'none';
-      nextLead.orderAmount = null;
-      nextLead.promoCodeInvalidated = false;
-      nextLead.promoCodeInvalidatedAt = null;
-    } else if (updates.category !== undefined) {
-      if (!nextLead.called) {
-        throw new ApiValidationError('Debes marcar al prospecto como llamado antes de clasificarlo.');
-      }
-      nextLead.category = updates.category;
-      nextLead.promoCodeInvalidated = true;
-      nextLead.promoCodeInvalidatedAt = currentLead.promoCodeInvalidatedAt || nowIso;
-      if (updates.category === 'orden') {
-        nextLead.orderAmount = updates.orderAmount ?? nextLead.orderAmount ?? state.settings.defaultTicketAmount;
-      } else {
-        nextLead.orderAmount = null;
-      }
-    } else if (updates.orderAmount !== undefined && nextLead.category === 'orden') {
-      nextLead.orderAmount = updates.orderAmount;
-    } else if (updates.promoCodeInvalidated === true) {
-      nextLead.promoCodeInvalidated = true;
-      nextLead.promoCodeInvalidatedAt = currentLead.promoCodeInvalidatedAt || nowIso;
-    }
-
-    const nextLeads = [...state.leads];
-    nextLeads[index] = nextLead;
-    const nextState = commitMutatedState({ ...state, leads: nextLeads }, true);
-    return { lead: nextLead, state: nextState };
   } finally {
     endMutation();
   }
@@ -716,27 +1239,18 @@ export async function updateLead(
 export async function deleteLead(id: string): Promise<AppState> {
   beginMutation();
   try {
-    const res = await requestJson<{ state: AppState }>(`/api/leads/${id}`, {
+    const res = await requestJson<{ state: AppState }>(`/api/leads/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
     return commitMutatedState(res.state, true);
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-    const state = readLocalState();
-    return commitMutatedState(
-      { ...state, leads: state.leads.filter((l) => l.id !== id) },
-      true
-    );
   } finally {
     endMutation();
   }
 }
 
-const VALID_SHOWCASE_STYLES = new Set<ShowcaseStyleId>([
-  'luminous-gold',
-  'crystal-aurora',
-  'royal-ember',
-]);
+// ----------------------------------------------------------------------------
+// Gifts & Settings API (Protected by Current Admin Password)
+// ----------------------------------------------------------------------------
 
 export interface UpsertGiftPayload {
   name: string;
@@ -749,12 +1263,21 @@ export interface UpsertGiftPayload {
   active: boolean;
   stockLabel: string;
   probability?: number;
+  adminPassword?: string;
+  masterPassword?: string;
 }
 
-export async function createGift(payload: UpsertGiftPayload): Promise<{ gift: GiftItem; state: AppState }> {
-  const sanitizedPayload: UpsertGiftPayload = {
+export async function createGift(
+  payload: UpsertGiftPayload,
+  adminPassword?: string
+): Promise<{ gift: GiftItem; state: AppState }> {
+  const effectivePassword = adminPassword ?? payload.adminPassword ?? payload.masterPassword;
+  const sanitizedPayload = {
     ...payload,
     probability: sanitizeGiftProbability(payload.probability, DEFAULT_GIFT_PROBABILITY),
+    ...(effectivePassword !== undefined
+      ? { adminPassword: effectivePassword, masterPassword: effectivePassword }
+      : {}),
   };
   beginMutation();
   try {
@@ -764,18 +1287,6 @@ export async function createGift(payload: UpsertGiftPayload): Promise<{ gift: Gi
     });
     const normalizedState = commitMutatedState(res.state, true);
     return { gift: normalizeGift(res.gift), state: normalizedState };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-    const state = readLocalState();
-    const gift: GiftItem = normalizeGift({
-      id: generateLocalId('gift'),
-      ...payload,
-      usageTip: payload.usageTip?.trim() || '',
-      customImageUrl: payload.customImageUrl?.trim() || undefined,
-      probability: sanitizeGiftProbability(payload.probability, DEFAULT_GIFT_PROBABILITY),
-    });
-    const nextState = commitMutatedState({ ...state, gifts: [...state.gifts, gift] }, true);
-    return { gift, state: nextState };
   } finally {
     endMutation();
   }
@@ -783,69 +1294,44 @@ export async function createGift(payload: UpsertGiftPayload): Promise<{ gift: Gi
 
 export async function updateGift(
   id: string,
-  updates: Partial<UpsertGiftPayload>
+  updates: Partial<UpsertGiftPayload>,
+  adminPassword?: string
 ): Promise<{ gift: GiftItem; state: AppState }> {
+  const effectivePassword = adminPassword ?? updates.adminPassword ?? updates.masterPassword;
   const hasFiniteProbUpdate =
     updates.probability !== undefined &&
     typeof updates.probability === 'number' &&
     Number.isFinite(updates.probability);
-  const apiUpdates: Partial<UpsertGiftPayload> =
-    updates.probability !== undefined
+  const apiUpdates = {
+    ...updates,
+    ...(updates.probability !== undefined
       ? {
-          ...updates,
           probability: hasFiniteProbUpdate
             ? sanitizeGiftProbability(updates.probability, DEFAULT_GIFT_PROBABILITY)
             : undefined,
         }
-      : updates;
+      : {}),
+    ...(effectivePassword !== undefined
+      ? { adminPassword: effectivePassword, masterPassword: effectivePassword }
+      : {}),
+  };
+
   beginMutation();
   try {
-    const res = await requestJson<{ gift: GiftItem; state: AppState }>(`/api/gifts/${id}`, {
+    const res = await requestJson<{ gift: GiftItem; state: AppState }>(`/api/gifts/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(apiUpdates),
     });
     const normalizedState = commitMutatedState(res.state, true);
     return { gift: normalizeGift(res.gift), state: normalizedState };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-    const state = readLocalState();
-    const index = state.gifts.findIndex((g) => g.id === id);
-    if (index === -1) throw new Error('Regalo no encontrado.');
-    if (updates.active === false && state.gifts.filter((g) => g.id !== id && g.active).length < 1) {
-      throw new ApiValidationError('Debe quedar al menos un regalo activo para las tarjetas ocultas.');
-    }
-    const currentGift = state.gifts[index];
-    const currentProbability = sanitizeGiftProbability(
-      currentGift.probability,
-      DEFAULT_GIFT_PROBABILITY
-    );
-    const nextGift: GiftItem = normalizeGift({
-      ...currentGift,
-      ...updates,
-      usageTip:
-        updates.usageTip !== undefined
-          ? updates.usageTip.trim()
-          : currentGift.usageTip || '',
-      customImageUrl:
-        updates.customImageUrl === ''
-          ? undefined
-          : updates.customImageUrl ?? currentGift.customImageUrl,
-      probability:
-        updates.probability !== undefined
-          ? sanitizeGiftProbability(updates.probability, currentProbability)
-          : currentProbability,
-    });
-    const nextGifts = [...state.gifts];
-    nextGifts[index] = nextGift;
-    const nextState = commitMutatedState({ ...state, gifts: nextGifts }, true);
-    return { gift: nextGift, state: nextState };
   } finally {
     endMutation();
   }
 }
 
 export async function updateGiftProbabilities(
-  probabilities: Record<string, number> | Array<{ id: string; probability: number }>
+  probabilities: Record<string, number> | Array<{ id: string; probability: number }>,
+  adminPassword?: string
 ): Promise<{ gifts: GiftItem[]; state: AppState }> {
   const entries = Array.isArray(probabilities)
     ? probabilities
@@ -859,166 +1345,95 @@ export async function updateGiftProbabilities(
         probability: sanitizeGiftProbability(probability, DEFAULT_GIFT_PROBABILITY),
       }));
 
-  const updatesMap = new Map(entries.map((entry) => [entry.id, entry.probability]));
-
   beginMutation();
   try {
     const res = await requestJson<{ gifts: GiftItem[]; state: AppState }>(
       '/api/gifts/probabilities',
       {
         method: 'PATCH',
-        body: JSON.stringify({ gifts: entries }),
+        body: JSON.stringify({
+          gifts: entries,
+          ...(adminPassword !== undefined
+            ? { adminPassword, masterPassword: adminPassword }
+            : {}),
+        }),
       }
     );
     const normalizedState = commitMutatedState(res.state, true);
     return { gifts: normalizedState.gifts, state: normalizedState };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-    const state = readLocalState();
-    const nextGifts = state.gifts.map((gift) => {
-      const normalized = normalizeGift(gift);
-      const nextProb = updatesMap.get(normalized.id);
-      return nextProb !== undefined ? { ...normalized, probability: nextProb } : normalized;
-    });
-    const nextState = commitMutatedState({ ...state, gifts: nextGifts }, true);
-    return { gifts: nextGifts, state: nextState };
   } finally {
     endMutation();
   }
 }
 
-export async function deleteGift(id: string): Promise<AppState> {
+export async function deleteGift(id: string, adminPassword?: string): Promise<AppState> {
   beginMutation();
   try {
-    const res = await requestJson<{ state: AppState }>(`/api/gifts/${id}`, {
+    const res = await requestJson<{ state: AppState }>(`/api/gifts/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      headers: adminPassword
+        ? { 'X-Admin-Password': adminPassword, 'X-Master-Password': adminPassword }
+        : undefined,
+      body: JSON.stringify(
+        adminPassword !== undefined ? { adminPassword, masterPassword: adminPassword } : {}
+      ),
     });
     return commitMutatedState(res.state, true);
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-    const state = readLocalState();
-    const remaining = state.gifts.filter((g) => g.id !== id);
-    if (remaining.filter((g) => g.active).length < 1) {
-      throw new ApiValidationError('Debe quedar al menos un regalo activo en el catálogo.');
-    }
-    return commitMutatedState({ ...state, gifts: remaining }, true);
   } finally {
     endMutation();
   }
 }
 
-export async function resetDefaultGifts(): Promise<AppState> {
+export async function resetDefaultGifts(adminPassword?: string): Promise<AppState> {
   beginMutation();
   try {
     const res = await requestJson<{ state: AppState }>('/api/gifts/reset', {
       method: 'POST',
+      body: JSON.stringify(
+        adminPassword !== undefined ? { adminPassword, masterPassword: adminPassword } : {}
+      ),
     });
     return commitMutatedState(res.state, true);
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-    const state = readLocalState();
-    const defaults = cloneDefaults();
-    return commitMutatedState({ ...state, gifts: defaults.gifts }, true);
   } finally {
     endMutation();
   }
 }
 
-export async function updateSettings(updates: Partial<AppSettings>): Promise<AppState> {
+export async function updateSettings(
+  updates: Partial<AppSettings> & {
+    adminPassword?: string;
+    masterPassword?: string;
+    showcaseStyle?: ShowcaseStyleId;
+  },
+  adminPassword?: string
+): Promise<AppState> {
+  const effectivePassword = adminPassword ?? updates.adminPassword ?? updates.masterPassword;
   beginMutation();
   try {
     const res = await requestJson<{ settings: AppSettings; state: AppState }>('/api/settings', {
       method: 'PATCH',
-      body: JSON.stringify(updates),
+      body: JSON.stringify({
+        ...updates,
+        ...(effectivePassword !== undefined
+          ? { adminPassword: effectivePassword, masterPassword: effectivePassword }
+          : {}),
+      }),
     });
     return commitMutatedState(res.state, true);
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-    const state = readLocalState();
-    const nextSettings: AppSettings = {
-      ...state.settings,
-      ...updates,
-      pinCode: '',
-      showcaseStyle:
-        updates.showcaseStyle && VALID_SHOWCASE_STYLES.has(updates.showcaseStyle)
-          ? updates.showcaseStyle
-          : state.settings.showcaseStyle || 'luminous-gold',
-      randomizeGifts:
-        typeof updates.randomizeGifts === 'boolean'
-          ? updates.randomizeGifts
-          : typeof state.settings.randomizeGifts === 'boolean'
-            ? state.settings.randomizeGifts
-            : true,
-      referralPrizeRule: normalizeReferralPrizeRule(
-        updates.referralPrizeRule !== undefined
-          ? { ...state.settings.referralPrizeRule, ...updates.referralPrizeRule }
-          : state.settings.referralPrizeRule
-      ),
-    };
-    return commitMutatedState({ ...state, settings: nextSettings }, true);
   } finally {
     endMutation();
   }
 }
 
-const VALID_QR_STYLE_IDS = new Set<QrStyleId>([
-  'classic-gold',
-  'obsidian-dots',
-  'ivory-rounded',
-  'emerald-heritage',
-  'ruby-atelier',
-]);
-const VALID_QR_DOT_SHAPES = new Set<QrDotShape>(['square', 'rounded', 'dots']);
-const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-
-function isValidQrTargetUrl(rawUrl: string): boolean {
-  const clean = rawUrl.trim();
-  if (!clean || clean.length > 2048) return false;
-  if (clean.startsWith('/') && !clean.startsWith('//')) return true;
-  try {
-    const parsed = new URL(clean);
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function extractReferralCodeFromUrl(rawUrl: string): string {
-  const clean = rawUrl.trim();
-  if (!clean) return '';
-  try {
-    const parsed = new URL(clean, 'https://local.invalid');
-    const searchCandidates: string[] = [];
-    if (parsed.search) searchCandidates.push(parsed.search);
-    const hashQueryIdx = parsed.hash.indexOf('?');
-    if (hashQueryIdx !== -1) {
-      searchCandidates.push(parsed.hash.slice(hashQueryIdx));
-    }
-
-    for (const search of searchCandidates) {
-      const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-      const direct = params.get('ref') ?? params.get('r');
-      if (direct) {
-        const normalized = normalizeReferralCode(direct);
-        if (normalized) return normalized;
-      }
-      for (const [key, value] of params.entries()) {
-        const lower = key.toLowerCase();
-        if ((lower === 'ref' || lower === 'r') && value) {
-          const normalized = normalizeReferralCode(value);
-          if (normalized) return normalized;
-        }
-      }
-    }
-  } catch {
-    return '';
-  }
-  return '';
-}
+// ----------------------------------------------------------------------------
+// QR Studio API (Strictly linked to active vendedor account)
+// ----------------------------------------------------------------------------
 
 export interface CreateQrPayload {
   name: string;
   targetUrl: string;
+  accountId?: string | null;
+  referrerId?: string | null;
   styleId?: QrStyleId;
   dotShape?: QrDotShape;
   foregroundColor?: string;
@@ -1026,7 +1441,6 @@ export interface CreateQrPayload {
   includeLogo?: boolean;
   frameText?: string;
   referralCode?: string | null;
-  referrerId?: string | null;
 }
 
 export async function createQrCode(
@@ -1049,108 +1463,6 @@ export async function createQrCode(
       referrer: res.referrer ? normalizeReferralPartner(res.referrer) : null,
       state: normalizedState,
     };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-
-    if (!isDsbAdminSession()) {
-      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
-    }
-
-    const cleanName = payload.name.trim();
-    const cleanUrl = payload.targetUrl.trim();
-    if (cleanName.length < 2) {
-      throw new ApiValidationError('El nombre del código QR debe tener al menos 2 caracteres.');
-    }
-    if (!isValidQrTargetUrl(cleanUrl)) {
-      throw new ApiValidationError('Ingresa una URL válida que comience con http://, https:// o /.');
-    }
-
-    const nowIso = new Date().toISOString();
-    const cleanFrameText = payload.frameText?.trim().slice(0, 120) || undefined;
-    const validStyleId: QrStyleId =
-      payload.styleId && VALID_QR_STYLE_IDS.has(payload.styleId)
-        ? payload.styleId
-        : 'classic-gold';
-    const explicitReferralCode = payload.referralCode
-      ? normalizeReferralCode(payload.referralCode)
-      : '';
-    const urlReferralCode = extractReferralCodeFromUrl(cleanUrl);
-    let cleanReferralCode = explicitReferralCode || urlReferralCode;
-    let cleanReferrerId = payload.referrerId?.trim() || '';
-
-    const state = readLocalState();
-    const existingReferrers = state.referrers || [];
-    let nextReferrers = existingReferrers;
-    let linkedPartner: ReferralPartner | null = null;
-
-    if (cleanReferralCode) {
-      const existingPartner =
-        existingReferrers.find((r) => r.code === cleanReferralCode) ||
-        (cleanReferrerId ? existingReferrers.find((r) => r.id === cleanReferrerId) : undefined) ||
-        null;
-
-      if (existingPartner) {
-        linkedPartner = existingPartner;
-        cleanReferrerId = existingPartner.id;
-        cleanReferralCode = existingPartner.code;
-      } else {
-        const autoPartner: ReferralPartner = normalizeReferralPartner({
-          id: generateLocalId('ref'),
-          name: cleanName.slice(0, 120),
-          code: cleanReferralCode,
-          active: true,
-          visitsCount: 0,
-          uniqueVisitsCount: 0,
-          lastVisitAt: null,
-          qrStyleId: validStyleId,
-          createdAt: nowIso,
-        });
-        linkedPartner = autoPartner;
-        cleanReferrerId = autoPartner.id;
-        nextReferrers = [autoPartner, ...existingReferrers];
-      }
-    } else if (cleanReferrerId) {
-      const existingById = existingReferrers.find((r) => r.id === cleanReferrerId) || null;
-      if (existingById) {
-        linkedPartner = existingById;
-        cleanReferrerId = existingById.id;
-        cleanReferralCode = existingById.code;
-      }
-    }
-
-    const qr: QrCodeRecord = {
-      id: generateLocalId('qr'),
-      name: cleanName.slice(0, 120),
-      targetUrl: cleanUrl,
-      styleId: validStyleId,
-      dotShape:
-        payload.dotShape && VALID_QR_DOT_SHAPES.has(payload.dotShape)
-          ? payload.dotShape
-          : 'rounded',
-      foregroundColor:
-        payload.foregroundColor && HEX_COLOR_RE.test(payload.foregroundColor.trim())
-          ? payload.foregroundColor.trim()
-          : '#22150E',
-      backgroundColor:
-        payload.backgroundColor && HEX_COLOR_RE.test(payload.backgroundColor.trim())
-          ? payload.backgroundColor.trim()
-          : '#FFFDF9',
-      includeLogo: typeof payload.includeLogo === 'boolean' ? payload.includeLogo : true,
-      ...(cleanFrameText ? { frameText: cleanFrameText } : {}),
-      ...(cleanReferralCode ? { referralCode: cleanReferralCode } : {}),
-      ...(cleanReferrerId ? { referrerId: cleanReferrerId } : {}),
-      createdAt: nowIso,
-    };
-
-    const nextState = commitMutatedState(
-      {
-        ...state,
-        referrers: nextReferrers,
-        qrHistory: [qr, ...(state.qrHistory || [])],
-      },
-      true
-    );
-    return { qr, referrer: linkedPartner, state: nextState };
   } finally {
     endMutation();
   }
@@ -1166,33 +1478,25 @@ export async function deleteQrCode(id: string): Promise<AppState> {
       }
     );
     return commitMutatedState(res.state, true);
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-
-    if (!isDsbAdminSession()) {
-      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
-    }
-
-    const state = readLocalState();
-    return commitMutatedState(
-      {
-        ...state,
-        qrHistory: (state.qrHistory || []).filter((item) => item.id !== id),
-      },
-      true
-    );
   } finally {
     endMutation();
   }
 }
 
+// ----------------------------------------------------------------------------
+// Referrals & Visits API
+// ----------------------------------------------------------------------------
+
 export interface CreateReferralPayload {
-  name: string;
+  accountId?: string;
+  name?: string;
   code?: string;
   phone?: string;
   notes?: string;
   qrStyleId?: QrStyleId;
   active?: boolean;
+  adminPassword?: string;
+  masterPassword?: string;
 }
 
 export interface BatchCreateReferralsPayload {
@@ -1200,16 +1504,21 @@ export interface BatchCreateReferralsPayload {
   count?: number;
   namePrefix?: string;
   codePrefix?: string;
+  adminPassword?: string;
+  masterPassword?: string;
 }
 
 export interface UpdateReferralPayload {
   name?: string;
   code?: string;
+  avatarUrl?: string | null;
   phone?: string;
   notes?: string;
   active?: boolean;
   qrStyleId?: QrStyleId;
   resetVisits?: boolean;
+  adminPassword?: string;
+  masterPassword?: string;
 }
 
 export interface ResolvedReferralPartner {
@@ -1217,36 +1526,10 @@ export interface ResolvedReferralPartner {
   name: string;
   code: string;
   active: boolean;
-}
-
-const localSeenVisitorsByCode = new Map<string, Set<string>>();
-
-function generateUniqueReferralCode(baseInput: string, existingCodes: Set<string>): string {
-  const rawBase = baseInput
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '')
-    .slice(0, 12);
-  const base = rawBase.length >= 2 ? rawBase : 'EMB';
-
-  let candidate = `${base}01`;
-  if (rawBase.length >= 3 && !existingCodes.has(rawBase)) {
-    candidate = rawBase;
-  } else {
-    let idx = 1;
-    while (idx < 9999) {
-      const suffix = String(idx).padStart(2, '0');
-      const next = `${base.slice(0, 28 - suffix.length)}${suffix}`;
-      if (!existingCodes.has(next)) {
-        candidate = next;
-        break;
-      }
-      idx += 1;
-    }
-  }
-  existingCodes.add(candidate);
-  return candidate;
+  avatarUrl?: string | null;
+  emoji?: string | null;
+  partnerType?: ReferralPartnerType;
+  ownerVendedorName?: string | null;
 }
 
 export async function resolveReferralCode(code: string): Promise<ResolvedReferralPartner | null> {
@@ -1264,18 +1547,22 @@ export async function resolveReferralCode(code: string): Promise<ResolvedReferra
       name: res.partner.name,
       code: normalizeReferralCode(res.partner.code) || res.partner.code,
       active: typeof res.partner.active === 'boolean' ? res.partner.active : true,
+      avatarUrl:
+        typeof res.partner.avatarUrl === 'string' && res.partner.avatarUrl.trim()
+          ? res.partner.avatarUrl.trim()
+          : null,
+      emoji:
+        typeof res.partner.emoji === 'string' && res.partner.emoji.trim()
+          ? res.partner.emoji.trim()
+          : null,
+      partnerType: res.partner.partnerType === 'embajador' ? 'embajador' : 'vendedor',
+      ownerVendedorName:
+        typeof res.partner.ownerVendedorName === 'string' && res.partner.ownerVendedorName.trim()
+          ? res.partner.ownerVendedorName.trim()
+          : null,
     };
-  } catch (err) {
-    if (err instanceof ApiValidationError) return null;
-    const state = readLocalState();
-    const match = (state.referrers || []).find((r) => r.code === normalized);
-    if (!match) return null;
-    return {
-      id: match.id,
-      name: match.name,
-      code: match.code,
-      active: match.active,
-    };
+  } catch {
+    return null;
   }
 }
 
@@ -1304,6 +1591,22 @@ export async function recordReferralVisit(
             name: res.partner.name,
             code: normalizeReferralCode(res.partner.code) || res.partner.code,
             active: typeof res.partner.active === 'boolean' ? res.partner.active : true,
+            avatarUrl:
+              typeof res.partner.avatarUrl === 'string' && res.partner.avatarUrl.trim()
+                ? res.partner.avatarUrl.trim()
+                : null,
+            emoji:
+              typeof res.partner.emoji === 'string' && res.partner.emoji.trim()
+                ? res.partner.emoji.trim()
+                : null,
+            partnerType: (res.partner.partnerType === 'embajador'
+              ? 'embajador'
+              : 'vendedor') as ReferralPartnerType,
+            ownerVendedorName:
+              typeof res.partner.ownerVendedorName === 'string' &&
+              res.partner.ownerVendedorName.trim()
+                ? res.partner.ownerVendedorName.trim()
+                : null,
           }
         : null;
     return {
@@ -1311,131 +1614,42 @@ export async function recordReferralVisit(
       counted: Boolean(res.counted),
       partner,
     };
-  } catch (err) {
-    if (err instanceof ApiValidationError) {
-      return { ok: false, counted: false, partner: null };
-    }
-    const state = readLocalState();
-    const referrers = state.referrers || [];
-    const idx = referrers.findIndex((r) => r.code === normalized);
-    if (idx === -1 || !referrers[idx].active) {
-      return { ok: true, counted: false, partner: null };
-    }
-
-    const current = referrers[idx];
-    let seen = localSeenVisitorsByCode.get(normalized);
-    if (!seen) {
-      seen = new Set<string>();
-      localSeenVisitorsByCode.set(normalized, seen);
-    }
-    const cleanVisitor = visitorId.trim();
-    const isUnique = Boolean(cleanVisitor) && !seen.has(cleanVisitor);
-    if (cleanVisitor) seen.add(cleanVisitor);
-
-    const updated: ReferralPartner = {
-      ...current,
-      visitsCount: current.visitsCount + 1,
-      uniqueVisitsCount: current.uniqueVisitsCount + (isUnique ? 1 : 0),
-      lastVisitAt: new Date().toISOString(),
-    };
-
-    const nextReferrers = [...referrers];
-    nextReferrers[idx] = updated;
-    if (getDsbSessionToken()) {
-      commitMutatedState({ ...state, referrers: nextReferrers }, true);
-    }
-
-    return {
-      ok: true,
-      counted: true,
-      partner: {
-        id: updated.id,
-        name: updated.name,
-        code: updated.code,
-        active: updated.active,
-      },
-    };
+  } catch {
+    return { ok: false, counted: false, partner: null };
   }
 }
 
 export async function createReferralPartner(
-  payload: CreateReferralPayload
+  payload: CreateReferralPayload,
+  adminPassword?: string
 ): Promise<{ referrer: ReferralPartner; state: AppState }> {
+  const effectivePassword = adminPassword ?? payload.adminPassword ?? payload.masterPassword;
   beginMutation();
   try {
     const res = await requestJson<{ ok?: boolean; referrer: ReferralPartner; state: AppState }>(
       '/api/referrals',
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          ...(effectivePassword !== undefined
+            ? { adminPassword: effectivePassword, masterPassword: effectivePassword }
+            : {}),
+        }),
       }
     );
     const normalizedState = commitMutatedState(res.state, true);
     return { referrer: normalizeReferralPartner(res.referrer), state: normalizedState };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-
-    if (!isDsbAdminSession()) {
-      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
-    }
-
-    const cleanName = payload.name.trim();
-    if (cleanName.length < 2) {
-      throw new ApiValidationError('El nombre del embajador debe tener al menos 2 caracteres.');
-    }
-
-    const state = readLocalState();
-    const existing = state.referrers || [];
-    const existingCodes = new Set(existing.map((r) => r.code));
-
-    let code = '';
-    if (payload.code && payload.code.trim()) {
-      code = normalizeReferralCode(payload.code);
-      if (!code) {
-        throw new ApiValidationError(
-          'El código debe tener entre 2 y 32 caracteres alfanuméricos o guiones.'
-        );
-      }
-      if (existingCodes.has(code)) {
-        throw new ApiValidationError(`El código ${code} ya está en uso por otro embajador.`);
-      }
-    } else {
-      code = generateUniqueReferralCode(cleanName, existingCodes);
-    }
-
-    const referrer: ReferralPartner = normalizeReferralPartner({
-      id: generateLocalId('ref'),
-      name: cleanName.slice(0, 120),
-      code,
-      phone: payload.phone?.trim() || undefined,
-      notes: payload.notes?.trim() || undefined,
-      active: typeof payload.active === 'boolean' ? payload.active : true,
-      visitsCount: 0,
-      uniqueVisitsCount: 0,
-      lastVisitAt: null,
-      qrStyleId:
-        payload.qrStyleId && VALID_QR_STYLE_IDS.has(payload.qrStyleId)
-          ? payload.qrStyleId
-          : 'classic-gold',
-      createdAt: new Date().toISOString(),
-    });
-
-    const nextState = commitMutatedState(
-      {
-        ...state,
-        referrers: [referrer, ...existing],
-      },
-      true
-    );
-    return { referrer, state: nextState };
   } finally {
     endMutation();
   }
 }
 
 export async function batchCreateReferralPartners(
-  payload: BatchCreateReferralsPayload
+  payload: BatchCreateReferralsPayload,
+  adminPassword?: string
 ): Promise<{ created: ReferralPartner[]; skipped: string[]; state: AppState }> {
+  const effectivePassword = adminPassword ?? payload.adminPassword ?? payload.masterPassword;
   beginMutation();
   try {
     const res = await requestJson<{
@@ -1445,7 +1659,12 @@ export async function batchCreateReferralPartners(
       state: AppState;
     }>('/api/referrals/batch', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        ...(effectivePassword !== undefined
+          ? { adminPassword: effectivePassword, masterPassword: effectivePassword }
+          : {}),
+      }),
     });
     const normalizedState = commitMutatedState(res.state, true);
     return {
@@ -1453,101 +1672,6 @@ export async function batchCreateReferralPartners(
       skipped: Array.isArray(res.skipped) ? res.skipped : [],
       state: normalizedState,
     };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-
-    if (!isDsbAdminSession()) {
-      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
-    }
-
-    const state = readLocalState();
-    const existing = state.referrers || [];
-    const existingCodes = new Set(existing.map((r) => r.code));
-    const created: ReferralPartner[] = [];
-    const skipped: string[] = [];
-    const nowIso = new Date().toISOString();
-
-    if (Array.isArray(payload.items) && payload.items.length > 0) {
-      const slice = payload.items.slice(0, 50);
-      for (const item of slice) {
-        const cleanName = String(item?.name || '').trim();
-        if (cleanName.length < 2) {
-          skipped.push(cleanName || '(sin nombre)');
-          continue;
-        }
-        let code = '';
-        if (item.code && item.code.trim()) {
-          code = normalizeReferralCode(item.code);
-          if (!code || existingCodes.has(code)) {
-            skipped.push(item.code.trim());
-            continue;
-          }
-          existingCodes.add(code);
-        } else {
-          code = generateUniqueReferralCode(cleanName, existingCodes);
-        }
-
-        created.push(
-          normalizeReferralPartner({
-            id: generateLocalId('ref'),
-            name: cleanName.slice(0, 120),
-            code,
-            phone: item.phone?.trim() || undefined,
-            notes: item.notes?.trim() || undefined,
-            active: true,
-            visitsCount: 0,
-            uniqueVisitsCount: 0,
-            lastVisitAt: null,
-            qrStyleId: 'classic-gold',
-            createdAt: nowIso,
-          })
-        );
-      }
-    } else if (typeof payload.count === 'number' && payload.count > 0) {
-      const count = Math.min(50, Math.max(1, Math.round(payload.count)));
-      const namePrefix = (payload.namePrefix?.trim() || 'Embajador').slice(0, 60);
-      const rawCodePrefix = normalizeReferralCode(payload.codePrefix || 'EMB') || 'EMB';
-      let seq = 1;
-      for (let i = 0; i < count; i += 1) {
-        let code = '';
-        while (seq < 9999) {
-          const suffix = String(seq).padStart(2, '0');
-          const candidate = `${rawCodePrefix.slice(0, 28 - suffix.length)}-${suffix}`;
-          seq += 1;
-          if (!existingCodes.has(candidate)) {
-            code = candidate;
-            existingCodes.add(candidate);
-            break;
-          }
-        }
-        if (!code) break;
-        const labelNum = String(seq - 1).padStart(2, '0');
-        created.push(
-          normalizeReferralPartner({
-            id: generateLocalId('ref'),
-            name: `${namePrefix} ${labelNum}`,
-            code,
-            active: true,
-            visitsCount: 0,
-            uniqueVisitsCount: 0,
-            lastVisitAt: null,
-            qrStyleId: 'classic-gold',
-            createdAt: nowIso,
-          })
-        );
-      }
-    } else {
-      throw new ApiValidationError('Debes proporcionar una lista de embajadores o una cantidad.');
-    }
-
-    const nextState = commitMutatedState(
-      {
-        ...state,
-        referrers: [...created, ...existing],
-      },
-      true
-    );
-    return { created, skipped, state: nextState };
   } finally {
     endMutation();
   }
@@ -1555,118 +1679,508 @@ export async function batchCreateReferralPartners(
 
 export async function updateReferralPartner(
   id: string,
-  updates: UpdateReferralPayload
+  updates: UpdateReferralPayload,
+  adminPassword?: string
 ): Promise<{ referrer: ReferralPartner; state: AppState }> {
+  const effectivePassword = adminPassword ?? updates.adminPassword ?? updates.masterPassword;
   beginMutation();
   try {
     const res = await requestJson<{ ok?: boolean; referrer: ReferralPartner; state: AppState }>(
       `/api/referrals/${encodeURIComponent(id)}`,
       {
         method: 'PATCH',
-        body: JSON.stringify(updates),
+        body: JSON.stringify({
+          ...updates,
+          ...(effectivePassword !== undefined
+            ? { adminPassword: effectivePassword, masterPassword: effectivePassword }
+            : {}),
+        }),
       }
     );
     const normalizedState = commitMutatedState(res.state, true);
     return { referrer: normalizeReferralPartner(res.referrer), state: normalizedState };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-
-    if (!isDsbAdminSession()) {
-      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
-    }
-
-    const state = readLocalState();
-    const existing = state.referrers || [];
-    const index = existing.findIndex((r) => r.id === id);
-    if (index === -1) {
-      throw new ApiValidationError('Embajador no encontrado.');
-    }
-
-    const current = existing[index];
-    let nextCode = current.code;
-    if (updates.code !== undefined) {
-      const normalized = normalizeReferralCode(updates.code);
-      if (!normalized) {
-        throw new ApiValidationError(
-          'El código debe tener entre 2 y 32 caracteres alfanuméricos o guiones.'
-        );
-      }
-      if (existing.some((r) => r.id !== id && r.code === normalized)) {
-        throw new ApiValidationError(`El código ${normalized} ya está en uso por otro embajador.`);
-      }
-      nextCode = normalized;
-    }
-
-    let nextName = current.name;
-    if (updates.name !== undefined) {
-      const cleanName = updates.name.trim();
-      if (cleanName.length < 2) {
-        throw new ApiValidationError('El nombre del embajador debe tener al menos 2 caracteres.');
-      }
-      nextName = cleanName.slice(0, 120);
-    }
-
-    const nextPartner: ReferralPartner = normalizeReferralPartner({
-      ...current,
-      name: nextName,
-      code: nextCode,
-      phone: updates.phone !== undefined ? updates.phone.trim() || undefined : current.phone,
-      notes: updates.notes !== undefined ? updates.notes.trim() || undefined : current.notes,
-      active: typeof updates.active === 'boolean' ? updates.active : current.active,
-      qrStyleId:
-        updates.qrStyleId && VALID_QR_STYLE_IDS.has(updates.qrStyleId)
-          ? updates.qrStyleId
-          : current.qrStyleId,
-      visitsCount: updates.resetVisits ? 0 : current.visitsCount,
-      uniqueVisitsCount: updates.resetVisits ? 0 : current.uniqueVisitsCount,
-      lastVisitAt: updates.resetVisits ? null : current.lastVisitAt,
-    });
-
-    if (updates.resetVisits) {
-      localSeenVisitorsByCode.delete(current.code);
-      localSeenVisitorsByCode.delete(nextCode);
-    }
-
-    const nextReferrers = [...existing];
-    nextReferrers[index] = nextPartner;
-    const nextState = commitMutatedState({ ...state, referrers: nextReferrers }, true);
-    return { referrer: nextPartner, state: nextState };
   } finally {
     endMutation();
   }
 }
 
-export async function deleteReferralPartner(id: string): Promise<{ state: AppState }> {
+export async function deleteReferralPartner(
+  id: string,
+  adminPassword?: string
+): Promise<{ state: AppState }> {
   beginMutation();
   try {
     const res = await requestJson<{ ok?: boolean; state: AppState }>(
       `/api/referrals/${encodeURIComponent(id)}`,
       {
         method: 'DELETE',
+        headers: adminPassword
+          ? { 'X-Admin-Password': adminPassword, 'X-Master-Password': adminPassword }
+          : undefined,
+        body: JSON.stringify(
+          adminPassword !== undefined ? { adminPassword, masterPassword: adminPassword } : {}
+        ),
       }
     );
     const normalizedState = commitMutatedState(res.state, true);
     return { state: normalizedState };
-  } catch (err) {
-    if (err instanceof ApiValidationError) throw err;
-
-    if (!isDsbAdminSession()) {
-      throw new ApiValidationError('Acceso denegado. Permisos administrativos requeridos.');
-    }
-
-    const state = readLocalState();
-    const nextState = commitMutatedState(
-      {
-        ...state,
-        referrers: (state.referrers || []).filter((r) => r.id !== id),
-      },
-      true
-    );
-    return { state: nextState };
   } finally {
     endMutation();
   }
 }
+
+// ----------------------------------------------------------------------------
+// Embajadores API (Non-login referral partners linked to a Vendedor or Ciprian Direct)
+// ----------------------------------------------------------------------------
+
+export interface CreateEmbajadorPayload {
+  name: string;
+  emoji?: string | null;
+  avatarUrl?: string | null;
+  code?: string;
+  qrStyleId?: QrStyleId;
+  phone?: string;
+  notes?: string;
+  ownerVendedorAccountId?: string | null;
+  createQr?: boolean;
+  targetUrl?: string;
+  dotShape?: QrDotShape;
+  foregroundColor?: string;
+  backgroundColor?: string;
+  includeLogo?: boolean;
+  frameText?: string;
+}
+
+export interface UpdateEmbajadorPayload {
+  name?: string;
+  emoji?: string | null;
+  avatarUrl?: string | null;
+  code?: string;
+  qrStyleId?: QrStyleId;
+  phone?: string;
+  notes?: string;
+  active?: boolean;
+  ownerVendedorAccountId?: string | null;
+}
+
+export async function createEmbajadorRemote(
+  payload: CreateEmbajadorPayload
+): Promise<{ state: AppState; referrer: ReferralPartner; qr?: QrCodeRecord | null }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      state: AppState;
+      referrer: ReferralPartner;
+      qr?: QrCodeRecord | null;
+    }>('/api/embajadores', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      state: normalizedState,
+      referrer: normalizeReferralPartner(res.referrer),
+      qr: res.qr ?? null,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function updateEmbajadorRemote(
+  id: string,
+  updates: UpdateEmbajadorPayload
+): Promise<{ state: AppState; referrer: ReferralPartner }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      state: AppState;
+      referrer: ReferralPartner;
+    }>(`/api/embajadores/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    return {
+      state: normalizedState,
+      referrer: normalizeReferralPartner(res.referrer),
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function deleteEmbajadorRemote(
+  id: string,
+  adminPassword: string
+): Promise<{ state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{ ok?: boolean; state: AppState }>(
+      `/api/embajadores/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        headers: adminPassword
+          ? { 'X-Admin-Password': adminPassword, 'X-Master-Password': adminPassword }
+          : undefined,
+        body: JSON.stringify({ adminPassword, masterPassword: adminPassword }),
+      }
+    );
+    const normalizedState = commitMutatedState(res.state, true);
+    return { state: normalizedState };
+  } finally {
+    endMutation();
+  }
+}
+
+export const createQrCodeRemote = createQrCode;
+export const createLeadRemote = createLead;
+export const updateLeadRemote = updateLead;
+
+// ----------------------------------------------------------------------------
+// Accounts Management API (Admin only)
+// ----------------------------------------------------------------------------
+
+export interface CreateAccountPayload {
+  masterPassword: string;
+  adminPassword?: string;
+  username: string;
+  displayName: string;
+  role: 'telemarketing' | 'vendedor';
+  tag: string;
+  avatarUrl?: string | null;
+  password: string;
+  confirmPassword: string;
+}
+
+export interface UpdateAccountPayload {
+  masterPassword: string;
+  adminPassword?: string;
+  displayName?: string;
+  tag?: string;
+  avatarUrl?: string | null;
+  active?: boolean;
+}
+
+export interface UpdateAccountPasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+  confirmNewPassword: string;
+}
+
+export interface UpdateAdminAccountPasswordPayload {
+  securityKey: string;
+  confirmationPin: string;
+  newPassword: string;
+  confirmNewPassword: string;
+}
+
+export async function fetchAccounts(): Promise<UserAccount[]> {
+  const res = await requestJson<{ ok?: boolean; accounts: UserAccount[] }>('/api/accounts', {
+    cache: 'no-store',
+  });
+  return Array.isArray(res.accounts) ? res.accounts : [];
+}
+
+export async function createAccount(
+  payload: CreateAccountPayload
+): Promise<{
+  account: UserAccount;
+  referrer?: ReferralPartner | null;
+  accounts: UserAccount[];
+  state: AppState;
+}> {
+  const normalizedTag = normalizeReferralCode(payload.tag) || payload.tag.trim().toUpperCase();
+  const cleanAvatar =
+    typeof payload.avatarUrl === 'string' && payload.avatarUrl.trim()
+      ? payload.avatarUrl.trim()
+      : null;
+  const sanitizedPayload: CreateAccountPayload = {
+    ...payload,
+    adminPassword: payload.adminPassword ?? payload.masterPassword,
+    masterPassword: payload.masterPassword,
+    username: payload.username.trim(),
+    displayName: payload.displayName.trim(),
+    tag: normalizedTag,
+    ...(payload.role === 'vendedor' && cleanAvatar ? { avatarUrl: cleanAvatar } : {}),
+  };
+
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      account: UserAccount;
+      referrer?: ReferralPartner | null;
+      accounts: UserAccount[];
+      state: AppState;
+    }>('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify(sanitizedPayload),
+    });
+    const nextAccounts = Array.isArray(res.accounts)
+      ? res.accounts
+      : Array.isArray(res.state?.accounts)
+        ? res.state.accounts
+        : [];
+    const normalizedState = commitMutatedState({ ...res.state, accounts: nextAccounts }, true);
+    return {
+      account: res.account,
+      referrer: res.referrer ? normalizeReferralPartner(res.referrer) : null,
+      accounts: nextAccounts,
+      state: normalizedState,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function updateAccount(
+  id: string,
+  payload: UpdateAccountPayload
+): Promise<{ account: UserAccount; accounts: UserAccount[]; state: AppState }> {
+  const effectivePassword = payload.adminPassword ?? payload.masterPassword;
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      account: UserAccount;
+      accounts: UserAccount[];
+      state: AppState;
+    }>(`/api/accounts/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...payload,
+        adminPassword: effectivePassword,
+        masterPassword: effectivePassword,
+      }),
+    });
+    const nextAccounts = Array.isArray(res.accounts)
+      ? res.accounts
+      : Array.isArray(res.state?.accounts)
+        ? res.state.accounts
+        : [];
+    const normalizedState = commitMutatedState({ ...res.state, accounts: nextAccounts }, true);
+    return {
+      account: res.account,
+      accounts: nextAccounts,
+      state: normalizedState,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function updateAccountPassword(
+  id: string,
+  payload: UpdateAccountPasswordPayload
+): Promise<{ ok: boolean; account: UserAccount; message: string }> {
+  const res = await requestJson<{
+    ok?: boolean;
+    account: UserAccount;
+    message?: string;
+  }>(`/api/accounts/${encodeURIComponent(id)}/password`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return {
+    ok: true,
+    account: res.account,
+    message: res.message || 'Contraseña actualizada correctamente.',
+  };
+}
+
+export async function updateAdminAccountPassword(
+  id: string,
+  payload: UpdateAdminAccountPasswordPayload
+): Promise<{ ok: boolean; message: string; sessionToken?: string; account?: UserAccount }> {
+  const res = await requestJson<{
+    ok?: boolean;
+    message?: string;
+    sessionToken?: string;
+    account?: UserAccount;
+  }>(`/api/accounts/${encodeURIComponent(id)}/admin-password`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (res.sessionToken) {
+    const existing = getStoredSessionUser();
+    const updatedAccount = res.account;
+    saveSessionStorage(res.sessionToken, {
+      userId: existing?.userId || updatedAccount?.id || id,
+      username: updatedAccount?.username || existing?.username || 'AdminCiprian',
+      displayName:
+        updatedAccount?.displayName ||
+        existing?.displayName ||
+        updatedAccount?.username ||
+        'Administrador',
+      role: 'admin',
+      tag: updatedAccount?.tag || existing?.tag || 'ADMIN-CIPRIAN',
+      avatarUrl: updatedAccount?.avatarUrl ?? existing?.avatarUrl ?? null,
+    });
+  }
+
+  return {
+    ok: true,
+    message: res.message || 'Contraseña de administrador actualizada correctamente.',
+    ...(res.sessionToken ? { sessionToken: res.sessionToken } : {}),
+    ...(res.account ? { account: res.account } : {}),
+  };
+}
+
+export async function deleteAccount(
+  id: string,
+  adminPassword: string
+): Promise<{ ok: boolean; accounts: UserAccount[]; state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      accounts: UserAccount[];
+      state: AppState;
+    }>(`/api/accounts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: {
+        'X-Admin-Password': adminPassword,
+        'X-Master-Password': adminPassword,
+      },
+      body: JSON.stringify({ adminPassword, masterPassword: adminPassword }),
+    });
+    const nextAccounts = Array.isArray(res.accounts)
+      ? res.accounts
+      : Array.isArray(res.state?.accounts)
+        ? res.state.accounts
+        : [];
+    const normalizedState = commitMutatedState({ ...res.state, accounts: nextAccounts }, true);
+    return {
+      ok: true,
+      accounts: nextAccounts,
+      state: normalizedState,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Security & Anti-Fraud Center API (Admin only)
+// ----------------------------------------------------------------------------
+
+export async function updateSecurityAlertStatus(
+  id: string,
+  status: SecurityAlertStatus,
+  reviewNote?: string
+): Promise<{ alert: SecurityAlert; alerts: SecurityAlert[]; state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      alert: SecurityAlert;
+      alerts?: SecurityAlert[];
+      state: AppState;
+    }>(`/api/security/alerts/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status,
+        ...(reviewNote !== undefined ? { reviewNote } : {}),
+      }),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    const normalizedAlerts = Array.isArray(res.alerts)
+      ? res.alerts.map(normalizeSecurityAlert)
+      : normalizedState.securityAlerts ?? [];
+    return {
+      alert: normalizeSecurityAlert(res.alert),
+      alerts: normalizedAlerts,
+      state: normalizedState,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export async function bulkUpdateSecurityAlerts(
+  action: 'mark_all_reviewed' | 'clear_resolved'
+): Promise<{ alerts: SecurityAlert[]; state: AppState }> {
+  beginMutation();
+  try {
+    const res = await requestJson<{
+      ok?: boolean;
+      alerts?: SecurityAlert[];
+      state: AppState;
+    }>('/api/security/alerts/bulk-status', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+    const normalizedState = commitMutatedState(res.state, true);
+    const normalizedAlerts = Array.isArray(res.alerts)
+      ? res.alerts.map(normalizeSecurityAlert)
+      : normalizedState.securityAlerts ?? [];
+    return {
+      alerts: normalizedAlerts,
+      state: normalizedState,
+    };
+  } finally {
+    endMutation();
+  }
+}
+
+export function reportClientTamper(reason: string, detail?: string): void {
+  if (typeof window === 'undefined') return;
+  const token = getDsbSessionToken();
+  if (!token) return;
+  const cleanReason = String(reason || '').trim().slice(0, 80);
+  if (!cleanReason) return;
+  const cleanDetail =
+    typeof detail === 'string' && detail.trim() ? detail.trim().slice(0, 320) : undefined;
+
+  try {
+    void fetch('/api/security/client-tamper', {
+      method: 'POST',
+      cache: 'no-store',
+      keepalive: true,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        reason: cleanReason,
+        ...(cleanDetail ? { detail: cleanDetail } : {}),
+      }),
+    }).catch(() => {
+      // Swallow network/API errors silently
+    });
+  } catch {
+    // Swallow runtime errors silently
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Activity Log API (Admin only — strictly in-memory, never written to localStorage)
+// ----------------------------------------------------------------------------
+
+export async function fetchActivityLogs(): Promise<ActivityLogEntry[]> {
+  const res = await requestJson<
+    | { ok?: boolean; activityLogs?: ActivityLogEntry[]; logs?: ActivityLogEntry[] }
+    | ActivityLogEntry[]
+  >('/api/activity', {
+    cache: 'no-store',
+  });
+  const raw = Array.isArray(res)
+    ? res
+    : Array.isArray(res.activityLogs)
+      ? res.activityLogs
+      : Array.isArray(res.logs)
+        ? res.logs
+        : [];
+  return raw.map(normalizeActivityLogEntry);
+}
+
+// ----------------------------------------------------------------------------
+// Cross-tab Sync
+// ----------------------------------------------------------------------------
 
 export function subscribeStoreSync(onSync: (state: AppState) => void): () => void {
   let lastDeliveredJson = '';
@@ -1675,7 +2189,6 @@ export function subscribeStoreSync(onSync: (state: AppState) => void): () => voi
     if (activeMutationCount > 0) return;
     const isCurrentTabAuthed = Boolean(getDsbSessionToken());
     if (isCurrentTabAuthed && !fromAuthedSource) {
-      // Never allow an unauthenticated public tab's stripped state to wipe DSB leads/QR history
       return;
     }
     const normalized = normalizeAppState(candidate);
@@ -1698,16 +2211,27 @@ export function subscribeStoreSync(onSync: (state: AppState) => void): () => voi
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== STORAGE_KEY || !event.newValue) return;
     try {
-      const parsed = JSON.parse(event.newValue) as AppState;
-      const isCurrentTabAuthed = Boolean(getDsbSessionToken());
-      const incomingHasLeads = Array.isArray(parsed.leads) && parsed.leads.length > 0;
-      const currentHasLeads =
-        Array.isArray(latestCommittedState?.leads) && latestCommittedState.leads.length > 0;
-      if (isCurrentTabAuthed && !incomingHasLeads && currentHasLeads) {
-        // Public tabs strip leads in localStorage; authed DSB resets arrive via BroadcastChannel (sourceAuthed: true)
-        return;
-      }
-      deliverIfChanged(parsed, !isCurrentTabAuthed || incomingHasLeads);
+      const parsed = JSON.parse(event.newValue) as Partial<PublicCatalogStorage>;
+      if (!parsed || typeof parsed !== 'object') return;
+      const base = latestCommittedState ?? readLocalState();
+      const merged: AppState = {
+        ...base,
+        settings: {
+          ...base.settings,
+          ...(parsed.settings || {}),
+          pinCode: '',
+          referralPrizeRule: normalizeReferralPrizeRule(
+            parsed.settings?.referralPrizeRule ?? base.settings.referralPrizeRule
+          ),
+        },
+        gifts:
+          base.role === 'telemarketing'
+            ? []
+            : Array.isArray(parsed.gifts)
+              ? parsed.gifts.map(normalizeGift)
+              : base.gifts,
+      };
+      deliverIfChanged(merged, Boolean(getDsbSessionToken()));
     } catch {
       // Ignore parse failure
     }
@@ -1722,8 +2246,13 @@ export function subscribeStoreSync(onSync: (state: AppState) => void): () => voi
   };
 }
 
+// ----------------------------------------------------------------------------
+// Authentication & Security API (Strict server-side verification, zero client hash bypass)
+// ----------------------------------------------------------------------------
+
 export interface AuthErrorResponse {
   error?: string;
+  code?: string;
   locked?: boolean;
   retryAfterSeconds?: number;
   remainingAttempts?: number;
@@ -1747,312 +2276,176 @@ export class DsbAuthError extends Error {
   }
 }
 
-export const DSB_ROLE_KEY = 'cipriano_dsb_role';
-
-interface FallbackAccount {
+export interface LoginStep1Result {
+  requiresPin: boolean;
+  preAuthToken?: string;
+  sessionToken?: string;
+  userId: string;
   username: string;
-  role: 'admin' | 'caller';
-  userHashes: Set<string>;
-  pwdHashes: Set<string>;
-  pinHashes: Set<string>;
+  displayName: string;
+  role: UserRole;
+  tag: string;
+  avatarUrl?: string | null;
 }
 
-const FALLBACK_ACCOUNTS: FallbackAccount[] = [
-  {
-    username: 'AdminCiprian',
-    role: 'admin',
-    userHashes: new Set(['5dbd4bd91051c7b5b11a696562016355f51672251611218c71923683fdde56c4']),
-    pwdHashes: new Set(['8f7289679cd994a3283afaec616377653dd3a4fb23f6946f8265c4b9e2c908ee']),
-    pinHashes: new Set(['ab43d09287dec7e951522e1adc084a95af2cea3bb6a3d7bb940843ac8a63b0be']),
-  },
-  {
-    username: 'Caller',
-    role: 'caller',
-    userHashes: new Set([
-      '9e61aba50ade2e90a650017fea1d840dacdb5585235eabe2fb1e9cec4e22461c',
-      'a7f29f0f9b6cb60d7c71f379434e320f772bf22d7ba59f6b986872583804aa18',
-    ]),
-    pwdHashes: new Set([
-      'eb60d6e50255d26572a94097be640ad4c7311845b039a1ffa1e38e8b9ce14f01',
-      '2e2c8fb944e94b281f6920fbbff91db858908f5d023f0423c9314c44280cf277',
-    ]),
-    pinHashes: new Set([
-      '8e78515e0134148dbebf546e488caaaa069c73d6af3adef96ec8c2c29acfbd1e',
-      '7c975a64380ca9ce63737ecae6ae406856b3e6425cff2fdfc100e470123565f4',
-    ]),
-  },
-];
-const FALLBACK_ATTEMPTS_KEY = 'cipriano_dsb_attempts';
-
-async function sha256Hex(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await window.crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-function getFallbackRateLimit(scope: 'login' | 'pin'): {
-  locked: boolean;
-  retryAfterSeconds: number;
-  count: number;
-} {
-  try {
-    const raw = sessionStorage.getItem(`${FALLBACK_ATTEMPTS_KEY}_${scope}`);
-    if (!raw) return { locked: false, retryAfterSeconds: 0, count: 0 };
-    const parsed = JSON.parse(raw) as { count: number; lockedUntil: number };
-    const now = Date.now();
-    if (parsed.lockedUntil > now) {
-      return {
-        locked: true,
-        retryAfterSeconds: Math.ceil((parsed.lockedUntil - now) / 1000),
-        count: parsed.count,
-      };
-    }
-    if (parsed.lockedUntil > 0 && parsed.lockedUntil <= now) {
-      sessionStorage.removeItem(`${FALLBACK_ATTEMPTS_KEY}_${scope}`);
-      return { locked: false, retryAfterSeconds: 0, count: 0 };
-    }
-    return { locked: false, retryAfterSeconds: 0, count: parsed.count || 0 };
-  } catch {
-    return { locked: false, retryAfterSeconds: 0, count: 0 };
-  }
-}
-
-function recordFallbackFailure(scope: 'login' | 'pin'): {
-  locked: boolean;
-  retryAfterSeconds: number;
-  remainingAttempts: number;
-} {
-  const cur = getFallbackRateLimit(scope);
-  const nextCount = cur.count + 1;
-  const max = 5;
-  const lockedUntil = nextCount >= max ? Date.now() + 15 * 60 * 1000 : 0;
-  try {
-    sessionStorage.setItem(
-      `${FALLBACK_ATTEMPTS_KEY}_${scope}`,
-      JSON.stringify({ count: nextCount, lockedUntil })
-    );
-  } catch {
-    // Ignore storage restriction
-  }
-  return {
-    locked: lockedUntil > Date.now(),
-    retryAfterSeconds: lockedUntil > Date.now() ? 900 : 0,
-    remainingAttempts: Math.max(0, max - nextCount),
-  };
-}
-
-function clearFallbackFailures(scope: 'login' | 'pin'): void {
-  try {
-    sessionStorage.removeItem(`${FALLBACK_ATTEMPTS_KEY}_${scope}`);
-  } catch {
-    // Ignore storage cleanup error
-  }
-}
-
-export async function loginStep1(
-  username: string,
-  password: string
-): Promise<{ preAuthToken: string; username: string; role?: 'admin' | 'caller' }> {
+export async function loginStep1(username: string, password: string): Promise<LoginStep1Result> {
   const cleanUser = username.trim();
-  // Strictly reject AdminCripian and variants
   if (cleanUser.toLowerCase() === 'admincripian') {
     throw new DsbAuthError({ error: 'Credenciales inválidas.', remainingAttempts: 4 });
   }
 
-  let apiUnavailable = false;
-
+  let res: Response;
   try {
-    const res = await fetch('/api/auth/login', {
+    res = await fetch('/api/auth/login', {
       method: 'POST',
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: cleanUser, password }),
     });
+  } catch {
+    throw new DsbAuthError({
+      error: 'No se pudo conectar con el servidor de autenticación. Intenta de nuevo.',
+    });
+  }
 
-    if (res.status === 404 || res.status >= 500) {
-      apiUnavailable = true;
-    } else {
-      const data = (await res.json().catch(() => null)) as
-        | ({ preAuthToken?: string; username?: string; user?: string; role?: 'admin' | 'caller' } & AuthErrorResponse)
-        | null;
+  const data = (await res.json().catch(() => null)) as
+    | ({
+        ok?: boolean;
+        requiresPin?: boolean;
+        preAuthToken?: string;
+        sessionToken?: string;
+        userId?: string;
+        username?: string;
+        user?: string;
+        displayName?: string;
+        role?: UserRole;
+        tag?: string;
+        avatarUrl?: string | null;
+      } & AuthErrorResponse)
+    | null;
 
-      if (!data) {
-        apiUnavailable = true;
-      } else if (!res.ok || !data.preAuthToken) {
-        throw new DsbAuthError(data);
-      } else {
-        return {
-          preAuthToken: data.preAuthToken,
-          username: data.username || data.user || cleanUser,
-          role: data.role || (cleanUser.toLowerCase() === 'caller' ? 'caller' : 'admin'),
-        };
-      }
+  if (!data || !res.ok || !data.ok) {
+    throw new DsbAuthError(data || { error: 'No se pudo completar la autenticación.' });
+  }
+
+  const resolvedRole: UserRole = data.role || 'admin';
+  const resolvedUsername = data.username || data.user || cleanUser;
+  const resolvedDisplayName = data.displayName || resolvedUsername;
+  const resolvedUserId = data.userId || '';
+  const resolvedTag = data.tag || '';
+  const resolvedAvatarUrl =
+    typeof data.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl.trim() : null;
+  const requiresPin = data.requiresPin !== undefined ? Boolean(data.requiresPin) : resolvedRole === 'admin';
+
+  if (!requiresPin) {
+    if (!data.sessionToken) {
+      throw new DsbAuthError({ error: 'Respuesta de sesión inválida.' });
     }
-  } catch (err) {
-    if (err instanceof DsbAuthError) throw err;
-    apiUnavailable = true;
-  }
-
-  if (!apiUnavailable) {
-    throw new DsbAuthError({ error: 'No se pudo completar la autenticación.' });
-  }
-
-  const rl = getFallbackRateLimit('login');
-  if (rl.locked) {
-    throw new DsbAuthError({
-      error: `Demasiados intentos fallidos. Sistema bloqueado temporalmente (${rl.retryAfterSeconds}s).`,
-      locked: true,
-      retryAfterSeconds: rl.retryAfterSeconds,
-      remainingAttempts: 0,
+    saveSessionStorage(data.sessionToken, {
+      userId: resolvedUserId,
+      username: resolvedUsername,
+      displayName: resolvedDisplayName,
+      role: resolvedRole,
+      tag: resolvedTag,
+      avatarUrl: resolvedAvatarUrl,
     });
+    stateMutationEpoch += 1;
+    latestCommittedState = null;
+    return {
+      requiresPin: false,
+      sessionToken: data.sessionToken,
+      userId: resolvedUserId,
+      username: resolvedUsername,
+      displayName: resolvedDisplayName,
+      role: resolvedRole,
+      tag: resolvedTag,
+      avatarUrl: resolvedAvatarUrl,
+    };
   }
 
-  const [userHash, pwdHash] = await Promise.all([
-    sha256Hex(`dsb_user_v1:${cleanUser.toLowerCase()}`),
-    sha256Hex(`dsb_pwd_v1:${password}`),
-  ]);
-
-  const matchedAccount = FALLBACK_ACCOUNTS.find(
-    (acc) => acc.userHashes.has(userHash) && acc.pwdHashes.has(pwdHash)
-  );
-
-  if (!matchedAccount) {
-    const fail = recordFallbackFailure('login');
-    throw new DsbAuthError({
-      error: fail.locked
-        ? 'Alerta Anti-Hacking: Se superó el límite de 5 intentos. Acceso bloqueado por 15 minutos.'
-        : `Credenciales inválidas. Intentos restantes antes de bloqueo: ${fail.remainingAttempts}.`,
-      locked: fail.locked,
-      retryAfterSeconds: fail.retryAfterSeconds,
-      remainingAttempts: fail.remainingAttempts,
-    });
+  if (!data.preAuthToken) {
+    throw new DsbAuthError({ error: 'No se recibió token de segundo factor.' });
   }
 
-  clearFallbackFailures('login');
-  const expiresAt = Date.now() + 5 * 60 * 1000;
   return {
-    preAuthToken: `local_pre.${matchedAccount.role}.${expiresAt}`,
-    username: matchedAccount.username,
-    role: matchedAccount.role,
+    requiresPin: true,
+    preAuthToken: data.preAuthToken,
+    userId: resolvedUserId,
+    username: resolvedUsername,
+    displayName: resolvedDisplayName,
+    role: resolvedRole,
+    tag: resolvedTag,
+    avatarUrl: resolvedAvatarUrl,
   };
 }
 
 export async function verifyPinStep2(
   preAuthToken: string,
   pin: string
-): Promise<{ sessionToken: string; username: string; role?: 'admin' | 'caller' }> {
-  const isLocalPre = preAuthToken.startsWith('local_pre.');
-
-  if (!isLocalPre) {
-    let apiUnavailable = false;
-    try {
-      const res = await fetch('/api/auth/verify-pin', {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preAuthToken, pin }),
-      });
-
-      if (res.status === 404 || res.status >= 500) {
-        apiUnavailable = true;
-      } else {
-        const data = (await res.json().catch(() => null)) as
-          | ({ sessionToken?: string; username?: string; user?: string; role?: 'admin' | 'caller' } & AuthErrorResponse)
-          | null;
-
-        if (!data) {
-          apiUnavailable = true;
-        } else if (!res.ok || !data.sessionToken) {
-          throw new DsbAuthError(data);
-        } else {
-          const role = data.role || 'admin';
-          sessionStorage.setItem(DSB_SESSION_TOKEN_KEY, data.sessionToken);
-          sessionStorage.setItem(DSB_ROLE_KEY, role);
-          stateMutationEpoch += 1;
-          latestCommittedState = null;
-          return {
-            sessionToken: data.sessionToken,
-            username: data.username || data.user || 'AdminCiprian',
-            role,
-          };
-        }
-      }
-    } catch (err) {
-      if (err instanceof DsbAuthError) throw err;
-      apiUnavailable = true;
-    }
-
-    if (!apiUnavailable) {
-      throw new DsbAuthError({ error: 'No se pudo verificar el PIN.' });
-    }
-  }
-
-  // Fallback local PIN verification
-  const parts = preAuthToken.split('.');
-  const role: 'admin' | 'caller' = parts[1] === 'caller' ? 'caller' : 'admin';
-  const exp = Number(parts[2] || parts[1]);
-  if (!Number.isFinite(exp) || Date.now() > exp) {
+): Promise<{
+  sessionToken: string;
+  userId: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  tag: string;
+  avatarUrl?: string | null;
+}> {
+  let res: Response;
+  try {
+    res = await fetch('/api/auth/verify-pin', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preAuthToken, pin }),
+    });
+  } catch {
     throw new DsbAuthError({
-      error: 'La sesión del primer filtro expiró. Vuelve a iniciar sesión.',
-      expiredFirstFactor: true,
+      error: 'No se pudo conectar con el servidor para verificar el PIN.',
     });
   }
 
-  const rl = getFallbackRateLimit('pin');
-  if (rl.locked) {
-    throw new DsbAuthError({
-      error: `Segundo factor bloqueado temporalmente (${rl.retryAfterSeconds}s).`,
-      locked: true,
-      retryAfterSeconds: rl.retryAfterSeconds,
-      remainingAttempts: 0,
-    });
+  const data = (await res.json().catch(() => null)) as
+    | ({
+        ok?: boolean;
+        sessionToken?: string;
+        userId?: string;
+        username?: string;
+        user?: string;
+        displayName?: string;
+        role?: UserRole;
+        tag?: string;
+        avatarUrl?: string | null;
+      } & AuthErrorResponse)
+    | null;
+
+  if (!data || !res.ok || !data.sessionToken) {
+    throw new DsbAuthError(data || { error: 'No se pudo verificar el PIN.' });
   }
 
-  const pinHash = await sha256Hex(`dsb_pin_v1:${pin.trim()}`);
-  const account = FALLBACK_ACCOUNTS.find((a) => a.role === role);
-  if (!account || !account.pinHashes.has(pinHash)) {
-    const fail = recordFallbackFailure('pin');
-    throw new DsbAuthError({
-      error: fail.locked
-        ? 'Alerta Anti-Hacking: PIN bloqueado por 15 minutos tras 5 intentos fallidos.'
-        : `PIN incorrecto. Intentos restantes: ${fail.remainingAttempts}.`,
-      locked: fail.locked,
-      retryAfterSeconds: fail.retryAfterSeconds,
-      remainingAttempts: fail.remainingAttempts,
-    });
-  }
+  const user: StoredSessionUser = {
+    userId: data.userId || '',
+    username: data.username || data.user || 'AdminCiprian',
+    displayName: data.displayName || data.username || data.user || 'AdminCiprian',
+    role: data.role || 'admin',
+    tag: data.tag || 'ADMIN-CIPRIAN',
+    avatarUrl:
+      typeof data.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl.trim() : null,
+  };
 
-  clearFallbackFailures('pin');
-  const sessionToken = `local_dsb.${role}.${Date.now() + 8 * 60 * 60 * 1000}`;
-  sessionStorage.setItem(DSB_SESSION_TOKEN_KEY, sessionToken);
-  sessionStorage.setItem(DSB_ROLE_KEY, role);
+  saveSessionStorage(data.sessionToken, user);
   stateMutationEpoch += 1;
   latestCommittedState = null;
-  return { sessionToken, username: account.username, role };
+
+  return {
+    sessionToken: data.sessionToken,
+    ...user,
+  };
 }
 
-export async function verifyDsbSession(): Promise<{
-  authenticated: boolean;
-  username?: string;
-  role?: 'admin' | 'caller';
-}> {
-  const token = sessionStorage.getItem(DSB_SESSION_TOKEN_KEY);
+export async function verifyDsbSession(): Promise<AuthSessionInfo> {
+  const token = getDsbSessionToken();
   if (!token) return { authenticated: false };
-
-  if (token.startsWith('local_dsb.')) {
-    const parts = token.split('.');
-    const role: 'admin' | 'caller' = parts[1] === 'caller' ? 'caller' : 'admin';
-    const exp = Number(parts[2] || parts[1]);
-    if (Number.isFinite(exp) && Date.now() <= exp) {
-      sessionStorage.setItem(DSB_ROLE_KEY, role);
-      return { authenticated: true, username: role === 'caller' ? 'Caller' : 'AdminCiprian', role };
-    }
-    sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
-    sessionStorage.removeItem(DSB_ROLE_KEY);
-    return { authenticated: false };
-  }
 
   try {
     const res = await fetch('/api/auth/session', {
@@ -2061,23 +2454,38 @@ export async function verifyDsbSession(): Promise<{
     });
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
-        sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
-        sessionStorage.removeItem(DSB_ROLE_KEY);
+        clearSessionStorage();
       }
       return { authenticated: false };
     }
     const data = (await res.json()) as {
-      authenticated: boolean;
+      ok?: boolean;
+      authenticated?: boolean;
+      userId?: string;
       username?: string;
       user?: string;
-      role?: 'admin' | 'caller';
+      displayName?: string;
+      role?: UserRole;
+      tag?: string;
+      avatarUrl?: string | null;
     };
-    const role = data.role || (sessionStorage.getItem(DSB_ROLE_KEY) as 'admin' | 'caller') || 'admin';
-    sessionStorage.setItem(DSB_ROLE_KEY, role);
+    if (!data.authenticated && !data.ok) {
+      clearSessionStorage();
+      return { authenticated: false };
+    }
+    const user: StoredSessionUser = {
+      userId: data.userId || '',
+      username: data.username || data.user || '',
+      displayName: data.displayName || data.username || data.user || '',
+      role: data.role || getDsbRole() || 'admin',
+      tag: data.tag || '',
+      avatarUrl:
+        typeof data.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl.trim() : null,
+    };
+    saveSessionStorage(token, user);
     return {
-      authenticated: data.authenticated,
-      username: data.username || data.user,
-      role,
+      authenticated: true,
+      ...user,
     };
   } catch {
     return { authenticated: false };
@@ -2088,79 +2496,114 @@ export function logoutDsbSession(): void {
   stateMutationEpoch += 1;
   latestCommittedState = null;
   lastWrittenLocalJson = '';
-  sessionStorage.removeItem(DSB_SESSION_TOKEN_KEY);
-  sessionStorage.removeItem(DSB_ROLE_KEY);
-  sessionStorage.removeItem('konverta_dsb_unlocked');
+  clearSessionStorage();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<AppState>;
-      window.localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ ...parsed, leads: [], qrHistory: [], referrers: [] })
-      );
+      const publicCatalog = buildPublicCatalogSnapshot(parsed);
+      const serialized = JSON.stringify(publicCatalog);
+      window.localStorage.setItem(STORAGE_KEY, serialized);
+      lastWrittenLocalJson = serialized;
     }
   } catch {
-    // Ignore storage cleanup error
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore storage cleanup error
+    }
   }
 }
 
 export interface UpdateCredentialsPayload {
   masterPassword: string;
+  confirmationPin: string;
   newUsername?: string;
   newPassword?: string;
+  confirmNewPassword?: string;
   newPin?: string;
 }
 
 export async function updateDsbCredentials(
   payload: UpdateCredentialsPayload
-): Promise<{ ok: boolean; username: string; message: string }> {
+): Promise<{ ok: boolean; username: string; sessionToken?: string; message: string }> {
   const token = getDsbSessionToken();
-  const res = await fetch('/api/auth/update-credentials', {
-    method: 'POST',
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-  const data = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    username?: string;
-    message?: string;
-  } & AuthErrorResponse;
-
-  if (!res.ok || !data.ok) {
-    throw new DsbAuthError(data);
-  }
-
-  return {
-    ok: true,
-    username: data.username || 'Admin',
-    message: data.message || 'Credenciales actualizadas.',
-  };
-}
-
-export async function resetAllWorkspaceData(
-  masterPassword: string,
-  resetCatalogAndSettings = true
-): Promise<{ ok: boolean; state: AppState; message: string }> {
-  const token = getDsbSessionToken();
-  beginMutation();
+  let res: Response;
   try {
-    const res = await fetch('/api/admin/reset-all', {
+    res = await fetch('/api/auth/update-credentials', {
       method: 'POST',
       cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({
-        masterPassword,
-        resetCatalogAndSettings,
-      }),
+      body: JSON.stringify(payload),
     });
+  } catch {
+    throw new DsbAuthError({
+      error: 'No se pudo conectar con el servidor para actualizar credenciales. Intenta de nuevo.',
+    });
+  }
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    username?: string;
+    sessionToken?: string;
+    message?: string;
+  } & AuthErrorResponse;
+
+  if (!res.ok || !data.ok) {
+    throw new DsbAuthError(
+      data.error ? data : { error: `No se pudieron actualizar las credenciales (HTTP ${res.status}).` }
+    );
+  }
+
+  if (data.sessionToken) {
+    const existing = getStoredSessionUser();
+    saveSessionStorage(data.sessionToken, {
+      userId: existing?.userId || 'default',
+      username: data.username || existing?.username || 'AdminCiprian',
+      displayName: existing?.displayName || data.username || 'Administrador Ciprian',
+      role: 'admin',
+      tag: existing?.tag || 'ADMIN-CIPRIAN',
+      avatarUrl: existing?.avatarUrl ?? null,
+    });
+  }
+
+  return {
+    ok: true,
+    username: data.username || 'AdminCiprian',
+    sessionToken: data.sessionToken,
+    message: data.message || 'Credenciales actualizadas.',
+  };
+}
+
+export async function resetAllWorkspaceData(
+  adminPassword: string,
+  resetCatalogAndSettings = true
+): Promise<{ ok: boolean; state: AppState; message: string }> {
+  const token = getDsbSessionToken();
+  beginMutation();
+  try {
+    let res: Response;
+    try {
+      res = await fetch('/api/admin/reset-all', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          adminPassword,
+          masterPassword: adminPassword,
+          resetCatalogAndSettings,
+        }),
+      });
+    } catch {
+      throw new DsbAuthError({
+        error: 'No se pudo conectar con el servidor para reiniciar los datos. Intenta de nuevo.',
+      });
+    }
 
     const data = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
@@ -2169,7 +2612,9 @@ export async function resetAllWorkspaceData(
     } & AuthErrorResponse;
 
     if (!res.ok || !data.ok || !data.state) {
-      throw new DsbAuthError(data);
+      throw new DsbAuthError(
+        data.error ? data : { error: `No se pudo completar el reinicio (HTTP ${res.status}).` }
+      );
     }
 
     const normalizedState = commitMutatedState(data.state, true);

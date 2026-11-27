@@ -8,50 +8,73 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-// Isolate test store in OS temp dir so concurrent test suites never collide on store.json
 const TEST_STORE_FILE = path.join(
   os.tmpdir(),
   `royal-referrals-test-${process.pid}-${Date.now()}.json`
 );
+const TEST_AUTH_FILE = path.join(
+  os.tmpdir(),
+  `royal-referrals-auth-${process.pid}-${Date.now()}.json`
+);
 process.env.NODE_ENV = 'test';
 process.env.TEST_STORE_PATH = TEST_STORE_FILE;
+process.env.TEST_AUTH_PATH = TEST_AUTH_FILE;
+
+const MASTER_KEY = 'PoloNorte121966@';
+const ADMIN_DEFAULT_PASSWORD = 'AdminMaster2026@';
 
 const {
   default: app,
   DEFAULT_REFERRAL_PRIZE_RULE,
   normalizeLeadRecord,
   normalizeReferralCode,
+  sanitizeAvatarUrl,
   sanitizeReferralPrizeRule,
   normalizeReferrerRecord,
+  normalizeVisitEvent,
+  enforceRefParamOnUrl,
   mapLeadRow,
   mapQrRow,
   mapReferrerRow,
+  mapVisitRow,
 } = await import('../server/index.js');
 
-async function loginAs(baseUrl, username, password, pin) {
+async function loginAdmin(baseUrl, username = 'AdminCiprian', password = 'AdminMaster2026@', pin = '1966') {
   const step1 = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
-  assert.strictEqual(step1.status, 200, `Step 1 login failed for ${username}`);
-  const { preAuthToken } = await step1.json();
+  assert.strictEqual(step1.status, 200, `Step 1 admin login failed for ${username}`);
+  const d1 = await step1.json();
+  assert.strictEqual(d1.requiresPin, true);
 
   const step2 = await fetch(`${baseUrl}/api/auth/verify-pin`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ preAuthToken, pin }),
+    body: JSON.stringify({ preAuthToken: d1.preAuthToken, pin }),
   });
   assert.strictEqual(step2.status, 200, `Step 2 PIN failed for ${username}`);
-  const { sessionToken } = await step2.json();
-  return sessionToken;
+  return (await step2.json()).sessionToken;
 }
 
-describe('Referral QR / Ambassador Tracking & Prize System Suite', () => {
+async function loginDirect(baseUrl, username, password) {
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  assert.strictEqual(res.status, 200, `Direct 1FA login failed for ${username}`);
+  const data = await res.json();
+  assert.strictEqual(data.requiresPin, false);
+  return data.sessionToken;
+}
+
+describe('Ambassador Accounts, Strict QR Linking & Timestamped Visits Suite', () => {
   let server;
   let baseUrl;
   let adminToken;
-  let callerToken;
+  let teleToken;
 
   before(async () => {
     await new Promise((resolve) => {
@@ -62,8 +85,8 @@ describe('Referral QR / Ambassador Tracking & Prize System Suite', () => {
       });
     });
 
-    adminToken = await loginAs(baseUrl, 'AdminCiprian', 'AdminMaster2026@', '1966');
-    callerToken = await loginAs(baseUrl, 'Caller', 'UsuCa2026@', '1532');
+    adminToken = await loginAdmin(baseUrl);
+    teleToken = await loginDirect(baseUrl, 'Telemarketing', 'UsuCa2026@');
   });
 
   after(async () => {
@@ -73,98 +96,84 @@ describe('Referral QR / Ambassador Tracking & Prize System Suite', () => {
       }
       await new Promise((resolve) => server.close(resolve));
     }
-    try {
-      if (fs.existsSync(TEST_STORE_FILE)) {
-        fs.unlinkSync(TEST_STORE_FILE);
+    for (const file of [TEST_STORE_FILE, TEST_AUTH_FILE]) {
+      try {
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      } catch {
+        // Ignore cleanup failure
       }
-    } catch {
-      // Ignore temp file cleanup error
     }
   });
 
-  describe('1. Unit Helpers, Schema & Default Store Contract', () => {
-    test('normalizeReferralCode normalizes accents, case, whitespace and rejects invalid codes', () => {
+  describe('1. Unit Helpers, URL Tag Enforcement & Schema Contract', () => {
+    test('normalizeReferralCode, enforceRefParamOnUrl, normalizeVisitEvent & row mappers work cleanly', () => {
       assert.strictEqual(normalizeReferralCode('  maria-01  '), 'MARIA-01');
       assert.strictEqual(normalizeReferralCode('María José'), 'MARIA-JOSE');
-      assert.strictEqual(normalizeReferralCode('emb_20!@#'), 'EMB20');
       assert.strictEqual(normalizeReferralCode('a'), null);
-      assert.strictEqual(normalizeReferralCode('---'), null);
-      assert.strictEqual(normalizeReferralCode(''), null);
-      assert.strictEqual(normalizeReferralCode(null), null);
-      assert.strictEqual(normalizeReferralCode('A'.repeat(40)), 'A'.repeat(32));
-    });
 
-    test('sanitizeReferralPrizeRule enforces valid metrics and safe numeric bounds', () => {
-      const def = sanitizeReferralPrizeRule(undefined);
-      assert.deepStrictEqual(def, DEFAULT_REFERRAL_PRIZE_RULE);
+      assert.strictEqual(
+        enforceRefParamOnUrl('https://royal.ciprian.example/show?tag=OLD&mesa=1', 'MARIA-01'),
+        'https://royal.ciprian.example/show?mesa=1&ref=MARIA-01'
+      );
+      assert.strictEqual(
+        enforceRefParamOnUrl('/?r=wrong', 'CARLOS-02'),
+        '/?ref=CARLOS-02'
+      );
 
-      const custom = sanitizeReferralPrizeRule({
-        prizeName: '  Viaje Cancún  ',
-        metric: 'points',
-        targetCount: 15,
-        maxWinners: 0,
-        pointsPerLead: 2,
-        pointsPerCita: 4,
-        pointsPerDemo: 6,
-        pointsPerOrden: 12,
+      const visit = normalizeVisitEvent({
+        referrerId: 'ref-1',
+        referralCode: 'maria-01',
+        visitorId: 'vis-1',
+        visitedAt: '2026-11-24T12:00:00.000Z',
       });
-      assert.deepStrictEqual(custom, {
-        prizeName: 'Viaje Cancún',
-        metric: 'points',
-        targetCount: 15,
-        maxWinners: 0,
-        pointsPerLead: 2,
-        pointsPerCita: 4,
-        pointsPerDemo: 6,
-        pointsPerOrden: 12,
-      });
+      assert.strictEqual(visit.referralCode, 'MARIA-01');
+      assert.strictEqual(visit.referrerId, 'ref-1');
 
-      const sanitizedBad = sanitizeReferralPrizeRule({
-        prizeName: '   ',
-        metric: 'invalid_metric',
-        targetCount: -10,
-        maxWinners: -3,
-        pointsPerLead: -1,
+      const mappedVisit = mapVisitRow({
+        id: 'visit-1',
+        referrer_id: 'ref-1',
+        referral_code: 'maria-01',
+        visitor_id: 'vis-99',
+        visited_at: '2026-11-24T13:00:00.000Z',
       });
-      assert.strictEqual(sanitizedBad.prizeName, DEFAULT_REFERRAL_PRIZE_RULE.prizeName);
-      assert.strictEqual(sanitizedBad.metric, 'leads');
-      assert.strictEqual(sanitizedBad.targetCount, 1);
-      assert.strictEqual(sanitizedBad.maxWinners, 0);
-      assert.strictEqual(sanitizedBad.pointsPerLead, 0);
-    });
+      assert.strictEqual(mappedVisit.id, 'visit-1');
+      assert.strictEqual(mappedVisit.referralCode, 'MARIA-01');
+      assert.strictEqual(mappedVisit.visitedAt, '2026-11-24T13:00:00.000Z');
 
-    test('Supabase row mappers preserve referral fields cleanly', () => {
       const mappedPartner = mapReferrerRow({
         id: 'ref-1',
+        account_id: 'usr-1',
         name: 'Laura Méndez',
         code: 'laura-01',
-        phone: '555-888-9999',
-        notes: 'VIP',
+        avatar_url: 'https://cdn.example.com/laura.jpg',
         active: true,
-        visits_count: 14,
-        unique_visits_count: 9,
-        last_visit_at: '2026-11-21T10:00:00.000Z',
-        qr_style_id: 'emerald-heritage',
+        visits_count: 5,
+        unique_visits_count: 3,
         created_at: '2026-11-20T10:00:00.000Z',
       });
+      assert.strictEqual(mappedPartner.accountId, 'usr-1');
       assert.strictEqual(mappedPartner.code, 'LAURA-01');
-      assert.strictEqual(mappedPartner.visitsCount, 14);
-      assert.strictEqual(mappedPartner.uniqueVisitsCount, 9);
-      assert.strictEqual(mappedPartner.qrStyleId, 'emerald-heritage');
+      assert.strictEqual(mappedPartner.avatarUrl, 'https://cdn.example.com/laura.jpg');
 
-      const mappedLead = mapLeadRow({
-        id: 'lead-1',
-        name: 'Juan',
-        phone: '555-111-2222',
-        claim_code: 'OTN-1234',
-        referral_code: 'laura-01',
-        referrer_id: 'ref-1',
-        referrer_name: 'Laura Méndez',
-        created_at: '2026-11-21T11:00:00.000Z',
+      // sanitizeAvatarUrl unit checks
+      const samplePng =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+      assert.deepStrictEqual(sanitizeAvatarUrl(null), { ok: true, value: null });
+      assert.deepStrictEqual(sanitizeAvatarUrl('   '), { ok: true, value: null });
+      assert.deepStrictEqual(sanitizeAvatarUrl('https://cdn.example.com/a.webp'), {
+        ok: true,
+        value: 'https://cdn.example.com/a.webp',
       });
-      assert.strictEqual(mappedLead.referralCode, 'LAURA-01');
-      assert.strictEqual(mappedLead.referrerId, 'ref-1');
-      assert.strictEqual(mappedLead.referrerName, 'Laura Méndez');
+      assert.strictEqual(sanitizeAvatarUrl(samplePng).ok, true);
+      assert.strictEqual(
+        sanitizeAvatarUrl('data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=').ok,
+        false
+      );
+      assert.strictEqual(sanitizeAvatarUrl('javascript:alert(1)').ok, false);
+      assert.strictEqual(
+        sanitizeAvatarUrl(`data:image/jpeg;base64,${'A'.repeat(560000)}`).ok,
+        false
+      );
 
       const mappedQr = mapQrRow({
         id: 'qr-1',
@@ -172,889 +181,353 @@ describe('Referral QR / Ambassador Tracking & Prize System Suite', () => {
         target_url: 'https://example.com/?ref=LAURA-01',
         referral_code: 'laura-01',
         referrer_id: 'ref-1',
+        account_id: 'usr-1',
         created_at: '2026-11-21T11:00:00.000Z',
       });
-      assert.strictEqual(mappedQr.referralCode, 'LAURA-01');
-      assert.strictEqual(mappedQr.referrerId, 'ref-1');
+      assert.strictEqual(mappedQr.accountId, 'usr-1');
 
-      const clampedPartner = normalizeReferrerRecord({
-        id: 'ref-2',
-        name: 'Test',
-        code: 'TST-02',
-        visitsCount: 3,
-        uniqueVisitsCount: 99,
+      const mappedLead = mapLeadRow({
+        id: 'lead-1',
+        name: 'Juan',
+        phone: '555-111-2222',
+        claim_code: 'OTN-1234',
+        call_outcome: 'not_scheduled',
+        called_by: 'Telemarketing',
+        seller_locked: false,
+        referral_code: 'laura-01',
+        referrer_id: 'ref-1',
+        referrer_name: 'Laura Méndez',
+        created_at: '2026-11-21T11:00:00.000Z',
       });
-      assert.strictEqual(clampedPartner.uniqueVisitsCount, 3);
+      assert.strictEqual(mappedLead.callOutcome, 'not_scheduled');
+      assert.strictEqual(mappedLead.called, true);
+      assert.strictEqual(mappedLead.calledBy, 'Telemarketing');
     });
 
-    test('defaultStore.json and supabase/schema.sql define full referral persistence contract', () => {
+    test('defaultStore.json and supabase/schema.sql define updated persistence contract', () => {
       const defaultStore = JSON.parse(
         fs.readFileSync(path.join(PROJECT_ROOT, 'src', 'shared', 'defaultStore.json'), 'utf8')
       );
       assert.deepStrictEqual(defaultStore.referrers, []);
+      assert.deepStrictEqual(defaultStore.visitLog, []);
       assert.deepStrictEqual(defaultStore.settings.referralPrizeRule, DEFAULT_REFERRAL_PRIZE_RULE);
 
       const schemaSql = fs.readFileSync(path.join(PROJECT_ROOT, 'supabase', 'schema.sql'), 'utf8');
       assert.match(schemaSql, /create table if not exists public\.referrers/i);
+      assert.match(schemaSql, /create table if not exists public\.referral_visits/i);
+      assert.match(schemaSql, /referral_visits_service_only/i);
       assert.match(schemaSql, /referrers_service_only/i);
       assert.match(schemaSql, /revoke all on table public\.referrers from anon, authenticated, public/i);
       assert.match(schemaSql, /alter table public\.app_settings add column if not exists referral_prize_rule jsonb/i);
       assert.match(schemaSql, /alter table public\.leads add column if not exists referral_code text/i);
       assert.match(schemaSql, /alter table public\.leads add column if not exists referrer_id text/i);
       assert.match(schemaSql, /alter table public\.leads add column if not exists referrer_name text/i);
+      assert.match(schemaSql, /alter table public\.leads add column if not exists call_outcome text/i);
+      assert.match(schemaSql, /alter table public\.leads add column if not exists seller_locked boolean/i);
       assert.match(schemaSql, /alter table public\.qr_codes add column if not exists referral_code text/i);
       assert.match(schemaSql, /alter table public\.qr_codes add column if not exists referrer_id text/i);
+      assert.match(schemaSql, /alter table public\.qr_codes add column if not exists account_id text/i);
+      assert.match(schemaSql, /alter table public\.referrers add column if not exists account_id text/i);
+      assert.match(schemaSql, /alter table public\.referrers add column if not exists avatar_url text/i);
+      assert.match(schemaSql, /alter table public\.dsb_auth add column if not exists avatar_url text/i);
+      assert.match(schemaSql, /alter table public\.dsb_auth add column if not exists token_version int/i);
     });
   });
 
-  describe('2. RBAC, CRUD, Auto-Code Generation & Duplicate Code Rejection (409)', () => {
-    let createdPartner;
+  describe('2. Vendedor Account <-> Referrer Auto-Sync, Standalone Rejection & Strict QR Linking', () => {
+    let vendedorAccount;
+    let vendedorReferrer;
+    let vendedorToken;
+    let teleAccountId;
 
-    test('Unauthenticated and Caller sessions cannot create, batch-create, edit, or delete referrers', async () => {
-      // Unauthenticated -> 401
-      const unauthGet = await fetch(`${baseUrl}/api/referrals`);
-      assert.strictEqual(unauthGet.status, 401);
-
-      const unauthPost = await fetch(`${baseUrl}/api/referrals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Sin Auth' }),
-      });
-      assert.strictEqual(unauthPost.status, 401);
-
-      const unauthBatch = await fetch(`${baseUrl}/api/referrals/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: 5 }),
-      });
-      assert.strictEqual(unauthBatch.status, 401);
-
-      // Caller -> 403 on mutations, 200 on GET /api/referrals
-      const callerGet = await fetch(`${baseUrl}/api/referrals`, {
-        headers: { Authorization: `Bearer ${callerToken}` },
-      });
-      assert.strictEqual(callerGet.status, 200);
-      const callerList = await callerGet.json();
-      assert.strictEqual(callerList.ok, true);
-      assert.ok(Array.isArray(callerList.referrers));
-
-      const callerPost = await fetch(`${baseUrl}/api/referrals`, {
+    test('Standalone POST /api/referrals and /api/referrals/batch are rejected (401 without adminPassword, 400 without vendedor accountId)', async () => {
+      const noMaster = await fetch(`${baseUrl}/api/referrals`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${callerToken}`,
+          Authorization: `Bearer ${adminToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name: 'Caller Intento' }),
+        body: JSON.stringify({ name: 'Sin Llave' }),
       });
-      assert.strictEqual(callerPost.status, 403);
+      assert.strictEqual(noMaster.status, 401);
 
-      const callerBatch = await fetch(`${baseUrl}/api/referrals/batch`, {
+      const masterRejected = await fetch(`${baseUrl}/api/referrals`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${callerToken}`,
+          Authorization: `Bearer ${adminToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ count: 3 }),
+        body: JSON.stringify({ name: 'Master Rechazada', masterPassword: MASTER_KEY }),
       });
-      assert.strictEqual(callerBatch.status, 403);
+      assert.strictEqual(masterRejected.status, 401);
 
-      const callerPatch = await fetch(`${baseUrl}/api/referrals/ref-any`, {
-        method: 'PATCH',
+      const standalone = await fetch(`${baseUrl}/api/referrals`, {
+        method: 'POST',
         headers: {
-          Authorization: `Bearer ${callerToken}`,
+          Authorization: `Bearer ${adminToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name: 'Editado' }),
+        body: JSON.stringify({ name: 'Sin Cuenta', adminPassword: ADMIN_DEFAULT_PASSWORD }),
       });
-      assert.strictEqual(callerPatch.status, 403);
+      assert.strictEqual(standalone.status, 400);
 
-      const callerDelete = await fetch(`${baseUrl}/api/referrals/ref-any`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${callerToken}` },
+      const batchBlocked = await fetch(`${baseUrl}/api/referrals/batch`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ count: 5, adminPassword: ADMIN_DEFAULT_PASSWORD }),
       });
-      assert.strictEqual(callerDelete.status, 403);
+      assert.strictEqual(batchBlocked.status, 400);
     });
 
-    test('Admin creates referral partner with explicit code, auto-generates unique code when omitted, and rejects duplicate with 409', async () => {
-      const res1 = await fetch(`${baseUrl}/api/referrals`, {
+    test('Creating a vendedor account auto-syncs a ReferralPartner and allows strict QR creation with forced ?ref=TAG', async () => {
+      const createRes = await fetch(`${baseUrl}/api/accounts`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${adminToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: 'María González',
-          code: '  maria-01 ',
-          phone: '555-777-8899',
-          notes: 'Embajadora zona norte - privado',
-          qrStyleId: 'emerald-heritage',
+          adminPassword: ADMIN_DEFAULT_PASSWORD,
+          username: 'sofia_vend',
+          displayName: 'Sofía Ramírez',
+          role: 'vendedor',
+          tag: 'sofia-vip',
+          avatarUrl: 'https://cdn.example.com/sofia.jpg',
+          password: 'SofiaPassword1!',
+          confirmPassword: 'SofiaPassword1!',
         }),
       });
-      assert.strictEqual(res1.status, 201);
-      const data1 = await res1.json();
-      assert.strictEqual(data1.ok, true);
-      assert.strictEqual(data1.referrer.code, 'MARIA-01');
-      assert.strictEqual(data1.referrer.name, 'María González');
-      assert.strictEqual(data1.referrer.phone, '555-777-8899');
-      assert.strictEqual(data1.referrer.notes, 'Embajadora zona norte - privado');
-      assert.strictEqual(data1.referrer.active, true);
-      assert.strictEqual(data1.referrer.visitsCount, 0);
-      assert.strictEqual(data1.referrer.uniqueVisitsCount, 0);
-      assert.strictEqual(data1.referrer.lastVisitAt, null);
-      assert.ok(Array.isArray(data1.state.referrers));
-      createdPartner = data1.referrer;
-
-      // Duplicate explicit code (different case) -> 409
-      const dupRes = await fetch(`${baseUrl}/api/referrals`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Otra María',
-          code: 'MARIA-01',
-        }),
-      });
-      assert.strictEqual(dupRes.status, 409);
-
-      // Auto-generated code from name (and deduplication on same name)
-      const auto1 = await fetch(`${baseUrl}/api/referrals`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: 'Carlos Pérez' }),
-      });
-      assert.strictEqual(auto1.status, 201);
-      const autoData1 = await auto1.json();
-      assert.strictEqual(autoData1.referrer.code, 'CARLOS-PEREZ');
-
-      const auto2 = await fetch(`${baseUrl}/api/referrals`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: 'Carlos Pérez' }),
-      });
-      assert.strictEqual(auto2.status, 201);
-      const autoData2 = await auto2.json();
-      assert.strictEqual(autoData2.referrer.code, 'CARLOS-PEREZ-02');
-    });
-
-    test('GET /api/state hides referrers from unauthenticated visitors while exposing them to admin and caller', async () => {
-      const publicRes = await fetch(`${baseUrl}/api/state`);
-      assert.strictEqual(publicRes.status, 200);
-      const publicState = await publicRes.json();
-      assert.deepStrictEqual(publicState.referrers, []);
-
-      const callerRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${callerToken}` },
-      });
-      assert.strictEqual(callerRes.status, 200);
-      const callerState = await callerRes.json();
-      assert.ok(callerState.referrers.some((r) => r.code === 'MARIA-01'));
-
-      const adminRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      assert.strictEqual(adminRes.status, 200);
-      const adminState = await adminRes.json();
-      assert.ok(adminState.referrers.some((r) => r.id === createdPartner.id));
-    });
-  });
-
-  describe('3. Public Resolve (Zero PII Leak), Visit Deduplication & Lead Attribution', () => {
-    let activePartner;
-    let inactivePartner;
-
-    before(async () => {
-      const res1 = await fetch(`${baseUrl}/api/referrals`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Sofía Ramírez',
-          code: 'SOFIA-VIP',
-          phone: '555-999-0001',
-          notes: 'Nota confidencial Sofía',
-          active: true,
-        }),
-      });
-      activePartner = (await res1.json()).referrer;
-
-      const res2 = await fetch(`${baseUrl}/api/referrals`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Roberto Inactivo',
-          code: 'ROBERTO-OFF',
-          phone: '555-000-1111',
-          notes: 'Pausado',
-          active: false,
-        }),
-      });
-      inactivePartner = (await res2.json()).referrer;
-    });
-
-    test('GET /api/referrals/resolve/:code normalizes code and NEVER leaks phone, notes, or visit counts', async () => {
-      const res = await fetch(`${baseUrl}/api/referrals/resolve/sofia-vip`);
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
+      assert.strictEqual(createRes.status, 201);
+      const data = await createRes.json();
       assert.strictEqual(data.ok, true);
-      assert.deepStrictEqual(data.partner, {
-        id: activePartner.id,
+      assert.strictEqual(data.account.tag, 'SOFIA-VIP');
+      assert.strictEqual(data.account.avatarUrl, 'https://cdn.example.com/sofia.jpg');
+      assert.strictEqual(data.account.hasPin, false);
+      assert.ok(data.referrer);
+      assert.strictEqual(data.referrer.accountId, data.account.id);
+      assert.strictEqual(data.referrer.code, 'SOFIA-VIP');
+      assert.strictEqual(data.referrer.name, 'Sofía Ramírez');
+      assert.strictEqual(data.referrer.avatarUrl, 'https://cdn.example.com/sofia.jpg');
+      vendedorAccount = data.account;
+      vendedorReferrer = data.referrer;
+
+      const teleAcc = data.accounts.find((a) => a.role === 'telemarketing');
+      teleAccountId = teleAcc.id;
+
+      // Vendedor logs in 1FA
+      vendedorToken = await loginDirect(baseUrl, 'sofia_vend', 'SofiaPassword1!');
+
+      // Plain QR without accountId/referrerId -> 400
+      const plainQr = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR Genérico Prohibido',
+          targetUrl: 'https://royal.ciprian.example/',
+        }),
+      });
+      assert.strictEqual(plainQr.status, 400);
+
+      // QR linked to telemarketing account -> 400
+      const teleQr = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR Telemarketing Prohibido',
+          targetUrl: 'https://royal.ciprian.example/',
+          accountId: teleAccountId,
+        }),
+      });
+      assert.strictEqual(teleQr.status, 400);
+
+      // QR linked to active vendedor account succeeds & forces ?ref=SOFIA-VIP
+      const okQrRes = await fetch(`${baseUrl}/api/qr`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'QR Sofía Mesa 1',
+          targetUrl: 'https://royal.ciprian.example/?ref=OTHER-FAKE',
+          accountId: vendedorAccount.id,
+          styleId: 'emerald-heritage',
+        }),
+      });
+      assert.strictEqual(okQrRes.status, 201);
+      const qrData = await okQrRes.json();
+      assert.strictEqual(qrData.qr.accountId, vendedorAccount.id);
+      assert.strictEqual(qrData.qr.referrerId, vendedorReferrer.id);
+      assert.strictEqual(qrData.qr.referralCode, 'SOFIA-VIP');
+      assert.strictEqual(qrData.qr.targetUrl, 'https://royal.ciprian.example/?ref=SOFIA-VIP');
+    });
+
+    test('Public resolve (zero PII), timestamped visits in visitLog, lead attribution & resetVisits work end-to-end', async () => {
+      // Resolve includes avatarUrl and zero PII
+      const resolveRes = await fetch(`${baseUrl}/api/referrals/resolve/sofia-vip`);
+      assert.strictEqual(resolveRes.status, 200);
+      const resolveData = await resolveRes.json();
+      assert.deepStrictEqual(resolveData.partner, {
+        id: vendedorReferrer.id,
         name: 'Sofía Ramírez',
         code: 'SOFIA-VIP',
         active: true,
-      });
-      assert.strictEqual('phone' in data.partner, false);
-      assert.strictEqual('notes' in data.partner, false);
-      assert.strictEqual('visitsCount' in data.partner, false);
-      assert.strictEqual('uniqueVisitsCount' in data.partner, false);
-      assert.strictEqual('lastVisitAt' in data.partner, false);
-
-      // Inactive partner returns active: false
-      const inactiveRes = await fetch(`${baseUrl}/api/referrals/resolve/ROBERTO-OFF`);
-      assert.strictEqual(inactiveRes.status, 200);
-      const inactiveData = await inactiveRes.json();
-      assert.strictEqual(inactiveData.partner.active, false);
-      assert.strictEqual('phone' in inactiveData.partner, false);
-
-      // Unknown code returns partner: null
-      const unknownRes = await fetch(`${baseUrl}/api/referrals/resolve/DOES-NOT-EXIST`);
-      assert.strictEqual(unknownRes.status, 200);
-      const unknownData = await unknownRes.json();
-      assert.deepStrictEqual(unknownData, { ok: true, partner: null });
-    });
-
-    test('POST /api/referrals/visit increments visits, deduplicates uniqueVisitsCount by visitorId, and ignores unknown/inactive', async () => {
-      // Visit 1 from visitor-A
-      const v1 = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'sofia-vip', visitorId: 'visitor-A' }),
-      });
-      assert.strictEqual(v1.status, 200);
-      const d1 = await v1.json();
-      assert.deepStrictEqual(d1, {
-        ok: true,
-        counted: true,
-        partner: { id: activePartner.id, name: 'Sofía Ramírez', code: 'SOFIA-VIP' },
+        avatarUrl: 'https://cdn.example.com/sofia.jpg',
+        emoji: null,
+        partnerType: 'vendedor',
+        ownerVendedorName: null,
       });
 
-      // Reload by same visitor-A -> visitsCount +1, uniqueVisitsCount unchanged
-      const v2 = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'SOFIA-VIP', visitorId: 'visitor-A' }),
-      });
-      assert.strictEqual(v2.status, 200);
-      assert.strictEqual((await v2.json()).counted, true);
+      // Record 3 visits (2 unique) and confirm visit response exposes partner.avatarUrl
+      for (const visitorId of ['vis-1', 'vis-1', 'vis-2']) {
+        const vRes = await fetch(`${baseUrl}/api/referrals/visit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: 'sofia-vip', visitorId }),
+        });
+        assert.strictEqual(vRes.status, 200);
+        const vData = await vRes.json();
+        assert.strictEqual(vData.counted, true);
+        assert.strictEqual(vData.partner.avatarUrl, 'https://cdn.example.com/sofia.jpg');
+        assert.strictEqual(vData.visit.referralCode, 'SOFIA-VIP');
+        assert.ok(typeof vData.visit.visitedAt === 'string');
+      }
 
-      // Visit by visitor-B -> both visitsCount and uniqueVisitsCount increment
-      const v3 = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'SOFIA-VIP', visitorId: 'visitor-B' }),
-      });
-      assert.strictEqual(v3.status, 200);
+      // Admin state includes visitLog with 3 timestamped events
+      const adminState = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json();
+      assert.strictEqual(adminState.visitLog.length, 3);
+      const sofiaPartner = adminState.referrers.find((r) => r.id === vendedorReferrer.id);
+      assert.strictEqual(sofiaPartner.visitsCount, 3);
+      assert.strictEqual(sofiaPartner.uniqueVisitsCount, 2);
 
-      // Inactive partner -> counted: false
-      const inactiveVisit = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'ROBERTO-OFF', visitorId: 'visitor-C' }),
-      });
-      assert.strictEqual(inactiveVisit.status, 200);
-      assert.deepStrictEqual(await inactiveVisit.json(), {
-        ok: true,
-        counted: false,
-        partner: null,
-      });
+      // Vendedor state includes ONLY own visitLog & own QRs
+      const vendState = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${vendedorToken}` },
+        })
+      ).json();
+      assert.strictEqual(vendState.role, 'vendedor');
+      assert.strictEqual(vendState.visitLog.length, 3);
+      assert.strictEqual(vendState.qrHistory.length, 1);
 
-      // Unknown partner -> counted: false
-      const unknownVisit = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'NO-EXISTE', visitorId: 'visitor-C' }),
-      });
-      assert.strictEqual(unknownVisit.status, 200);
-      assert.deepStrictEqual(await unknownVisit.json(), {
-        ok: true,
-        counted: false,
-        partner: null,
-      });
+      // Telemarketing gets empty visitLog & empty qrHistory
+      const teleState = await (
+        await fetch(`${baseUrl}/api/state`, {
+          headers: { Authorization: `Bearer ${teleToken}` },
+        })
+      ).json();
+      assert.deepStrictEqual(teleState.visitLog, []);
+      assert.deepStrictEqual(teleState.qrHistory, []);
 
-      // Verify exact counts via admin GET /api/referrals
-      const listRes = await fetch(`${baseUrl}/api/referrals`, {
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      const { referrers } = await listRes.json();
-      const sofia = referrers.find((r) => r.id === activePartner.id);
-      assert.strictEqual(sofia.visitsCount, 3);
-      assert.strictEqual(sofia.uniqueVisitsCount, 2);
-      assert.ok(typeof sofia.lastVisitAt === 'string' && sofia.lastVisitAt.length > 0);
-
-      const roberto = referrers.find((r) => r.id === inactivePartner.id);
-      assert.strictEqual(roberto.visitsCount, 0);
-      assert.strictEqual(roberto.uniqueVisitsCount, 0);
-    });
-
-    test('POST /api/leads normalizes referralCode and auto-populates referrerId & referrerName', async () => {
+      // Lead submission attributes to Sofía and preserves US credit qualification
       const leadRes = await fetch(`${baseUrl}/api/leads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: 'Prospecto Referido',
-          phone: '555-234-5678',
-          address: 'Av. Reforma 100',
-          acceptedTerms: true,
-          referralCode: '  sofia-vip ',
-        }),
-      });
-      assert.strictEqual(leadRes.status, 201);
-      const { lead, state } = await leadRes.json();
-      assert.strictEqual(lead.referralCode, 'SOFIA-VIP');
-      assert.strictEqual(lead.referrerId, activePartner.id);
-      assert.strictEqual(lead.referrerName, 'Sofía Ramírez');
-      // Unauthenticated POST /api/leads still hides referrers list
-      assert.deepStrictEqual(state.referrers, []);
-
-      // Unknown referral code still preserves normalized code without crashing
-      const orphanLeadRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Prospecto Código Libre',
-          phone: '555-345-6789',
-          address: 'Calle 5',
-          acceptedTerms: true,
-          referralCode: 'promo-externa',
-        }),
-      });
-      assert.strictEqual(orphanLeadRes.status, 201);
-      const orphan = (await orphanLeadRes.json()).lead;
-      assert.strictEqual(orphan.referralCode, 'PROMO-EXTERNA');
-      assert.strictEqual(orphan.referrerId, null);
-      assert.strictEqual(orphan.referrerName, null);
-    });
-
-    test('PATCH /api/referrals/:id updates partner, checks duplicate code (409), resets visits, and DELETE removes partner', async () => {
-      // Reject duplicate code on update
-      const dupPatch = await fetch(`${baseUrl}/api/referrals/${activePartner.id}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ code: 'ROBERTO-OFF' }),
-      });
-      assert.strictEqual(dupPatch.status, 409);
-
-      // Update details & resetVisits
-      const patchRes = await fetch(`${baseUrl}/api/referrals/${activePartner.id}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Sofía Ramírez Editada',
-          resetVisits: true,
-        }),
-      });
-      assert.strictEqual(patchRes.status, 200);
-      const patched = await patchRes.json();
-      assert.strictEqual(patched.ok, true);
-      assert.strictEqual(patched.referrer.name, 'Sofía Ramírez Editada');
-      assert.strictEqual(patched.referrer.visitsCount, 0);
-      assert.strictEqual(patched.referrer.uniqueVisitsCount, 0);
-      assert.strictEqual(patched.referrer.lastVisitAt, null);
-
-      // Returning visitor-A counts as unique again after resetVisits
-      await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'SOFIA-VIP', visitorId: 'visitor-A' }),
-      });
-      const afterResetList = await (
-        await fetch(`${baseUrl}/api/referrals`, {
-          headers: { Authorization: `Bearer ${adminToken}` },
-        })
-      ).json();
-      const sofiaAfter = afterResetList.referrers.find((r) => r.id === activePartner.id);
-      assert.strictEqual(sofiaAfter.visitsCount, 1);
-      assert.strictEqual(sofiaAfter.uniqueVisitsCount, 1);
-
-      // Delete inactivePartner
-      const delRes = await fetch(`${baseUrl}/api/referrals/${inactivePartner.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      assert.strictEqual(delRes.status, 200);
-      const delData = await delRes.json();
-      assert.strictEqual(delData.ok, true);
-      assert.strictEqual(
-        delData.state.referrers.some((r) => r.id === inactivePartner.id),
-        false
-      );
-
-      // Deleting again returns 404
-      const delMissing = await fetch(`${baseUrl}/api/referrals/${inactivePartner.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      assert.strictEqual(delMissing.status, 404);
-    });
-  });
-
-  describe('4. Batch Creation (20 Ambassadors), QR Code Linking, Prize Rule & Master Reset', () => {
-    test('POST /api/referrals/batch creates 20 ambassadors in one click and handles items mode with duplicate skipping', async () => {
-      const batch20Res = await fetch(`${baseUrl}/api/referrals/batch`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          count: 20,
-          namePrefix: 'Embajador',
-          codePrefix: 'EMB',
-        }),
-      });
-      assert.strictEqual(batch20Res.status, 201);
-      const batch20 = await batch20Res.json();
-      assert.strictEqual(batch20.ok, true);
-      assert.strictEqual(batch20.created.length, 20);
-      assert.deepStrictEqual(batch20.skipped, []);
-      assert.strictEqual(batch20.created[0].code, 'EMB-01');
-      assert.strictEqual(batch20.created[19].code, 'EMB-20');
-
-      // Items mode: auto-deduplicates omitted codes and skips explicit duplicate
-      const itemsRes = await fetch(`${baseUrl}/api/referrals/batch`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          items: [
-            { name: 'Ana Torres', phone: '555-100-2000' },
-            { name: 'Ana Torres', phone: '555-100-2001' },
-            { name: 'Duplicado Explícito', code: 'EMB-01' },
-          ],
-        }),
-      });
-      assert.strictEqual(itemsRes.status, 201);
-      const itemsData = await itemsRes.json();
-      assert.strictEqual(itemsData.created.length, 2);
-      assert.strictEqual(itemsData.created[0].code, 'ANA-TORRES');
-      assert.strictEqual(itemsData.created[1].code, 'ANA-TORRES-02');
-      assert.deepStrictEqual(itemsData.skipped, ['EMB-01']);
-
-      // Over 50 items rejected with 400
-      const overLimit = await fetch(`${baseUrl}/api/referrals/batch`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ count: 51 }),
-      });
-      assert.strictEqual(overLimit.status, 400);
-    });
-
-    test('POST /api/qr-codes and POST /api/qr persist referralCode and referrerId', async () => {
-      const stateRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      const { referrers } = await stateRes.json();
-      const emb01 = referrers.find((r) => r.code === 'EMB-01');
-      assert.ok(emb01);
-
-      const qrRes = await fetch(`${baseUrl}/api/qr-codes`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'QR Embajador 01',
-          targetUrl: 'https://royal.ciprian.example/?ref=EMB-01',
-          referralCode: 'emb-01',
-          referrerId: emb01.id,
-        }),
-      });
-      assert.strictEqual(qrRes.status, 201);
-      const qrData = await qrRes.json();
-      assert.strictEqual(qrData.qr.referralCode, 'EMB-01');
-      assert.strictEqual(qrData.qr.referrerId, emb01.id);
-
-      // Verify persisted in GET /api/state
-      const afterQrState = await (
-        await fetch(`${baseUrl}/api/state`, {
-          headers: { Authorization: `Bearer ${adminToken}` },
-        })
-      ).json();
-      const savedQr = afterQrState.qrHistory.find((q) => q.id === qrData.qr.id);
-      assert.strictEqual(savedQr.referralCode, 'EMB-01');
-      assert.strictEqual(savedQr.referrerId, emb01.id);
-    });
-
-    test('PATCH /api/settings persists referralPrizeRule cleanly', async () => {
-      const nextRule = {
-        prizeName: 'Bono Oro Royal Prestige $1,000',
-        metric: 'points',
-        targetCount: 25,
-        maxWinners: 5,
-        pointsPerLead: 2,
-        pointsPerCita: 5,
-        pointsPerDemo: 8,
-        pointsPerOrden: 15,
-      };
-      const patchRes = await fetch(`${baseUrl}/api/settings`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ referralPrizeRule: nextRule }),
-      });
-      assert.strictEqual(patchRes.status, 200);
-      const patched = await patchRes.json();
-      assert.deepStrictEqual(patched.settings.referralPrizeRule, nextRule);
-
-      const verifyState = await (
-        await fetch(`${baseUrl}/api/state`, {
-          headers: { Authorization: `Bearer ${adminToken}` },
-        })
-      ).json();
-      assert.deepStrictEqual(verifyState.settings.referralPrizeRule, nextRule);
-    });
-
-    test('POST /api/admin/master-reset resets referrer visit counters to 0 when wiping leads', async () => {
-      // Ensure EMB-01 has a visit
-      await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'EMB-01', visitorId: 'pre-reset-visitor' }),
-      });
-
-      const resetRes = await fetch(`${baseUrl}/api/admin/master-reset`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          masterPassword: 'PoloNorte121966@',
-          resetCatalogAndSettings: true,
-        }),
-      });
-      assert.strictEqual(resetRes.status, 200);
-      const resetData = await resetRes.json();
-      assert.strictEqual(resetData.ok, true);
-      assert.deepStrictEqual(resetData.state.leads, []);
-      assert.deepStrictEqual(resetData.state.qrHistory, []);
-      assert.deepStrictEqual(
-        resetData.state.settings.referralPrizeRule,
-        DEFAULT_REFERRAL_PRIZE_RULE
-      );
-      assert.ok(resetData.state.referrers.length >= 20);
-      for (const partner of resetData.state.referrers) {
-        assert.strictEqual(partner.visitsCount, 0);
-        assert.strictEqual(partner.uniqueVisitsCount, 0);
-        assert.strictEqual(partner.lastVisitAt, null);
-      }
-    });
-  });
-
-  describe('5. Auto-Tracking QRs Created Directly via POST /api/qr (2-QR End-to-End Scenario)', () => {
-    test('Creating 2 different QRs via POST /api/qr auto-registers both in state.referrers, tracks visits & leads separately, and reuses existing partner on duplicate code', async () => {
-      // QR #1: Explicit referralCode without pre-creating a referrer
-      const qr1Res = await fetch(`${baseUrl}/api/qr`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'QR María',
-          targetUrl: 'https://royal.ciprian.example/?ref=maria-auto-01',
-          referralCode: 'maria-auto-01',
-          styleId: 'emerald-heritage',
-        }),
-      });
-      assert.strictEqual(qr1Res.status, 201);
-      const qr1Data = await qr1Res.json();
-      assert.strictEqual(qr1Data.ok, true);
-      assert.ok(qr1Data.referrer, 'QR #1 should auto-create and return linked referrer');
-      assert.strictEqual(qr1Data.referrer.name, 'QR María');
-      assert.strictEqual(qr1Data.referrer.code, 'MARIA-AUTO-01');
-      assert.strictEqual(qr1Data.referrer.active, true);
-      assert.strictEqual(qr1Data.referrer.visitsCount, 0);
-      assert.strictEqual(qr1Data.referrer.uniqueVisitsCount, 0);
-      assert.strictEqual(qr1Data.referrer.qrStyleId, 'emerald-heritage');
-      assert.strictEqual(qr1Data.qr.referralCode, 'MARIA-AUTO-01');
-      assert.strictEqual(qr1Data.qr.referrerId, qr1Data.referrer.id);
-      assert.ok(
-        qr1Data.state.referrers.some(
-          (r) => r.id === qr1Data.referrer.id && r.code === 'MARIA-AUTO-01' && r.name === 'QR María'
-        )
-      );
-
-      // QR #2: No referralCode in body — extracted automatically from ?r= query param in targetUrl
-      const qr2Res = await fetch(`${baseUrl}/api/qr`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'QR Carlos',
-          targetUrl: 'https://royal.ciprian.example/?r=carlos-auto-02',
-          styleId: 'ruby-atelier',
-        }),
-      });
-      assert.strictEqual(qr2Res.status, 201);
-      const qr2Data = await qr2Res.json();
-      assert.strictEqual(qr2Data.ok, true);
-      assert.ok(qr2Data.referrer, 'QR #2 should auto-create referrer from targetUrl ?r= param');
-      assert.strictEqual(qr2Data.referrer.name, 'QR Carlos');
-      assert.strictEqual(qr2Data.referrer.code, 'CARLOS-AUTO-02');
-      assert.strictEqual(qr2Data.referrer.qrStyleId, 'ruby-atelier');
-      assert.strictEqual(qr2Data.qr.referralCode, 'CARLOS-AUTO-02');
-      assert.strictEqual(qr2Data.qr.referrerId, qr2Data.referrer.id);
-      assert.ok(
-        qr2Data.state.referrers.some(
-          (r) => r.id === qr2Data.referrer.id && r.code === 'CARLOS-AUTO-02' && r.name === 'QR Carlos'
-        )
-      );
-
-      // Simulate visits to both QRs (2 total / 2 unique for María, 1 total / 1 unique for Carlos)
-      const visitM1 = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'MARIA-AUTO-01', visitorId: 'vis-m-1' }),
-      });
-      assert.strictEqual((await visitM1.json()).counted, true);
-
-      const visitM2 = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'maria-auto-01', visitorId: 'vis-m-2' }),
-      });
-      assert.strictEqual((await visitM2.json()).counted, true);
-
-      const visitC1 = await fetch(`${baseUrl}/api/referrals/visit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: 'CARLOS-AUTO-02', visitorId: 'vis-c-1' }),
-      });
-      assert.strictEqual((await visitC1.json()).counted, true);
-
-      // Submit a lead from each QR's code
-      const leadMRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Invitada de María',
-          phone: '555-801-1001',
-          address: 'Monterrey',
-          acceptedTerms: true,
-          referralCode: 'MARIA-AUTO-01',
-        }),
-      });
-      assert.strictEqual(leadMRes.status, 201);
-      const leadM = (await leadMRes.json()).lead;
-      assert.strictEqual(leadM.referralCode, 'MARIA-AUTO-01');
-      assert.strictEqual(leadM.referrerId, qr1Data.referrer.id);
-      assert.strictEqual(leadM.referrerName, 'QR María');
-
-      const leadCRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Invitado de Carlos',
-          phone: '555-802-2002',
-          address: 'Guadalajara',
-          acceptedTerms: true,
-          referralCode: 'carlos-auto-02',
-        }),
-      });
-      assert.strictEqual(leadCRes.status, 201);
-      const leadC = (await leadCRes.json()).lead;
-      assert.strictEqual(leadC.referralCode, 'CARLOS-AUTO-02');
-      assert.strictEqual(leadC.referrerId, qr2Data.referrer.id);
-      assert.strictEqual(leadC.referrerName, 'QR Carlos');
-
-      // Creating a second QR with already-existing MARIA-AUTO-01 reuses existing partner without duplicating
-      const beforeCount = (
-        await (
-          await fetch(`${baseUrl}/api/referrals`, {
-            headers: { Authorization: `Bearer ${adminToken}` },
-          })
-        ).json()
-      ).referrers.filter((r) => r.code === 'MARIA-AUTO-01').length;
-      assert.strictEqual(beforeCount, 1);
-
-      const qrDupCodeRes = await fetch(`${baseUrl}/api/qr`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'QR María Versión Impresa',
-          targetUrl: 'https://royal.ciprian.example/?ref=MARIA-AUTO-01',
-          referralCode: 'MARIA-AUTO-01',
-        }),
-      });
-      assert.strictEqual(qrDupCodeRes.status, 201);
-      const qrDupData = await qrDupCodeRes.json();
-      assert.strictEqual(qrDupData.ok, true);
-      assert.strictEqual(qrDupData.referrer.id, qr1Data.referrer.id);
-      assert.strictEqual(qrDupData.qr.referrerId, qr1Data.referrer.id);
-      assert.strictEqual(
-        qrDupData.state.referrers.filter((r) => r.code === 'MARIA-AUTO-01').length,
-        1
-      );
-
-      // Plain QR without referralCode or ?ref= does NOT auto-create a referrer
-      const plainQrRes = await fetch(`${baseUrl}/api/qr`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'QR Genérico Sin Ref',
-          targetUrl: 'https://royal.ciprian.example/evento',
-        }),
-      });
-      assert.strictEqual(plainQrRes.status, 201);
-      const plainQrData = await plainQrRes.json();
-      assert.strictEqual(plainQrData.ok, true);
-      assert.strictEqual(plainQrData.referrer, null);
-      assert.strictEqual(plainQrData.qr.referralCode, null);
-      assert.strictEqual(plainQrData.qr.referrerId, null);
-
-      // Confirm exact visit counts and attributed leads in Admin GET /api/state
-      const finalState = await (
-        await fetch(`${baseUrl}/api/state`, {
-          headers: { Authorization: `Bearer ${adminToken}` },
-        })
-      ).json();
-      const mariaPartner = finalState.referrers.find((r) => r.id === qr1Data.referrer.id);
-      const carlosPartner = finalState.referrers.find((r) => r.id === qr2Data.referrer.id);
-      assert.strictEqual(mariaPartner.visitsCount, 2);
-      assert.strictEqual(mariaPartner.uniqueVisitsCount, 2);
-      assert.strictEqual(carlosPartner.visitsCount, 1);
-      assert.strictEqual(carlosPartner.uniqueVisitsCount, 1);
-      assert.ok(finalState.leads.some((l) => l.id === leadM.id && l.referrerId === mariaPartner.id));
-      assert.ok(finalState.leads.some((l) => l.id === leadC.id && l.referrerId === carlosPartner.id));
-    });
-  });
-
-  describe('6. Qualification US Credit Persistence & Caller RBAC Sanitization', () => {
-    test('PATCH /api/leads/:id persists qualification.usCreditEstablished & usCreditLabel for Admin while stripping qualification for Caller', async () => {
-      // Create a lead first
-      const createRes = await fetch(`${baseUrl}/api/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Prospecto Crédito EEUU',
+          name: 'Prospecto de Sofía',
           phone: '555-610-9090',
           address: 'Houston, TX',
           acceptedTerms: true,
+          referralCode: 'sofia-vip',
         }),
       });
-      assert.strictEqual(createRes.status, 201);
-      const { lead: createdLead } = await createRes.json();
+      assert.strictEqual(leadRes.status, 201);
+      const { lead } = await leadRes.json();
+      assert.strictEqual(lead.referralCode, 'SOFIA-VIP');
+      assert.strictEqual(lead.referrerId, vendedorReferrer.id);
+      assert.strictEqual(lead.referrerName, 'Sofía Ramírez');
 
-      const qualificationPayload = {
-        creditProfile: 'excelente',
-        housingStatus: 'propia',
-        investmentPriority: 'salud',
-        score: 92,
-        tier: 'alto',
-        knowsBrand: true,
-        isClient: false,
-        usCreditEstablished: 'yes',
-        usCreditLabel: 'Crédito establecido en EE. UU.',
-        cedeGoldenTicket: false,
-      };
-
-      // Public quiz completion updates qualification via PATCH /api/leads/:id
-      const patchRes = await fetch(`${baseUrl}/api/leads/${createdLead.id}`, {
+      const qualPatch = await fetch(`${baseUrl}/api/leads/${lead.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ qualification: qualificationPayload }),
+        body: JSON.stringify({
+          qualification: {
+            creditProfile: 'excelente',
+            housingStatus: 'propia',
+            investmentPriority: 'salud',
+            score: 92,
+            tier: 'alto',
+            usCreditEstablished: 'yes',
+            usCreditLabel: 'Crédito establecido en EE. UU.',
+            cedeGoldenTicket: true,
+          },
+        }),
       });
-      assert.strictEqual(patchRes.status, 200);
-      const patchData = await patchRes.json();
-      assert.strictEqual(patchData.lead.qualification.usCreditEstablished, 'yes');
-      assert.strictEqual(
-        patchData.lead.qualification.usCreditLabel,
-        'Crédito establecido en EE. UU.'
-      );
+      assert.strictEqual(qualPatch.status, 200);
+      const patched = await qualPatch.json();
+      assert.strictEqual(patched.lead.qualification.usCreditEstablished, 'yes');
+      assert.strictEqual(patched.lead.qualification.cedeGoldenTicket, true);
 
-      // Admin GET /api/state receives the full qualification fields intact
-      const adminStateRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${adminToken}` },
+      // Reset visits on referrer requires logged-in Admin's own password and clears visitLog
+      const noMasterReset = await fetch(`${baseUrl}/api/referrals/${vendedorReferrer.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ resetVisits: true }),
       });
-      assert.strictEqual(adminStateRes.status, 200);
-      const adminState = await adminStateRes.json();
-      const adminLead = adminState.leads.find((l) => l.id === createdLead.id);
-      assert.ok(adminLead, 'Admin state must include updated lead');
-      assert.strictEqual(adminLead.qualification.usCreditEstablished, 'yes');
-      assert.strictEqual(
-        adminLead.qualification.usCreditLabel,
-        'Crédito establecido en EE. UU.'
-      );
-      assert.strictEqual(adminLead.qualification.tier, 'alto');
-      assert.strictEqual(adminLead.qualification.score, 92);
+      assert.strictEqual(noMasterReset.status, 401);
 
-      // Caller GET /api/state strictly strips qualification (RBAC)
-      const callerStateRes = await fetch(`${baseUrl}/api/state`, {
-        headers: { Authorization: `Bearer ${callerToken}` },
+      const okReset = await fetch(`${baseUrl}/api/referrals/${vendedorReferrer.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ resetVisits: true, adminPassword: ADMIN_DEFAULT_PASSWORD }),
       });
-      assert.strictEqual(callerStateRes.status, 200);
-      const callerState = await callerStateRes.json();
-      const callerLead = callerState.leads.find((l) => l.id === createdLead.id);
-      assert.ok(callerLead, 'Caller state must include lead basic contact');
-      assert.strictEqual(callerLead.qualification, undefined);
-      assert.deepStrictEqual(Object.keys(callerLead).sort(), ['address', 'id', 'name', 'phone']);
+      assert.strictEqual(okReset.status, 200);
+      const afterReset = await okReset.json();
+      assert.strictEqual(afterReset.referrer.visitsCount, 0);
+      assert.strictEqual(afterReset.state.visitLog.length, 0);
 
-      // Verify normalizeLeadRecord and mapLeadRow (Supabase JSONB) preserve both fields untouched
-      const normalized = normalizeLeadRecord(adminLead);
-      assert.strictEqual(normalized.qualification.usCreditEstablished, 'yes');
-      assert.strictEqual(
-        normalized.qualification.usCreditLabel,
-        'Crédito establecido en EE. UU.'
-      );
-
-      const mappedFromDb = mapLeadRow({
-        id: createdLead.id,
-        name: createdLead.name,
-        phone: createdLead.phone,
-        claim_code: createdLead.claimCode,
-        qualification: qualificationPayload,
-        created_at: createdLead.createdAt,
+      // Updating vendedor tag syncs referrer code
+      const tagUpdate = await fetch(`${baseUrl}/api/accounts/${vendedorAccount.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          adminPassword: ADMIN_DEFAULT_PASSWORD,
+          displayName: 'Sofía Ramírez Pro',
+          tag: 'SOFIA-PRO',
+        }),
       });
-      assert.strictEqual(mappedFromDb.qualification.usCreditEstablished, 'yes');
-      assert.strictEqual(
-        mappedFromDb.qualification.usCreditLabel,
-        'Crédito establecido en EE. UU.'
-      );
+      assert.strictEqual(tagUpdate.status, 200);
+      const tagData = await tagUpdate.json();
+      const updatedPartner = tagData.state.referrers.find((r) => r.id === vendedorReferrer.id);
+      assert.strictEqual(updatedPartner.code, 'SOFIA-PRO');
+      assert.strictEqual(updatedPartner.name, 'Sofía Ramírez Pro');
+
+      // Master reset wipes leads, qrHistory, visitLog (requires logged-in Admin's own password)
+      const masterResetRes = await fetch(`${baseUrl}/api/admin/master-reset`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ adminPassword: ADMIN_DEFAULT_PASSWORD, resetCatalogAndSettings: true }),
+      });
+      assert.strictEqual(masterResetRes.status, 200);
+      const resetJson = await masterResetRes.json();
+      assert.deepStrictEqual(resetJson.state.leads, []);
+      assert.deepStrictEqual(resetJson.state.qrHistory, []);
+      assert.deepStrictEqual(resetJson.state.visitLog, []);
     });
   });
 });

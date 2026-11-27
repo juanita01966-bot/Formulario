@@ -107,3 +107,1739 @@ a {
 ::-webkit-scrollbar-thumb:hover {
   background: #b58c61;
 }
+
+/* ==========================================================================
+   Dashboard Operativo (#/dsb) — Crystalline Frosted Porcelain Glass & Motion
+   ========================================================================== */
+
+.dsb-glass {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.90) 0%, rgba(252, 248, 243, 0.84) 100%);
+  -webkit-backdrop-filter: blur(22px) saturate(165%);
+  backdrop-filter: blur(22px) saturate(165%);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow:
+    0 18px 44px -18px rgba(15, 23, 42, 0.14),
+    0 4px 14px -4px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+.dsb-glass-strong {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(252, 248, 243, 0.90) 100%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 22px 52px -18px rgba(15, 23, 42, 0.16),
+    0 6px 18px -6px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
+}
+
+.dsb-glass-subtle {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(250, 245, 238, 0.78) 100%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  box-shadow:
+    0 10px 28px -14px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+@keyframes dsbOrbitSlow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dsbOrbitReverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes dsbPulseRing {
+  0%,
+  100% {
+    transform: scale(0.94);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.85;
+  }
+}
+
+@keyframes dsbFloatAura {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(18px, -14px, 0) scale(1.04);
+  }
+  66% {
+    transform: translate3d(-14px, 16px, 0) scale(0.97);
+  }
+}
+
+.dsb-orbit-slow {
+  animation: dsbOrbitSlow 60s linear infinite;
+}
+
+.dsb-orbit-reverse {
+  animation: dsbOrbitReverse 90s linear infinite;
+}
+
+.dsb-pulse-ring {
+  animation: dsbPulseRing 2.8s ease-in-out infinite;
+}
+
+.dsb-float-aura {
+  animation: dsbFloatAura 22s ease-in-out infinite;
+}
+
+.dsb-float-aura-delayed {
+  animation: dsbFloatAura 28s ease-in-out -10s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsb-orbit-slow,
+  .dsb-orbit-reverse,
+  .dsb-pulse-ring,
+  .dsb-float-aura,
+  .dsb-float-aura-delayed {
+    animation: none !important;
+  }
+}
+
+/* ==========================================================================
+   Dashboard Operativo (#/dsb) — Luxury Dark Surface Themes (Scoped ONLY)
+   1) obsidian-marble (Nero Marquina Black Marble + Champagne Gold Veining)
+   2) royal-blue      (Imperial Royal Blue / Sapphire Crystal)
+   Public ReferralFlow is 100% untouched.
+   ========================================================================== */
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] {
+  color: #f5f2eb;
+  color-scheme: dark;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] {
+  color: #f4f7fc;
+  color-scheme: dark;
+}
+
+/* ---------- 1. OBSIDIAN MARBLE (Nero Marquina) ---------- */
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] .dsb-glass {
+  background-color: rgba(15, 14, 20, 0.92);
+  background-image:
+    linear-gradient(
+      128deg,
+      transparent 0%,
+      transparent 43.5%,
+      rgba(226, 194, 117, 0.055) 44.8%,
+      rgba(245, 242, 235, 0.035) 45.6%,
+      transparent 46.8%,
+      transparent 100%
+    ),
+    linear-gradient(
+      154deg,
+      transparent 0%,
+      transparent 71%,
+      rgba(255, 255, 255, 0.03) 72%,
+      transparent 73.2%,
+      transparent 100%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(8, 8, 12, 0.24) 100%);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  backdrop-filter: blur(24px) saturate(145%);
+  border-color: rgba(255, 255, 255, 0.11);
+  box-shadow:
+    0 22px 54px -18px rgba(0, 0, 0, 0.76),
+    0 6px 18px -6px rgba(0, 0, 0, 0.52),
+    inset 0 1px 0 rgba(226, 194, 117, 0.18);
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] .dsb-glass-strong {
+  background-color: rgba(12, 11, 16, 0.95);
+  background-image:
+    linear-gradient(
+      124deg,
+      transparent 0%,
+      transparent 38%,
+      rgba(226, 194, 117, 0.065) 39.2%,
+      rgba(245, 242, 235, 0.04) 40%,
+      transparent 41.4%,
+      transparent 100%
+    ),
+    linear-gradient(
+      158deg,
+      transparent 0%,
+      transparent 75%,
+      rgba(226, 194, 117, 0.04) 76%,
+      transparent 77.2%,
+      transparent 100%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(6, 6, 10, 0.28) 100%);
+  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  backdrop-filter: blur(28px) saturate(155%);
+  border-color: rgba(226, 194, 117, 0.20);
+  box-shadow:
+    0 26px 60px -18px rgba(0, 0, 0, 0.82),
+    0 8px 22px -6px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(226, 194, 117, 0.22);
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] .dsb-glass-subtle {
+  background-color: rgba(22, 21, 28, 0.88);
+  background-image:
+    linear-gradient(
+      132deg,
+      transparent 0%,
+      transparent 52%,
+      rgba(226, 194, 117, 0.04) 53.2%,
+      transparent 54.5%,
+      transparent 100%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(8, 8, 12, 0.18) 100%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow:
+    0 12px 30px -14px rgba(0, 0, 0, 0.60),
+    inset 0 1px 0 rgba(226, 194, 117, 0.14);
+}
+
+/* ---------- 2. ROYAL BLUE (Imperial Sapphire) ---------- */
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] .dsb-glass {
+  background-color: rgba(8, 20, 56, 0.92);
+  background-image:
+    linear-gradient(
+      132deg,
+      rgba(186, 212, 245, 0.07) 0%,
+      transparent 40%,
+      rgba(232, 204, 130, 0.05) 44.5%,
+      rgba(186, 212, 245, 0.045) 46%,
+      transparent 49.5%,
+      rgba(30, 74, 178, 0.08) 100%
+    ),
+    linear-gradient(180deg, rgba(186, 212, 245, 0.065) 0%, rgba(5, 14, 44, 0.28) 100%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  border-color: rgba(186, 212, 245, 0.18);
+  box-shadow:
+    0 22px 54px -18px rgba(3, 10, 32, 0.80),
+    0 8px 24px -8px rgba(18, 52, 136, 0.36),
+    inset 0 1px 0 rgba(186, 212, 245, 0.22);
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] .dsb-glass-strong {
+  background-color: rgba(6, 16, 48, 0.95);
+  background-image:
+    linear-gradient(
+      126deg,
+      rgba(186, 212, 245, 0.085) 0%,
+      transparent 38%,
+      rgba(232, 204, 130, 0.06) 42%,
+      transparent 46%,
+      rgba(24, 62, 152, 0.11) 100%
+    ),
+    linear-gradient(180deg, rgba(186, 212, 245, 0.08) 0%, rgba(4, 10, 32, 0.32) 100%);
+  -webkit-backdrop-filter: blur(28px) saturate(168%);
+  backdrop-filter: blur(28px) saturate(168%);
+  border-color: rgba(186, 212, 245, 0.22);
+  box-shadow:
+    0 26px 60px -18px rgba(3, 10, 32, 0.86),
+    0 10px 28px -8px rgba(18, 52, 136, 0.42),
+    inset 0 1px 0 rgba(186, 212, 245, 0.26);
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] .dsb-glass-subtle {
+  background-color: rgba(11, 28, 76, 0.88);
+  background-image:
+    linear-gradient(135deg, rgba(186, 212, 245, 0.06) 0%, transparent 60%, rgba(24, 62, 152, 0.09) 100%);
+  -webkit-backdrop-filter: blur(18px) saturate(152%);
+  backdrop-filter: blur(18px) saturate(152%);
+  border-color: rgba(186, 212, 245, 0.16);
+  box-shadow:
+    0 12px 30px -14px rgba(3, 10, 32, 0.64),
+    inset 0 1px 0 rgba(186, 212, 245, 0.18);
+}
+
+/* ---------- 3. SCOPED LIGHT-SURFACE OVERRIDES (Obsidian Marble) ---------- */
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .bg-white,
+  .bg-white\/95,
+  .bg-white\/90,
+  .bg-white\/88,
+  .bg-white\/86,
+  .bg-white\/85,
+  .bg-white\/82,
+  .bg-white\/80,
+  .bg-white\/78,
+  .bg-white\/75,
+  .bg-white\/72,
+  .bg-white\/70,
+  .bg-white\/65,
+  .bg-white\/60,
+  .bg-white\/55,
+  .bg-white\/50,
+  .bg-white\/45,
+  .bg-white\/40,
+  .bg-\[\#FFFDF9\],
+  .bg-\[\#fffdf9\],
+  .bg-\[\#FFFDF9\]\/80,
+  .bg-\[\#fffdf9\]\/80,
+  .bg-\[\#FFFDF9\]\/85,
+  .bg-\[\#fffdf9\]\/85,
+  .bg-\[\#FAF3E8\],
+  .bg-\[\#faf3e8\],
+  .bg-\[\#FAF3E8\]\/55,
+  .bg-\[\#faf3e8\]\/55,
+  .bg-\[\#FAF3E8\]\/60,
+  .bg-\[\#faf3e8\]\/60,
+  .bg-\[\#FAF3E8\]\/70,
+  .bg-\[\#faf3e8\]\/70,
+  .bg-\[\#FAF3E8\]\/75,
+  .bg-\[\#faf3e8\]\/75,
+  .bg-\[\#FAF3E8\]\/80,
+  .bg-\[\#faf3e8\]\/80,
+  .bg-\[\#FAF4EA\],
+  .bg-\[\#faf4ea\],
+  .bg-\[\#FAF4EA\]\/80,
+  .bg-\[\#faf4ea\]\/80,
+  .bg-\[\#FEF7E8\],
+  .bg-\[\#fef7e8\],
+  .bg-\[\#FEF7E8\]\/75,
+  .bg-\[\#fef7e8\]\/75,
+  .bg-\[\#FCF8F2\],
+  .bg-\[\#fcf8f2\],
+  .bg-\[\#F3E8D9\],
+  .bg-\[\#f3e8d9\],
+  .bg-\[\#F3E4CE\],
+  .bg-\[\#f3e4ce\],
+  .bg-\[\#F3DFC0\],
+  .bg-\[\#f3dfc0\],
+  .bg-\[\#F5E6D3\],
+  .bg-\[\#f5e6d3\],
+  .bg-\[\#F5E9D6\],
+  .bg-\[\#f5e9d6\],
+  .bg-\[\#EFE1CE\],
+  .bg-\[\#efe1ce\],
+  .bg-\[\#EFE2D0\],
+  .bg-\[\#efe2d0\],
+  .bg-\[\#EFE3D2\],
+  .bg-\[\#efe3d2\],
+  .bg-\[\#E5D7C4\],
+  .bg-\[\#e5d7c4\],
+  .bg-\[\#E6D5BF\],
+  .bg-\[\#e6d5bf\],
+  .bg-\[\#FCEEE7\],
+  .bg-\[\#fceee7\],
+  .bg-stone-50,
+  .bg-stone-50\/65,
+  .bg-stone-50\/70,
+  .bg-slate-50
+):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-card]):not([data-dsb-banner]):not([data-dsb-disabled-control]):not([data-dsb-segmented]):not(img):not(canvas) {
+  background-color: rgba(16, 15, 21, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.11) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .bg-white\/60,
+  .bg-white\/55,
+  .bg-white\/50,
+  .bg-white\/45,
+  .bg-white\/40,
+  .bg-\[\#FAF3E8\]\/55,
+  .bg-\[\#FAF3E8\]\/60,
+  .bg-\[\#FAF3E8\]\/70,
+  .bg-\[\#FAF3E8\]\/75,
+  .bg-\[\#FAF3E8\]\/80,
+  .bg-\[\#FAF4EA\]\/80,
+  .bg-stone-50,
+  .bg-stone-50\/65,
+  .bg-stone-50\/70,
+  .bg-slate-50
+):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-card]):not([data-dsb-banner]):not([data-dsb-disabled-control]):not([data-dsb-segmented]):not(img):not(canvas) {
+  background-color: rgba(23, 22, 29, 0.86) !important;
+}
+
+/* ---------- 4. SCOPED LIGHT-SURFACE OVERRIDES (Royal Blue) ---------- */
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .bg-white,
+  .bg-white\/95,
+  .bg-white\/90,
+  .bg-white\/88,
+  .bg-white\/86,
+  .bg-white\/85,
+  .bg-white\/82,
+  .bg-white\/80,
+  .bg-white\/78,
+  .bg-white\/75,
+  .bg-white\/72,
+  .bg-white\/70,
+  .bg-white\/65,
+  .bg-white\/60,
+  .bg-white\/55,
+  .bg-white\/50,
+  .bg-white\/45,
+  .bg-white\/40,
+  .bg-\[\#FFFDF9\],
+  .bg-\[\#fffdf9\],
+  .bg-\[\#FFFDF9\]\/80,
+  .bg-\[\#fffdf9\]\/80,
+  .bg-\[\#FFFDF9\]\/85,
+  .bg-\[\#fffdf9\]\/85,
+  .bg-\[\#FAF3E8\],
+  .bg-\[\#faf3e8\],
+  .bg-\[\#FAF3E8\]\/55,
+  .bg-\[\#faf3e8\]\/55,
+  .bg-\[\#FAF3E8\]\/60,
+  .bg-\[\#faf3e8\]\/60,
+  .bg-\[\#FAF3E8\]\/70,
+  .bg-\[\#faf3e8\]\/70,
+  .bg-\[\#FAF3E8\]\/75,
+  .bg-\[\#faf3e8\]\/75,
+  .bg-\[\#FAF3E8\]\/80,
+  .bg-\[\#faf3e8\]\/80,
+  .bg-\[\#FAF4EA\],
+  .bg-\[\#faf4ea\],
+  .bg-\[\#FAF4EA\]\/80,
+  .bg-\[\#faf4ea\]\/80,
+  .bg-\[\#FEF7E8\],
+  .bg-\[\#fef7e8\],
+  .bg-\[\#FEF7E8\]\/75,
+  .bg-\[\#fef7e8\]\/75,
+  .bg-\[\#FCF8F2\],
+  .bg-\[\#fcf8f2\],
+  .bg-\[\#F3E8D9\],
+  .bg-\[\#f3e8d9\],
+  .bg-\[\#F3E4CE\],
+  .bg-\[\#f3e4ce\],
+  .bg-\[\#F3DFC0\],
+  .bg-\[\#f3dfc0\],
+  .bg-\[\#F5E6D3\],
+  .bg-\[\#f5e6d3\],
+  .bg-\[\#F5E9D6\],
+  .bg-\[\#f5e9d6\],
+  .bg-\[\#EFE1CE\],
+  .bg-\[\#efe1ce\],
+  .bg-\[\#EFE2D0\],
+  .bg-\[\#efe2d0\],
+  .bg-\[\#EFE3D2\],
+  .bg-\[\#efe3d2\],
+  .bg-\[\#E5D7C4\],
+  .bg-\[\#e5d7c4\],
+  .bg-\[\#E6D5BF\],
+  .bg-\[\#e6d5bf\],
+  .bg-\[\#FCEEE7\],
+  .bg-\[\#fceee7\],
+  .bg-stone-50,
+  .bg-stone-50\/65,
+  .bg-stone-50\/70,
+  .bg-slate-50
+):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-card]):not([data-dsb-banner]):not([data-dsb-disabled-control]):not([data-dsb-segmented]):not(img):not(canvas) {
+  background-color: rgba(9, 23, 64, 0.92) !important;
+  border-color: rgba(186, 212, 245, 0.18) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .bg-white\/60,
+  .bg-white\/55,
+  .bg-white\/50,
+  .bg-white\/45,
+  .bg-white\/40,
+  .bg-\[\#FAF3E8\]\/55,
+  .bg-\[\#FAF3E8\]\/60,
+  .bg-\[\#FAF3E8\]\/70,
+  .bg-\[\#FAF3E8\]\/75,
+  .bg-\[\#FAF3E8\]\/80,
+  .bg-\[\#FAF4EA\]\/80,
+  .bg-stone-50,
+  .bg-stone-50\/65,
+  .bg-stone-50\/70,
+  .bg-slate-50
+):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-card]):not([data-dsb-banner]):not([data-dsb-disabled-control]):not([data-dsb-segmented]):not(img):not(canvas) {
+  background-color: rgba(13, 30, 82, 0.86) !important;
+}
+
+/* ---------- 4b. SEMANTIC GRADIENT CARDS, BANNERS & ICON TILES (Dark Themes) ---------- */
+
+/* Defensive fallback: kill any stray light bg-gradient-to-* stops on dark themes */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .from-white\/78,
+  .from-white\/75,
+  .from-amber-50\/70,
+  .from-\[\#FFF9EC\],
+  .from-\[\#FAF3E8\]\/85,
+  .via-white\/65
+):not([data-preserve-surface]):not([data-dsb-card]):not([data-dsb-banner]) {
+  background-image: linear-gradient(
+    118deg,
+    rgba(226, 194, 117, 0.08) 0%,
+    rgba(19, 18, 25, 0.92) 55%,
+    rgba(14, 13, 19, 0.94) 100%
+  ) !important;
+  background-color: rgba(17, 16, 23, 0.94) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .from-white\/78,
+  .from-white\/75,
+  .from-amber-50\/70,
+  .from-\[\#FFF9EC\],
+  .from-\[\#FAF3E8\]\/85,
+  .via-white\/65
+):not([data-preserve-surface]):not([data-dsb-card]):not([data-dsb-banner]) {
+  background-image: linear-gradient(
+    118deg,
+    rgba(186, 212, 245, 0.09) 0%,
+    rgba(10, 25, 70, 0.92) 55%,
+    rgba(7, 19, 54, 0.94) 100%
+  ) !important;
+  background-color: rgba(9, 23, 64, 0.94) !important;
+}
+
+/* Obsidian Marble — Semantic Cards */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-card="pending"] {
+  background-color: rgba(19, 17, 23, 0.94) !important;
+  background-image: linear-gradient(
+    118deg,
+    rgba(226, 194, 117, 0.11) 0%,
+    rgba(184, 139, 50, 0.04) 38%,
+    rgba(14, 13, 19, 0.28) 100%
+  ) !important;
+  border-color: rgba(226, 194, 117, 0.30) !important;
+  box-shadow:
+    0 14px 34px -16px rgba(0, 0, 0, 0.78),
+    0 0 0 1px rgba(226, 194, 117, 0.08),
+    inset 0 1px 0 rgba(226, 194, 117, 0.20) !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-card="pending"]:hover {
+  background-color: rgba(25, 22, 30, 0.96) !important;
+  border-color: rgba(226, 194, 117, 0.46) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-card="default"] {
+  background-color: rgba(17, 16, 23, 0.92) !important;
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.035) 0%,
+    rgba(10, 10, 15, 0.16) 100%
+  ) !important;
+  border-color: rgba(255, 255, 255, 0.11) !important;
+  box-shadow:
+    0 10px 26px -14px rgba(0, 0, 0, 0.68),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09) !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-card="default"]:hover {
+  background-color: rgba(23, 22, 30, 0.95) !important;
+  border-color: rgba(226, 194, 117, 0.26) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-card="locked"] {
+  background-color: rgba(15, 15, 21, 0.80) !important;
+  background-image: none !important;
+  border-color: rgba(156, 149, 137, 0.18) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-card="winning"] {
+  background-color: rgba(13, 23, 21, 0.94) !important;
+  background-image: linear-gradient(
+    116deg,
+    rgba(72, 148, 116, 0.14) 0%,
+    rgba(24, 78, 60, 0.10) 48%,
+    rgba(14, 15, 21, 0.28) 100%
+  ) !important;
+  border-color: rgba(150, 205, 178, 0.28) !important;
+  box-shadow:
+    0 14px 32px -16px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(150, 205, 178, 0.18) !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-card="winning"]:hover {
+  background-color: rgba(16, 29, 26, 0.96) !important;
+  border-color: rgba(150, 205, 178, 0.44) !important;
+}
+
+/* Royal Blue — Semantic Cards */
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-card="pending"] {
+  background-color: rgba(10, 25, 70, 0.94) !important;
+  background-image: linear-gradient(
+    118deg,
+    rgba(232, 204, 130, 0.12) 0%,
+    rgba(156, 199, 224, 0.05) 44%,
+    rgba(7, 17, 48, 0.30) 100%
+  ) !important;
+  border-color: rgba(232, 204, 130, 0.32) !important;
+  box-shadow:
+    0 14px 34px -16px rgba(3, 10, 32, 0.82),
+    0 0 0 1px rgba(232, 204, 130, 0.08),
+    inset 0 1px 0 rgba(232, 204, 130, 0.22) !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-card="pending"]:hover {
+  background-color: rgba(14, 33, 88, 0.96) !important;
+  border-color: rgba(232, 204, 130, 0.48) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-card="default"] {
+  background-color: rgba(9, 23, 64, 0.92) !important;
+  background-image: linear-gradient(
+    180deg,
+    rgba(186, 212, 245, 0.055) 0%,
+    rgba(5, 14, 44, 0.22) 100%
+  ) !important;
+  border-color: rgba(186, 212, 245, 0.18) !important;
+  box-shadow:
+    0 10px 26px -14px rgba(3, 10, 32, 0.72),
+    inset 0 1px 0 rgba(186, 212, 245, 0.14) !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-card="default"]:hover {
+  background-color: rgba(13, 31, 84, 0.95) !important;
+  border-color: rgba(186, 212, 245, 0.32) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-card="locked"] {
+  background-color: rgba(7, 18, 50, 0.82) !important;
+  background-image: none !important;
+  border-color: rgba(144, 164, 194, 0.20) !important;
+  box-shadow: inset 0 1px 0 rgba(186, 212, 245, 0.08) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-card="winning"] {
+  background-color: rgba(8, 32, 60, 0.94) !important;
+  background-image: linear-gradient(
+    116deg,
+    rgba(72, 148, 116, 0.14) 0%,
+    rgba(28, 96, 122, 0.11) 50%,
+    rgba(8, 20, 56, 0.28) 100%
+  ) !important;
+  border-color: rgba(150, 205, 178, 0.30) !important;
+  box-shadow:
+    0 14px 32px -16px rgba(3, 10, 32, 0.78),
+    inset 0 1px 0 rgba(150, 205, 178, 0.20) !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-card="winning"]:hover {
+  background-color: rgba(11, 40, 72, 0.96) !important;
+  border-color: rgba(150, 205, 178, 0.46) !important;
+}
+
+/* Semantic Banners (Reposo Amber, Telemarketing Cyan, QR Gold, Subtle) */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-banner="amber"] {
+  background-color: rgba(19, 17, 23, 0.92) !important;
+  background-image: linear-gradient(
+    102deg,
+    rgba(176, 122, 42, 0.17) 0%,
+    rgba(19, 17, 24, 0.88) 54%,
+    rgba(140, 92, 28, 0.12) 100%
+  ) !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-banner="amber"]:hover {
+  background-image: linear-gradient(
+    102deg,
+    rgba(196, 138, 52, 0.22) 0%,
+    rgba(26, 23, 32, 0.92) 54%,
+    rgba(160, 108, 36, 0.16) 100%
+  ) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-banner="amber"] {
+  background-color: rgba(9, 23, 64, 0.92) !important;
+  background-image: linear-gradient(
+    102deg,
+    rgba(176, 122, 42, 0.17) 0%,
+    rgba(9, 24, 68, 0.88) 54%,
+    rgba(232, 204, 130, 0.11) 100%
+  ) !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-banner="amber"]:hover {
+  background-image: linear-gradient(
+    102deg,
+    rgba(196, 138, 52, 0.22) 0%,
+    rgba(14, 32, 86, 0.92) 54%,
+    rgba(232, 204, 130, 0.15) 100%
+  ) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-banner="cyan"] {
+  background-color: rgba(13, 20, 29, 0.92) !important;
+  background-image: linear-gradient(
+    108deg,
+    rgba(32, 114, 146, 0.20) 0%,
+    rgba(15, 20, 30, 0.90) 52%,
+    rgba(46, 128, 160, 0.14) 100%
+  ) !important;
+  border-color: rgba(156, 199, 224, 0.26) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-banner="cyan"] {
+  background-color: rgba(8, 25, 72, 0.92) !important;
+  background-image: linear-gradient(
+    108deg,
+    rgba(38, 126, 160, 0.20) 0%,
+    rgba(9, 27, 76, 0.90) 52%,
+    rgba(156, 199, 224, 0.15) 100%
+  ) !important;
+  border-color: rgba(156, 199, 224, 0.26) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-banner="gold"] {
+  background-color: rgba(19, 17, 23, 0.94) !important;
+  background-image: linear-gradient(
+    112deg,
+    rgba(200, 154, 62, 0.15) 0%,
+    rgba(17, 16, 23, 0.92) 55%,
+    rgba(226, 194, 117, 0.09) 100%
+  ) !important;
+  border-color: rgba(226, 194, 117, 0.26) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-banner="gold"] {
+  background-color: rgba(9, 24, 68, 0.94) !important;
+  background-image: linear-gradient(
+    112deg,
+    rgba(200, 154, 62, 0.15) 0%,
+    rgba(10, 26, 74, 0.92) 55%,
+    rgba(186, 212, 245, 0.09) 100%
+  ) !important;
+  border-color: rgba(232, 204, 130, 0.28) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-banner="subtle"] {
+  background-color: rgba(19, 18, 25, 0.92) !important;
+  background-image: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(12, 11, 17, 0.24) 100%
+  ) !important;
+  border-color: rgba(255, 255, 255, 0.11) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-banner="subtle"] {
+  background-color: rgba(11, 28, 76, 0.92) !important;
+  background-image: linear-gradient(
+    110deg,
+    rgba(186, 212, 245, 0.07) 0%,
+    rgba(7, 19, 54, 0.26) 100%
+  ) !important;
+  border-color: rgba(186, 212, 245, 0.18) !important;
+}
+
+/* Refined Muted Metallic & Jewel KPI Icon Wells on Dark Themes */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-icon-tile="amber"] {
+  background-image: linear-gradient(135deg, rgba(212, 175, 55, 0.16), rgba(140, 102, 32, 0.10)) !important;
+  border: 1px solid rgba(226, 194, 117, 0.24) !important;
+  color: #e2c275 !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-icon-tile="amber"] {
+  background-image: linear-gradient(135deg, rgba(218, 182, 74, 0.16), rgba(146, 108, 36, 0.10)) !important;
+  border: 1px solid rgba(232, 204, 130, 0.24) !important;
+  color: #e8cc82 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-icon-tile="rose"] {
+  background-image: linear-gradient(135deg, rgba(159, 32, 62, 0.18), rgba(92, 14, 34, 0.12)) !important;
+  border: 1px solid rgba(226, 168, 176, 0.22) !important;
+  color: #e2a8b0 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-icon-tile="sky"] {
+  background-image: linear-gradient(135deg, rgba(38, 112, 148, 0.18), rgba(16, 62, 92, 0.12)) !important;
+  border: 1px solid rgba(156, 199, 224, 0.22) !important;
+  color: #9cc7e0 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-icon-tile="emerald"] {
+  background-image: linear-gradient(135deg, rgba(36, 118, 88, 0.18), rgba(16, 64, 48, 0.12)) !important;
+  border: 1px solid rgba(150, 205, 178, 0.22) !important;
+  color: #96cdb2 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-icon-tile="orange"] {
+  background-image: linear-gradient(135deg, rgba(176, 108, 48, 0.18), rgba(110, 62, 24, 0.12)) !important;
+  border: 1px solid rgba(223, 183, 140, 0.22) !important;
+  color: #dfb78c !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-icon-tile="vip"] {
+  background-image: linear-gradient(135deg, rgba(36, 118, 88, 0.16), rgba(196, 154, 62, 0.12)) !important;
+  border: 1px solid rgba(150, 205, 178, 0.24) !important;
+  color: #96cdb2 !important;
+}
+
+/* Disabled Controls & Segmented Bars (Clean Dark Translucent — Never Flat Gray Blocks) */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-disabled-control="true"] {
+  background-color: rgba(255, 255, 255, 0.045) !important;
+  border-color: rgba(255, 255, 255, 0.10) !important;
+  color: #9c9589 !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-disabled-control="true"] :is(svg, span) {
+  color: #9c9589 !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-disabled-control="true"] {
+  background-color: rgba(186, 212, 245, 0.06) !important;
+  border-color: rgba(186, 212, 245, 0.14) !important;
+  color: #90a4c2 !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-disabled-control="true"] :is(svg, span) {
+  color: #90a4c2 !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-disabled-icon="true"] {
+  color: rgba(156, 149, 137, 0.44) !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-disabled-icon="true"] {
+  color: rgba(144, 164, 194, 0.44) !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  [data-dsb-segmented="disabled"],
+  [data-dsb-segmented="locked"]
+) {
+  background-color: rgba(255, 255, 255, 0.045) !important;
+  border-color: rgba(255, 255, 255, 0.10) !important;
+  opacity: 1 !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-segmented="disabled"] button,
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-segmented="locked"] button:not(.bg-stone-700) {
+  color: #9c9589 !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-segmented="disabled"] button,
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-segmented="locked"] button:not(.bg-stone-700) {
+  color: #90a4c2 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-segmented="locked"] button.bg-stone-700 {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  color: #f5f2eb !important;
+}
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-segmented="active"] {
+  background-color: rgba(13, 12, 18, 0.88) !important;
+  border-color: rgba(226, 194, 117, 0.22) !important;
+}
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-segmented="active"] {
+  background-color: rgba(7, 20, 56, 0.88) !important;
+  border-color: rgba(186, 212, 245, 0.22) !important;
+}
+
+/* Scoped velvet-jewel translucent pill/alert surfaces on dark themes (ultra-thin 0.22 borders + 0.14 fills) */
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .bg-rose-50,
+  .bg-rose-50\/90,
+  .bg-rose-50\/85,
+  .bg-rose-50\/70,
+  .bg-rose-50\/60,
+  .bg-rose-100,
+  .bg-rose-100\/90,
+  .bg-red-50,
+  .bg-red-50\/90,
+  .bg-red-100,
+  .bg-\[\#FEE2E2\],
+  .bg-\[\#FEE2E2\]\/55,
+  .bg-\[\#FEE2E2\]\/65,
+  .bg-\[\#FEE2E2\]\/70,
+  .bg-\[\#fee2e2\],
+  .bg-\[\#fee2e2\]\/55,
+  .bg-\[\#fee2e2\]\/65,
+  .bg-\[\#fee2e2\]\/70,
+  .bg-\[\#8B0018\]\/10:not(.blur-2xl)
+):not([data-preserve-surface]) {
+  background-color: rgba(148, 28, 56, 0.15) !important;
+  border-color: rgba(226, 168, 176, 0.22) !important;
+  box-shadow: none !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .bg-emerald-50,
+  .bg-emerald-50\/90,
+  .bg-emerald-50\/85,
+  .bg-emerald-50\/80,
+  .bg-emerald-50\/70,
+  .bg-emerald-100,
+  .bg-emerald-100\/90,
+  .bg-\[\#E6EEDB\],
+  .bg-\[\#E6EEDB\]\/75,
+  .bg-\[\#E6EEDB\]\/80,
+  .bg-\[\#e6eedb\],
+  .bg-\[\#e6eedb\]\/75,
+  .bg-\[\#e6eedb\]\/80
+):not([data-preserve-surface]) {
+  background-color: rgba(34, 112, 84, 0.15) !important;
+  border-color: rgba(150, 205, 178, 0.22) !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) .bg-\[\#2B3A24\]\/10:not(.blur-2xl):not([data-preserve-surface]) {
+  background-color: rgba(68, 92, 50, 0.17) !important;
+  border-color: rgba(200, 168, 91, 0.24) !important;
+  box-shadow: none !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .bg-sky-50,
+  .bg-sky-50\/90,
+  .bg-sky-50\/85,
+  .bg-sky-100,
+  .bg-cyan-50,
+  .bg-cyan-100,
+  .bg-\[\#0891B2\]\/12:not(.blur-2xl),
+  .bg-\[\#0B4F6C\]\/10:not(.blur-2xl),
+  .bg-\[\#CFFAFE\],
+  .bg-\[\#CFFAFE\]\/50,
+  .bg-\[\#CFFAFE\]\/55,
+  .bg-\[\#CFFAFE\]\/60,
+  .bg-\[\#CFFAFE\]\/65,
+  .bg-\[\#CFFAFE\]\/75,
+  .bg-\[\#cffafe\],
+  .bg-\[\#cffafe\]\/50,
+  .bg-\[\#cffafe\]\/55,
+  .bg-\[\#cffafe\]\/60,
+  .bg-\[\#cffafe\]\/65,
+  .bg-\[\#cffafe\]\/75
+):not([data-preserve-surface]) {
+  background-color: rgba(28, 96, 130, 0.15) !important;
+  border-color: rgba(156, 199, 224, 0.22) !important;
+  box-shadow: none !important;
+}
+
+@media (min-width: 640px) {
+  .dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) .sm\:bg-transparent {
+    background-color: transparent !important;
+    border-color: transparent !important;
+  }
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .bg-amber-50,
+  .bg-amber-50\/85,
+  .bg-amber-50\/80,
+  .bg-amber-50\/70,
+  .bg-amber-100,
+  .bg-amber-100\/90,
+  .bg-amber-100\/85,
+  .bg-amber-100\/70,
+  .bg-amber-200\/75,
+  .bg-orange-50,
+  .bg-orange-100,
+  .bg-\[\#FAF0E0\],
+  .bg-\[\#faf0e0\],
+  .bg-\[\#FFF8E7\],
+  .bg-\[\#FFF8E7\]\/85,
+  .bg-\[\#fff8e7\],
+  .bg-\[\#fff8e7\]\/85,
+  .bg-\[\#FFF8EC\],
+  .bg-\[\#FFF6E3\],
+  .bg-\[\#FFF4DC\],
+  .bg-\[\#FFF3DA\],
+  .bg-\[\#FAF1E4\],
+  .bg-\[\#faf1e4\],
+  .bg-\[\#FAF1E4\]\/40,
+  .bg-\[\#FAF1E4\]\/50,
+  .bg-\[\#FAF1E4\]\/55,
+  .bg-\[\#EFE5D8\],
+  .bg-\[\#efe5d8\],
+  .bg-\[\#FFF5EC\]
+):not([data-preserve-surface]) {
+  background-color: rgba(176, 128, 44, 0.14) !important;
+  border-color: rgba(226, 194, 117, 0.22) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .bg-stone-100,
+  .bg-stone-100\/90,
+  .bg-stone-100\/80,
+  .bg-stone-100\/65,
+  .bg-stone-200,
+  .bg-stone-200\/90,
+  .bg-stone-200\/85,
+  .bg-stone-200\/80,
+  .bg-slate-100,
+  .bg-slate-200,
+  .bg-gray-100,
+  .bg-gray-200,
+  .bg-zinc-100,
+  .bg-zinc-200,
+  .bg-neutral-100,
+  .bg-neutral-200
+):not([data-preserve-surface]):not([data-dsb-disabled-control]):not([data-dsb-segmented]):not([data-dsb-card]) {
+  background-color: rgba(255, 255, 255, 0.065) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .bg-stone-100,
+  .bg-stone-100\/90,
+  .bg-stone-100\/80,
+  .bg-stone-100\/65,
+  .bg-stone-200,
+  .bg-stone-200\/90,
+  .bg-stone-200\/85,
+  .bg-stone-200\/80,
+  .bg-slate-100,
+  .bg-slate-200,
+  .bg-gray-100,
+  .bg-gray-200,
+  .bg-zinc-100,
+  .bg-zinc-200,
+  .bg-neutral-100,
+  .bg-neutral-200
+):not([data-preserve-surface]):not([data-dsb-disabled-control]):not([data-dsb-segmented]):not([data-dsb-card]) {
+  background-color: rgba(186, 212, 245, 0.09) !important;
+  border-color: rgba(186, 212, 245, 0.18) !important;
+}
+
+/* Progress bar tracks on dark surfaces */
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .bg-slate-900\/10,
+  .bg-\[\#8B0018\]\/12,
+  .overflow-hidden.rounded-full.bg-\[\#EFE3D2\]
+) {
+  background-color: rgba(255, 255, 255, 0.10) !important;
+}
+
+/* Dark espresso CTA buttons gain a crisp champagne rim on dark marble/sapphire */
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) button.bg-\[\#22150E\] {
+  border: 1px solid rgba(226, 194, 117, 0.30) !important;
+}
+
+/* Light hover background & border overrides (prevent bright white/cream flashes on dark themes) */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .hover\:bg-white,
+  .hover\:bg-white\/60,
+  .hover\:bg-white\/70,
+  .hover\:bg-white\/75,
+  .hover\:bg-white\/78,
+  .hover\:bg-white\/80,
+  .hover\:bg-white\/85,
+  .hover\:bg-white\/86,
+  .hover\:bg-white\/88,
+  .hover\:bg-white\/95,
+  .hover\:bg-\[\#FFFDF9\],
+  .hover\:bg-\[\#FAF3E8\],
+  .hover\:bg-\[\#FAF1E4\],
+  .hover\:bg-\[\#FAF1E4\]\/45,
+  .hover\:bg-\[\#F5E9D6\],
+  .hover\:bg-\[\#F3E4CE\],
+  .hover\:bg-\[\#EFE2D0\]
+):hover:not([data-preserve-surface]):not([data-dsb-card]):not([data-dsb-banner]) {
+  background-color: rgba(255, 255, 255, 0.10) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .hover\:bg-white,
+  .hover\:bg-white\/60,
+  .hover\:bg-white\/70,
+  .hover\:bg-white\/75,
+  .hover\:bg-white\/78,
+  .hover\:bg-white\/80,
+  .hover\:bg-white\/85,
+  .hover\:bg-white\/86,
+  .hover\:bg-white\/88,
+  .hover\:bg-white\/95,
+  .hover\:bg-\[\#FFFDF9\],
+  .hover\:bg-\[\#FAF3E8\],
+  .hover\:bg-\[\#FAF1E4\],
+  .hover\:bg-\[\#FAF1E4\]\/45,
+  .hover\:bg-\[\#F5E9D6\],
+  .hover\:bg-\[\#F3E4CE\],
+  .hover\:bg-\[\#EFE2D0\]
+):hover:not([data-preserve-surface]):not([data-dsb-card]):not([data-dsb-banner]) {
+  background-color: rgba(147, 197, 253, 0.14) !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .hover\:bg-amber-100,
+  .hover\:bg-amber-100\/70,
+  .hover\:bg-amber-100\/90,
+  .hover\:bg-\[\#F3DFC0\]
+):hover:not([data-preserve-surface]) {
+  background-color: rgba(184, 134, 48, 0.24) !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) .hover\:bg-emerald-100:hover:not([data-preserve-surface]) {
+  background-color: rgba(34, 112, 84, 0.26) !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .hover\:bg-rose-50,
+  .hover\:bg-rose-100,
+  .hover\:bg-red-50,
+  .hover\:bg-\[\#FEE2E2\]\/70
+):hover:not([data-preserve-surface]) {
+  background-color: rgba(148, 28, 56, 0.26) !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .hover\:bg-\[\#CFFAFE\]\/50,
+  .hover\:bg-\[\#CFFAFE\]\/60,
+  .hover\:bg-sky-100
+):hover:not([data-preserve-surface]) {
+  background-color: rgba(28, 96, 130, 0.26) !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .hover\:bg-stone-200,
+  .hover\:bg-slate-200
+):hover:not([data-preserve-surface]) {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] .hover\:border-white\/95:hover {
+  border-color: rgba(226, 194, 117, 0.34) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] .hover\:border-white\/95:hover {
+  border-color: rgba(186, 212, 245, 0.36) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] .ring-offset-1 {
+  --tw-ring-offset-color: #121015 !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] .ring-offset-1 {
+  --tw-ring-offset-color: #081845 !important;
+}
+
+/* Soft hairline borders & dividers on dark surfaces */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .border-slate-200,
+  .border-slate-200\/70,
+  .border-slate-200\/75,
+  .border-slate-200\/80,
+  .border-slate-200\/90,
+  .border-slate-300,
+  .border-slate-300\/80,
+  .border-slate-900\/10,
+  .border-stone-200,
+  .border-stone-200\/80,
+  .border-stone-300,
+  .border-stone-300\/80,
+  .border-\[\#E6D5BF\],
+  .border-\[\#e6d5bf\],
+  .border-\[\#DFCBB3\],
+  .border-\[\#DFCBB3\]\/85,
+  .border-\[\#DFCBB3\]\/90,
+  .border-\[\#DEC9AE\],
+  .border-\[\#EAD9C2\],
+  .border-\[\#E3D0B8\],
+  .border-\[\#EFE3D2\],
+  .border-\[\#D8B892\],
+  .border-\[\#D8B994\],
+  .border-\[\#D8BE99\]\/80,
+  .border-\[\#D8C0A2\],
+  .border-\[\#CDBAA1\],
+  .border-\[\#B89D86\],
+  .border-\[\#E8BCA7\],
+  .border-\[\#8B0018\]\/45,
+  .border-\[\#8B0018\]\/28,
+  .border-\[\#8B0018\]\/25,
+  .border-\[\#8B0018\]\/22,
+  .border-\[\#8B0018\]\/20,
+  .border-\[\#8B0018\]\/14,
+  .border-white\/80,
+  .border-white\/75,
+  .border-white\/70,
+  .border-white\/65,
+  .border-white\/60
+):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-card]):not([data-dsb-banner]):not([data-dsb-disabled-control]):not([data-dsb-segmented]) {
+  border-color: rgba(255, 255, 255, 0.11) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .border-slate-200,
+  .border-slate-200\/70,
+  .border-slate-200\/75,
+  .border-slate-200\/80,
+  .border-slate-200\/90,
+  .border-slate-300,
+  .border-slate-300\/80,
+  .border-slate-900\/10,
+  .border-stone-200,
+  .border-stone-200\/80,
+  .border-stone-300,
+  .border-stone-300\/80,
+  .border-\[\#E6D5BF\],
+  .border-\[\#e6d5bf\],
+  .border-\[\#DFCBB3\],
+  .border-\[\#DFCBB3\]\/85,
+  .border-\[\#DFCBB3\]\/90,
+  .border-\[\#DEC9AE\],
+  .border-\[\#EAD9C2\],
+  .border-\[\#E3D0B8\],
+  .border-\[\#EFE3D2\],
+  .border-\[\#D8B892\],
+  .border-\[\#D8B994\],
+  .border-\[\#D8BE99\]\/80,
+  .border-\[\#D8C0A2\],
+  .border-\[\#CDBAA1\],
+  .border-\[\#B89D86\],
+  .border-\[\#E8BCA7\],
+  .border-\[\#8B0018\]\/45,
+  .border-\[\#8B0018\]\/28,
+  .border-\[\#8B0018\]\/25,
+  .border-\[\#8B0018\]\/22,
+  .border-\[\#8B0018\]\/20,
+  .border-\[\#8B0018\]\/14,
+  .border-white\/80,
+  .border-white\/75,
+  .border-white\/70,
+  .border-white\/65,
+  .border-white\/60
+):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-card]):not([data-dsb-banner]):not([data-dsb-disabled-control]):not([data-dsb-segmented]) {
+  border-color: rgba(186, 212, 245, 0.18) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .border-\[\#E5C17B\],
+  .border-\[\#E6C99E\]
+):not([data-preserve-surface]) {
+  border-color: rgba(226, 194, 117, 0.28) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .border-\[\#E5C17B\],
+  .border-\[\#E6C99E\]
+):not([data-preserve-surface]) {
+  border-color: rgba(232, 204, 130, 0.30) !important;
+}
+
+/* ---------- 5. LUXURY CALIBRATED TEXT OVERRIDES (WCAG AA/AAA) ---------- */
+
+/* Primary headings & darkest ink: Alabaster (#F5F2EB) on Obsidian, Pearl White (#F4F7FC) on Royal Blue */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .text-black,
+  .text-slate-950,
+  .text-slate-900,
+  .text-stone-950,
+  .text-stone-900,
+  .text-gray-950,
+  .text-gray-900,
+  .text-zinc-950,
+  .text-zinc-900,
+  .text-neutral-950,
+  .text-neutral-900,
+  .text-\[\#1A0E08\],
+  .text-\[\#1a0e08\],
+  .text-\[\#1E110A\],
+  .text-\[\#1e110a\],
+  .text-\[\#1F1714\],
+  .text-\[\#1f1714\],
+  .text-\[\#22150E\],
+  .text-\[\#22150e\],
+  .text-\[\#23140D\],
+  .text-\[\#23140d\],
+  .text-\[\#2C1810\],
+  .text-\[\#2c1810\],
+  .text-\[\#3B2014\],
+  .text-\[\#3b2014\],
+  .text-\[\#3B2316\],
+  .text-\[\#3b2316\],
+  .text-\[\#1B2516\],
+  .text-\[\#1b2516\],
+  .text-\[\#07364B\],
+  .text-\[\#07364b\],
+  .text-\[\#082F40\],
+  .text-\[\#082f40\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #f5f2eb !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .text-black,
+  .text-slate-950,
+  .text-slate-900,
+  .text-stone-950,
+  .text-stone-900,
+  .text-gray-950,
+  .text-gray-900,
+  .text-zinc-950,
+  .text-zinc-900,
+  .text-neutral-950,
+  .text-neutral-900,
+  .text-\[\#1A0E08\],
+  .text-\[\#1a0e08\],
+  .text-\[\#1E110A\],
+  .text-\[\#1e110a\],
+  .text-\[\#1F1714\],
+  .text-\[\#1f1714\],
+  .text-\[\#22150E\],
+  .text-\[\#22150e\],
+  .text-\[\#23140D\],
+  .text-\[\#23140d\],
+  .text-\[\#2C1810\],
+  .text-\[\#2c1810\],
+  .text-\[\#3B2014\],
+  .text-\[\#3b2014\],
+  .text-\[\#3B2316\],
+  .text-\[\#3b2316\],
+  .text-\[\#1B2516\],
+  .text-\[\#1b2516\],
+  .text-\[\#07364B\],
+  .text-\[\#07364b\],
+  .text-\[\#082F40\],
+  .text-\[\#082f40\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #f4f7fc !important;
+}
+
+/* Strong body, pill labels & button ink */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .text-slate-800,
+  .text-slate-700,
+  .text-stone-800,
+  .text-stone-700,
+  .text-gray-800,
+  .text-gray-700,
+  .text-zinc-800,
+  .text-zinc-700,
+  .text-neutral-800,
+  .text-neutral-700,
+  .text-\[\#4A3224\],
+  .text-\[\#4a3224\],
+  .text-\[\#4B2E2B\],
+  .text-\[\#4b2e2b\],
+  .text-\[\#4B362A\],
+  .text-\[\#4b362a\],
+  .text-\[\#4E382B\],
+  .text-\[\#4e382b\],
+  .text-\[\#1E4455\],
+  .text-\[\#1e4455\],
+  .text-\[\#2A596D\],
+  .text-\[\#2a596d\],
+  .text-\[\#31596B\],
+  .text-\[\#31596b\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #e4dfd6 !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .text-slate-800,
+  .text-slate-700,
+  .text-stone-800,
+  .text-stone-700,
+  .text-gray-800,
+  .text-gray-700,
+  .text-zinc-800,
+  .text-zinc-700,
+  .text-neutral-800,
+  .text-neutral-700,
+  .text-\[\#4A3224\],
+  .text-\[\#4a3224\],
+  .text-\[\#4B2E2B\],
+  .text-\[\#4b2e2b\],
+  .text-\[\#4B362A\],
+  .text-\[\#4b362a\],
+  .text-\[\#4E382B\],
+  .text-\[\#4e382b\],
+  .text-\[\#1E4455\],
+  .text-\[\#1e4455\],
+  .text-\[\#2A596D\],
+  .text-\[\#2a596d\],
+  .text-\[\#31596B\],
+  .text-\[\#31596b\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #dce5f2 !important;
+}
+
+/* Secondary / subtitle ink: Warm Silver (#D5CFC4) on Obsidian, Soft Ice Silver (#C9D6E8) on Royal Blue */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .text-slate-600,
+  .text-stone-600,
+  .text-gray-600,
+  .text-zinc-600,
+  .text-neutral-600,
+  .text-\[\#475569\],
+  .text-\[\#594133\],
+  .text-\[\#594336\],
+  .text-\[\#5B4636\],
+  .text-\[\#5b4636\],
+  .text-\[\#5C4332\],
+  .text-\[\#5c4332\],
+  .text-\[\#6B5447\],
+  .text-\[\#6b5447\],
+  .text-\[\#6E5341\],
+  .text-\[\#6e5341\],
+  .text-\[\#3C6C80\],
+  .text-\[\#3c6c80\],
+  .text-\[\#4C7385\],
+  .text-\[\#4c7385\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #d5cfc4 !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .text-slate-600,
+  .text-stone-600,
+  .text-gray-600,
+  .text-zinc-600,
+  .text-neutral-600,
+  .text-\[\#475569\],
+  .text-\[\#594133\],
+  .text-\[\#594336\],
+  .text-\[\#5B4636\],
+  .text-\[\#5b4636\],
+  .text-\[\#5C4332\],
+  .text-\[\#5c4332\],
+  .text-\[\#6B5447\],
+  .text-\[\#6b5447\],
+  .text-\[\#6E5341\],
+  .text-\[\#6e5341\],
+  .text-\[\#3C6C80\],
+  .text-\[\#3c6c80\],
+  .text-\[\#4C7385\],
+  .text-\[\#4c7385\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #c9d6e8 !important;
+}
+
+/* Tertiary / helper / caption ink: Muted Pewter (#9C9589) on Obsidian, Muted Sapphire Mist (#90A4C2) on Royal Blue */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .text-slate-500,
+  .text-stone-500,
+  .text-gray-500,
+  .text-zinc-500,
+  .text-neutral-500,
+  .text-\[\#7B5D4A\],
+  .text-\[\#7b5d4a\],
+  .text-\[\#7B6253\],
+  .text-\[\#7b6253\],
+  .text-\[\#7D6353\],
+  .text-\[\#7d6353\],
+  .text-\[\#8A6D5B\],
+  .text-\[\#8a6d5b\],
+  .text-\[\#8A7162\],
+  .text-\[\#8a7162\],
+  .text-\[\#8B6F5B\],
+  .text-\[\#8b6f5b\],
+  .text-\[\#8C6E58\],
+  .text-\[\#8c6e58\],
+  .text-\[\#5B8394\],
+  .text-\[\#5b8394\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-disabled-control]):not([data-dsb-disabled-control] *) {
+  color: #9c9589 !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .text-slate-500,
+  .text-stone-500,
+  .text-gray-500,
+  .text-zinc-500,
+  .text-neutral-500,
+  .text-\[\#7B5D4A\],
+  .text-\[\#7b5d4a\],
+  .text-\[\#7B6253\],
+  .text-\[\#7b6253\],
+  .text-\[\#7D6353\],
+  .text-\[\#7d6353\],
+  .text-\[\#8A6D5B\],
+  .text-\[\#8a6d5b\],
+  .text-\[\#8A7162\],
+  .text-\[\#8a7162\],
+  .text-\[\#8B6F5B\],
+  .text-\[\#8b6f5b\],
+  .text-\[\#8C6E58\],
+  .text-\[\#8c6e58\],
+  .text-\[\#5B8394\],
+  .text-\[\#5b8394\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-disabled-control]):not([data-dsb-disabled-control] *) {
+  color: #90a4c2 !important;
+}
+
+/* Muted Metallic & Jewel Semantic Text Overrides (Zero Candy Pastels) */
+/* Crimson / Rose -> Velvet Rose (#E2A8B0) */
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .text-\[\#8B0018\],
+  .text-\[\#8b0018\],
+  .text-\[\#8B0018\]\/65,
+  .text-\[\#8B0018\]\/75,
+  .text-\[\#8C3318\],
+  .text-\[\#8c3318\],
+  .text-\[\#7A2B14\],
+  .text-\[\#7a2b14\],
+  .text-\[\#7C4327\],
+  .text-\[\#7c4327\],
+  .text-\[\#9E4725\],
+  .text-\[\#9e4725\],
+  .text-\[\#B84A27\],
+  .text-\[\#b84a27\],
+  .text-\[\#B91C1C\],
+  .text-\[\#b91c1c\],
+  .text-rose-600,
+  .text-rose-700,
+  .text-rose-800,
+  .text-rose-900,
+  .text-rose-950,
+  .text-red-600,
+  .text-red-700,
+  .text-red-800,
+  .text-red-900,
+  .text-red-950
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #e2a8b0 !important;
+}
+
+/* Amber / Gold -> Champagne Gold (#E2C275) on Obsidian, Royal Champagne (#E8CC82) on Royal Blue */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .text-\[\#6E4514\],
+  .text-\[\#6e4514\],
+  .text-\[\#734A12\],
+  .text-\[\#734a12\],
+  .text-\[\#7A4610\],
+  .text-\[\#7a4610\],
+  .text-\[\#7A4B0F\],
+  .text-\[\#7a4b0f\],
+  .text-\[\#8A5610\],
+  .text-\[\#8a5610\],
+  .text-\[\#8C4A19\],
+  .text-\[\#8c4a19\],
+  .text-\[\#8C5510\],
+  .text-\[\#8c5510\],
+  .text-\[\#9A5B13\],
+  .text-\[\#9a5b13\],
+  .text-\[\#9A5B1F\],
+  .text-\[\#9a5b1f\],
+  .text-\[\#9A6315\],
+  .text-\[\#9a6315\],
+  .text-\[\#B7791F\],
+  .text-\[\#b7791f\],
+  .text-\[\#9B816E\],
+  .text-\[\#9b816e\],
+  .text-\[\#A48A77\],
+  .text-\[\#a48a77\],
+  .text-\[\#A8917D\],
+  .text-\[\#a8917d\],
+  .text-\[\#B89D86\],
+  .text-\[\#b89d86\],
+  .text-amber-700,
+  .text-amber-800,
+  .text-amber-900,
+  .text-amber-950,
+  .text-orange-700,
+  .text-orange-800,
+  .text-orange-900,
+  .text-orange-950
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-icon-tile]) {
+  color: #e2c275 !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .text-\[\#6E4514\],
+  .text-\[\#6e4514\],
+  .text-\[\#734A12\],
+  .text-\[\#734a12\],
+  .text-\[\#7A4610\],
+  .text-\[\#7a4610\],
+  .text-\[\#7A4B0F\],
+  .text-\[\#7a4b0f\],
+  .text-\[\#8A5610\],
+  .text-\[\#8a5610\],
+  .text-\[\#8C4A19\],
+  .text-\[\#8c4a19\],
+  .text-\[\#8C5510\],
+  .text-\[\#8c5510\],
+  .text-\[\#9A5B13\],
+  .text-\[\#9a5b13\],
+  .text-\[\#9A5B1F\],
+  .text-\[\#9a5b1f\],
+  .text-\[\#9A6315\],
+  .text-\[\#9a6315\],
+  .text-\[\#B7791F\],
+  .text-\[\#b7791f\],
+  .text-\[\#9B816E\],
+  .text-\[\#9b816e\],
+  .text-\[\#A48A77\],
+  .text-\[\#a48a77\],
+  .text-\[\#A8917D\],
+  .text-\[\#a8917d\],
+  .text-\[\#B89D86\],
+  .text-\[\#b89d86\],
+  .text-amber-700,
+  .text-amber-800,
+  .text-amber-900,
+  .text-amber-950,
+  .text-orange-700,
+  .text-orange-800,
+  .text-orange-900,
+  .text-orange-950
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *):not([data-dsb-icon-tile]) {
+  color: #e8cc82 !important;
+}
+
+/* Emerald / Olive -> Muted Emerald Silk (#96CDB2) */
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .text-emerald-600,
+  .text-emerald-700,
+  .text-emerald-800,
+  .text-emerald-900,
+  .text-emerald-950,
+  .text-\[\#166534\],
+  .text-\[\#2F684B\],
+  .text-\[\#2f684b\],
+  .text-\[\#2F855A\],
+  .text-\[\#2f855a\],
+  .text-\[\#3D6B52\],
+  .text-\[\#3d6b52\],
+  .text-\[\#2B3A24\],
+  .text-\[\#2b3a24\],
+  .text-\[\#3F5432\],
+  .text-\[\#3f5432\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #96cdb2 !important;
+}
+
+/* Sky / Cyan -> Arctic Slate (#9CC7E0) */
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .text-sky-700,
+  .text-sky-800,
+  .text-sky-900,
+  .text-sky-950,
+  .text-cyan-700,
+  .text-cyan-800,
+  .text-cyan-900,
+  .text-cyan-950,
+  .text-\[\#0891B2\],
+  .text-\[\#0891b2\],
+  .text-\[\#0B4F6C\],
+  .text-\[\#0b4f6c\],
+  .text-\[\#2B6CB0\],
+  .text-\[\#2b6cb0\]
+):not([data-dsb-title]):not([data-dsb-greeting]):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #9cc7e0 !important;
+}
+
+/* Hover text contrast protection on dark themes */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .hover\:text-slate-950:hover,
+  .hover\:text-\[\#22150E\]:hover,
+  .group:hover .group-hover\:text-slate-700,
+  .group\/row:hover .group-hover\/row\:text-\[\#22150E\]
+):not([data-preserve-surface]) {
+  color: #f5f2eb !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .hover\:text-slate-950:hover,
+  .hover\:text-\[\#22150E\]:hover,
+  .group:hover .group-hover\:text-slate-700,
+  .group\/row:hover .group-hover\/row\:text-\[\#22150E\]
+):not([data-preserve-surface]) {
+  color: #f4f7fc !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) :is(
+  .group\/row:hover .group-hover\/row\:text-\[\#8C3318\],
+  .hover\:text-rose-800:hover,
+  .hover\:text-red-600:hover
+):not([data-preserve-surface]) {
+  color: #efc2c9 !important;
+}
+
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) .hover\:text-\[\#0891B2\]:hover:not([data-preserve-surface]) {
+  color: #b5d9ec !important;
+}
+
+/* Muted slate/stone-400 icons and disabled text */
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(
+  .text-stone-400,
+  .text-slate-400
+):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #9c9589 !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(
+  .text-stone-400,
+  .text-slate-400
+):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  color: #90a4c2 !important;
+}
+
+/* Role emblem badge text & tag contrast on dark glass (Distinct Velvet Jewel Identities) */
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-role-label="admin"] {
+  color: #e2a8b0 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-role-label="telemarketing"] {
+  color: #9cc7e0 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-role-label="vendedor"] {
+  color: #c6d1a8 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-role-tag="admin"] {
+  background-color: rgba(148, 28, 56, 0.15) !important;
+  border-color: rgba(226, 168, 176, 0.24) !important;
+  color: #e2a8b0 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-role-tag="telemarketing"] {
+  background-color: rgba(28, 96, 130, 0.15) !important;
+  border-color: rgba(156, 199, 224, 0.24) !important;
+  color: #9cc7e0 !important;
+}
+.dsb-theme-root:is([data-dsb-surface="obsidian-marble"], [data-dsb-surface="royal-blue"]) [data-dsb-role-tag="vendedor"] {
+  background-color: rgba(74, 96, 54, 0.17) !important;
+  border-color: rgba(200, 168, 91, 0.26) !important;
+  color: #c6d1a8 !important;
+}
+
+/* ---------- 6. EXPLICIT HEADER TITLE & GREETING PROTECTION ---------- */
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-title],
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-title] {
+  color: #09090b !important;
+  -webkit-text-stroke: 2px #ffffff;
+  paint-order: stroke fill;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] [data-dsb-greeting],
+.dsb-theme-root[data-dsb-surface="royal-blue"] [data-dsb-greeting] {
+  color: #ffffff !important;
+  -webkit-text-stroke: 1.5px #09090b;
+  paint-order: stroke fill;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.48);
+}
+
+/* ---------- 7. FORM CONTROLS (Inputs, Selects, Textareas, Options) ---------- */
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(input, select, textarea):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  background-color: rgba(255, 255, 255, 0.045) !important;
+  color: #f5f2eb !important;
+  border-color: rgba(255, 255, 255, 0.11) !important;
+  color-scheme: dark;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(input, select, textarea):not([data-preserve-surface]):not([data-preserve-surface] *):focus {
+  border-color: rgba(226, 194, 117, 0.58) !important;
+  background-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(input, select, textarea):not([data-preserve-surface]):not([data-preserve-surface] *) {
+  background-color: rgba(186, 212, 245, 0.06) !important;
+  color: #f4f7fc !important;
+  border-color: rgba(186, 212, 245, 0.18) !important;
+  color-scheme: dark;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(input, select, textarea):not([data-preserve-surface]):not([data-preserve-surface] *):focus {
+  border-color: rgba(232, 204, 130, 0.58) !important;
+  background-color: rgba(186, 212, 245, 0.10) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] :is(input, textarea):not([data-preserve-surface]):not([data-preserve-surface] *)::placeholder {
+  color: rgba(156, 149, 137, 0.72) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] :is(input, textarea):not([data-preserve-surface]):not([data-preserve-surface] *)::placeholder {
+  color: rgba(144, 164, 194, 0.72) !important;
+}
+
+.dsb-theme-root[data-dsb-surface="obsidian-marble"] select option {
+  background-color: #121015;
+  color: #f5f2eb;
+}
+
+.dsb-theme-root[data-dsb-surface="royal-blue"] select option {
+  background-color: #081845;
+  color: #f4f7fc;
+}

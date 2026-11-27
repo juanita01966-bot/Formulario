@@ -16,7 +16,6 @@ import {
   Medal,
   MessageCircle,
   Phone,
-  Plus,
   Power,
   QrCode,
   RotateCcw,
@@ -27,7 +26,6 @@ import {
   Trash2,
   TrendingUp,
   Trophy,
-  UserPlus,
   Users,
   X,
 } from 'lucide-react';
@@ -38,10 +36,9 @@ import type {
   ReferralMetricKey,
   ReferralPartner,
   ReferralPrizeRule,
+  ReferralVisitEvent,
 } from '../../types/app';
 import type {
-  BatchCreateReferralsPayload,
-  CreateReferralPayload,
   UpdateReferralPayload,
 } from '../../services/storeClient';
 import {
@@ -52,8 +49,12 @@ import {
   normalizeReferralCodeInput,
   REFERRAL_QR_THEMES,
   sanitizeReferralCodeDraft,
-  suggestReferralCodeFromName,
 } from './referralQrExport';
+import { SecretKeyModal } from './SecretKeyModal';
+import { AmbassadorAvatar } from '../shared/AmbassadorAvatar';
+import { AvatarPickerField } from './AvatarPickerField';
+import { validateAvatarUrlInput } from '../../utils/avatarImageUtils';
+import { getRoleTheme } from './roleTheme';
 
 export const DEFAULT_PRIZE_RULE: ReferralPrizeRule = {
   prizeName: 'Premio Embajador Royal Prestige',
@@ -69,15 +70,14 @@ export const DEFAULT_PRIZE_RULE: ReferralPrizeRule = {
 interface ReferralsLeaderboardPanelProps {
   referrers: ReferralPartner[];
   leads: Lead[];
+  visitLog?: ReferralVisitEvent[];
+  isDateFiltered?: boolean;
   settings: AppSettings;
   defaultOriginUrl: string;
-  onCreatePartner: (payload: CreateReferralPayload) => Promise<void>;
-  onBatchCreatePartners: (
-    payload: BatchCreateReferralsPayload
-  ) => Promise<{ created: ReferralPartner[]; skipped: string[] }>;
-  onUpdatePartner: (id: string, updates: UpdateReferralPayload) => Promise<void>;
-  onDeletePartner: (id: string) => Promise<void>;
-  onSavePrizeRule: (rule: ReferralPrizeRule) => Promise<void>;
+  onUpdatePartner: (id: string, updates: UpdateReferralPayload, masterPassword: string) => Promise<void>;
+  onDeletePartner: (id: string, masterPassword: string) => Promise<void>;
+  onSavePrizeRule: (rule: ReferralPrizeRule, masterPassword: string) => Promise<void>;
+  onGoToAccounts?: () => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
@@ -174,65 +174,17 @@ function formatShortDate(iso?: string | null): string {
   }).format(d);
 }
 
-interface ParsedBatchLine {
-  name: string;
-  phone?: string;
-  code: string;
-}
-
-function parseBatchLines(raw: string, existingCodes: Set<string>): ParsedBatchLine[] {
-  const used = new Set<string>(existingCodes);
-  const lines = raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  const results: ParsedBatchLine[] = [];
-  for (const line of lines) {
-    // Supports: "Name", "Name, Phone", "Name | Phone | Code", "Name; Phone"
-    const parts = line
-      .split(/[,|;\t]+/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (parts.length === 0) continue;
-    const name = parts[0];
-    if (name.length < 2) continue;
-
-    let phone: string | undefined;
-    let customCode: string | undefined;
-
-    if (parts.length === 2) {
-      const digits = parts[1].replace(/\D/g, '');
-      if (digits.length >= 6) {
-        phone = parts[1];
-      } else {
-        customCode = normalizeReferralCodeInput(parts[1]);
-      }
-    } else if (parts.length >= 3) {
-      phone = parts[1];
-      customCode = normalizeReferralCodeInput(parts[2]);
-    }
-
-    let code = customCode && customCode.length >= 2 ? customCode : suggestReferralCodeFromName(name, used);
-    if (used.has(code)) {
-      code = suggestReferralCodeFromName(name, used);
-    }
-    used.add(code);
-    results.push({ name, phone, code });
-  }
-  return results.slice(0, 50);
-}
-
 export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps> = ({
   referrers,
   leads,
+  visitLog,
+  isDateFiltered = false,
   settings,
   defaultOriginUrl,
-  onCreatePartner,
-  onBatchCreatePartners,
   onUpdatePartner,
   onDeletePartner,
   onSavePrizeRule,
+  onGoToAccounts,
   onBusyChange,
 }) => {
   const prizeRule = useMemo(
@@ -252,34 +204,26 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     }
   }, [prizeRule, rulePanelOpen]);
 
-  // Add / Batch Modal state
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [addMode, setAddMode] = useState<'single' | 'batch'>('single');
-  const [singleName, setSingleName] = useState('');
-  const [singleCode, setSingleCode] = useState('');
-  const [singleCodeTouched, setSingleCodeTouched] = useState(false);
-  const [singlePhone, setSinglePhone] = useState('');
-  const [singleNotes, setSingleNotes] = useState('');
-  const [singleStyleId, setSingleStyleId] = useState<QrStyleId>('classic-gold');
-  const [submittingSingle, setSubmittingSingle] = useState(false);
-
-  // Batch states
-  const [batchText, setBatchText] = useState('');
-  const [quickCount, setQuickCount] = useState(20);
-  const [quickNamePrefix, setQuickNamePrefix] = useState('Embajador');
-  const [quickCodePrefix, setQuickCodePrefix] = useState('EMB');
-  const [submittingBatch, setSubmittingBatch] = useState(false);
-
   // Edit Partner Modal
   const [editingPartner, setEditingPartner] = useState<ReferralPartner | null>(null);
   const [editName, setEditName] = useState('');
   const [editCode, setEditCode] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editAvatarUrl, setEditAvatarUrl] = useState('');
   const [editStyleId, setEditStyleId] = useState<QrStyleId>('classic-gold');
   const [editActive, setEditActive] = useState(true);
+  const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [resettingVisitsId, setResettingVisitsId] = useState<string | null>(null);
+
+  // Secret Key Authorization Modal for all protected mutations
+  const [pendingSecretAction, setPendingSecretAction] = useState<{
+    title: string;
+    description: string;
+    confirmLabel: string;
+    run: (masterPassword: string) => Promise<void>;
+  } | null>(null);
 
   // QR Card HD Modal
   const [qrModalPartner, setQrModalPartner] = useState<ReferralPartner | null>(null);
@@ -301,43 +245,23 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
   // Inform parent DashboardPage to pause polling while modals/forms are open
   useEffect(() => {
     const isBusy =
-      addModalOpen ||
       Boolean(editingPartner) ||
       Boolean(qrModalPartner) ||
+      Boolean(pendingSecretAction) ||
       rulePanelOpen ||
       savingRule ||
-      submittingSingle ||
-      submittingBatch ||
       savingEdit;
     onBusyChange?.(isBusy);
     return () => onBusyChange?.(false);
   }, [
-    addModalOpen,
     editingPartner,
     qrModalPartner,
+    pendingSecretAction,
     rulePanelOpen,
     savingRule,
-    submittingSingle,
-    submittingBatch,
     savingEdit,
     onBusyChange,
   ]);
-
-  const existingCodesSet = useMemo(
-    () => new Set(referrers.map((r) => r.code.trim().toUpperCase())),
-    [referrers]
-  );
-
-  // Auto-suggest code from name while creating a single partner
-  useEffect(() => {
-    if (!singleCodeTouched) {
-      if (singleName.trim().length >= 2) {
-        setSingleCode(suggestReferralCodeFromName(singleName, existingCodesSet));
-      } else {
-        setSingleCode('');
-      }
-    }
-  }, [singleName, singleCodeTouched, existingCodesSet]);
 
   // Render live HD QR card preview when QR modal opens or style changes
   useEffect(() => {
@@ -352,6 +276,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       partnerName: qrModalPartner.name,
       code: qrModalPartner.code,
       referralUrl: url,
+      avatarUrl: qrModalPartner.avatarUrl ?? null,
       styleId: qrModalStyle,
     })
       .then((dataUrl) => {
@@ -395,8 +320,19 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         demosCount * prizeRule.pointsPerDemo +
         ordenesCount * prizeRule.pointsPerOrden;
 
-      const visits = Math.max(0, Number(partner.visitsCount) || 0);
-      const uniqueVisits = Math.max(0, Number(partner.uniqueVisitsCount) || 0);
+      let visits = Math.max(0, Number(partner.visitsCount) || 0);
+      let uniqueVisits = Math.max(0, Number(partner.uniqueVisitsCount) || 0);
+      if (Array.isArray(visitLog) && (isDateFiltered || visitLog.length > 0)) {
+        const matchedVisits = visitLog.filter(
+          (ev) =>
+            ev.referrerId === partner.id ||
+            (ev.referralCode && ev.referralCode.trim().toUpperCase() === codeUpper)
+        );
+        if (isDateFiltered || matchedVisits.length > 0) {
+          visits = matchedVisits.length;
+          uniqueVisits = new Set(matchedVisits.map((ev) => ev.visitorId)).size;
+        }
+      }
       const conversionPct =
         visits > 0 ? Math.round((leadsCount / visits) * 1000) / 10 : 0;
 
@@ -466,7 +402,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         prizeStatusLabel,
       };
     });
-  }, [referrers, leads, prizeRule]);
+  }, [referrers, leads, visitLog, isDateFiltered, prizeRule]);
 
   // Global KPI aggregates
   const kpis = useMemo(() => {
@@ -554,119 +490,31 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     return sorted;
   }, [rankedRows, search, filterMode, sortMode]);
 
-  const parsedBatchPreview = useMemo(
-    () => parseBatchLines(batchText, existingCodesSet),
-    [batchText, existingCodesSet]
-  );
-
   // Handlers
   const showBanner = (type: 'success' | 'error', text: string) => {
     setBanner({ type, text });
   };
 
-  const handleSaveRuleSubmit = async (e: React.FormEvent) => {
+  const handleSaveRuleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setSavingRule(true);
+    const cleaned = sanitizePrizeRule(ruleDraft);
     setBanner(null);
-    try {
-      const cleaned = sanitizePrizeRule(ruleDraft);
-      await onSavePrizeRule(cleaned);
-      setRuleDraft(cleaned);
-      setRulePanelOpen(false);
-      showBanner('success', `Reglas del premio "${cleaned.prizeName}" actualizadas.`);
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'No se pudieron guardar las reglas del premio.');
-    } finally {
-      setSavingRule(false);
-    }
-  };
-
-  const handleSingleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanName = singleName.trim();
-    if (cleanName.length < 2) {
-      showBanner('error', 'Ingresa un nombre válido (mínimo 2 caracteres).');
-      return;
-    }
-    const cleanCode = normalizeReferralCodeInput(singleCode);
-    setSubmittingSingle(true);
-    setBanner(null);
-    try {
-      await onCreatePartner({
-        name: cleanName,
-        code: cleanCode.length >= 2 ? cleanCode : undefined,
-        phone: singlePhone.trim() || undefined,
-        notes: singleNotes.trim() || undefined,
-        qrStyleId: singleStyleId,
-        active: true,
-      });
-      setSingleName('');
-      setSingleCode('');
-      setSingleCodeTouched(false);
-      setSinglePhone('');
-      setSingleNotes('');
-      setAddModalOpen(false);
-      showBanner('success', `Embajador "${cleanName}" creado con su código QR único.`);
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'No se pudo crear el embajador.');
-    } finally {
-      setSubmittingSingle(false);
-    }
-  };
-
-  const handleBatchTextSubmit = async () => {
-    if (parsedBatchPreview.length === 0 || submittingBatch) return;
-    setSubmittingBatch(true);
-    setBanner(null);
-    try {
-      const res = await onBatchCreatePartners({
-        items: parsedBatchPreview.map((item) => ({
-          name: item.name,
-          code: item.code,
-          phone: item.phone,
-        })),
-      });
-      setBatchText('');
-      setAddModalOpen(false);
-      const skippedText =
-        res.skipped.length > 0 ? ` (${res.skipped.length} omitidos por duplicado)` : '';
-      showBanner(
-        'success',
-        `${res.created.length} ${res.created.length === 1 ? 'embajador creado' : 'embajadores creados'} en lote${skippedText}.`
-      );
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'Error al crear el lote de embajadores.');
-    } finally {
-      setSubmittingBatch(false);
-    }
-  };
-
-  const handleQuickGenerateBatch = async () => {
-    if (submittingBatch) return;
-    const count = Math.max(1, Math.min(50, Math.round(Number(quickCount) || 20)));
-    const namePrefix = quickNamePrefix.trim() || 'Embajador';
-    const codePrefix = normalizeReferralCodeInput(quickCodePrefix) || 'EMB';
-
-    setSubmittingBatch(true);
-    setBanner(null);
-    try {
-      const res = await onBatchCreatePartners({
-        count,
-        namePrefix,
-        codePrefix,
-      });
-      setAddModalOpen(false);
-      const skippedText =
-        res.skipped.length > 0 ? ` (${res.skipped.length} ya existían)` : '';
-      showBanner(
-        'success',
-        `Lote listo: ${res.created.length} embajadores generados con prefijo ${codePrefix}${skippedText}.`
-      );
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'No se pudo generar el lote.');
-    } finally {
-      setSubmittingBatch(false);
-    }
+    setPendingSecretAction({
+      title: 'Guardar reglas del premio',
+      description: `Ingresa tu contraseña de Administrador para actualizar las reglas de "${cleaned.prizeName}".`,
+      confirmLabel: 'Autorizar y guardar',
+      run: async (masterPassword) => {
+        setSavingRule(true);
+        try {
+          await onSavePrizeRule(cleaned, masterPassword);
+          setRuleDraft(cleaned);
+          setRulePanelOpen(false);
+          showBanner('success', `Reglas del premio "${cleaned.prizeName}" actualizadas.`);
+        } finally {
+          setSavingRule(false);
+        }
+      },
+    });
   };
 
   const openEditModal = (partner: ReferralPartner) => {
@@ -675,85 +523,116 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     setEditCode(partner.code);
     setEditPhone(partner.phone || '');
     setEditNotes(partner.notes || '');
+    setEditAvatarUrl(partner.avatarUrl || '');
     setEditStyleId(partner.qrStyleId || 'classic-gold');
     setEditActive(partner.active);
+    setEditError(null);
   };
 
-  const handleSaveEdit = async (e: React.FormEvent) => {
+  const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingPartner || savingEdit) return;
+    setEditError(null);
     if (editName.trim().length < 2) {
-      showBanner('error', 'El nombre del embajador debe tener al menos 2 caracteres.');
+      setEditError('El nombre del embajador debe tener al menos 2 caracteres.');
       return;
     }
     const normalizedCode = normalizeReferralCodeInput(editCode);
     if (normalizedCode.length < 2) {
-      showBanner('error', 'El código debe tener al menos 2 caracteres alfanuméricos.');
+      setEditError('El código debe tener al menos 2 caracteres alfanuméricos.');
       return;
     }
-    setSavingEdit(true);
-    setBanner(null);
-    try {
-      await onUpdatePartner(editingPartner.id, {
-        name: editName.trim(),
-        code: normalizedCode,
-        phone: editPhone.trim(),
-        notes: editNotes.trim(),
-        qrStyleId: editStyleId,
-        active: editActive,
-      });
-      setEditingPartner(null);
-      showBanner('success', `Embajador "${editName.trim()}" actualizado.`);
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'No se pudo actualizar el embajador.');
-    } finally {
-      setSavingEdit(false);
+    const avatarCheck = validateAvatarUrlInput(editAvatarUrl);
+    if (!avatarCheck.ok) {
+      setEditError(avatarCheck.error || 'La foto de perfil no es válida.');
+      return;
     }
+    const targetPartner = editingPartner;
+    const payload: UpdateReferralPayload = {
+      name: editName.trim(),
+      code: normalizedCode,
+      phone: editPhone.trim(),
+      notes: editNotes.trim(),
+      avatarUrl: avatarCheck.value,
+      qrStyleId: editStyleId,
+      active: editActive,
+    };
+    setBanner(null);
+    setPendingSecretAction({
+      title: `Actualizar a ${targetPartner.name}`,
+      description: 'Ingresa tu contraseña de Administrador para guardar los cambios del perfil de embajador.',
+      confirmLabel: 'Autorizar y guardar',
+      run: async (masterPassword) => {
+        setSavingEdit(true);
+        try {
+          await onUpdatePartner(targetPartner.id, payload, masterPassword);
+          setEditingPartner(null);
+          showBanner('success', `Embajador "${payload.name}" actualizado.`);
+        } finally {
+          setSavingEdit(false);
+        }
+      },
+    });
   };
 
-  const handleToggleActive = async (partner: ReferralPartner) => {
+  const handleToggleActive = (partner: ReferralPartner) => {
     if (busyPartnerId) return;
-    setBusyPartnerId(partner.id);
     setBanner(null);
-    try {
-      await onUpdatePartner(partner.id, { active: !partner.active });
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'No se pudo cambiar el estado.');
-    } finally {
-      setBusyPartnerId(null);
-    }
+    setPendingSecretAction({
+      title: partner.active ? `Desactivar QR de ${partner.name}` : `Activar QR de ${partner.name}`,
+      description: 'Ingresa tu contraseña de Administrador para cambiar el estado activo de este embajador.',
+      confirmLabel: 'Autorizar cambio',
+      run: async (masterPassword) => {
+        setBusyPartnerId(partner.id);
+        try {
+          await onUpdatePartner(partner.id, { active: !partner.active }, masterPassword);
+        } finally {
+          setBusyPartnerId(null);
+        }
+      },
+    });
   };
 
-  const handleResetVisits = async (partner: ReferralPartner) => {
+  const handleResetVisits = (partner: ReferralPartner) => {
     if (resettingVisitsId) return;
-    setResettingVisitsId(partner.id);
     setBanner(null);
-    try {
-      await onUpdatePartner(partner.id, { resetVisits: true });
-      if (editingPartner?.id === partner.id) {
-        setEditingPartner({ ...editingPartner, visitsCount: 0, uniqueVisitsCount: 0, lastVisitAt: null });
-      }
-      showBanner('success', `Visitas QR de "${partner.name}" reiniciadas a 0.`);
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'No se pudieron reiniciar las visitas.');
-    } finally {
-      setResettingVisitsId(null);
-    }
+    setPendingSecretAction({
+      title: `Reiniciar visitas de ${partner.name}`,
+      description: 'Ingresa tu contraseña de Administrador para poner en 0 el contador e historial de visitas de este QR.',
+      confirmLabel: 'Autorizar reinicio',
+      run: async (masterPassword) => {
+        setResettingVisitsId(partner.id);
+        try {
+          await onUpdatePartner(partner.id, { resetVisits: true }, masterPassword);
+          if (editingPartner?.id === partner.id) {
+            setEditingPartner({ ...editingPartner, visitsCount: 0, uniqueVisitsCount: 0, lastVisitAt: null });
+          }
+          showBanner('success', `Visitas QR de "${partner.name}" reiniciadas a 0.`);
+        } finally {
+          setResettingVisitsId(null);
+        }
+      },
+    });
   };
 
-  const handleDelete = async (partner: ReferralPartner) => {
+  const handleDelete = (partner: ReferralPartner) => {
     if (busyPartnerId) return;
-    setBusyPartnerId(partner.id);
     setBanner(null);
-    try {
-      await onDeletePartner(partner.id);
-      setConfirmDeleteId(null);
-      showBanner('success', `Embajador "${partner.name}" eliminado.`);
-    } catch (err) {
-      showBanner('error', err instanceof Error ? err.message : 'No se pudo eliminar el embajador.');
-    } finally {
-      setBusyPartnerId(null);
-    }
+    setPendingSecretAction({
+      title: `Eliminar registro de ${partner.name}`,
+      description: 'Ingresa tu contraseña de Administrador para eliminar este perfil del ranking de embajadores.',
+      confirmLabel: 'Autorizar y eliminar',
+      run: async (masterPassword) => {
+        setBusyPartnerId(partner.id);
+        try {
+          await onDeletePartner(partner.id, masterPassword);
+          setConfirmDeleteId(null);
+          showBanner('success', `Embajador "${partner.name}" eliminado.`);
+        } finally {
+          setBusyPartnerId(null);
+        }
+      },
+    });
   };
 
   const handleCopyLink = async (partner: ReferralPartner) => {
@@ -780,6 +659,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         partnerName: qrModalPartner.name,
         code: qrModalPartner.code,
         referralUrl: buildReferralUrl(defaultOriginUrl, qrModalPartner.code),
+        avatarUrl: qrModalPartner.avatarUrl ?? null,
         styleId: qrModalStyle,
       });
     } catch (err) {
@@ -837,66 +717,69 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
   };
 
   const metricInfo = METRIC_LABELS[prizeRule.metric];
+  const adminTheme = getRoleTheme('admin');
 
   return (
     <div className="space-y-5 sm:space-y-6">
       {/* Editorial Header + Main CTAs */}
-      <section className="relative overflow-hidden rounded-[24px] sm:rounded-[26px] bg-gradient-to-br from-[#FFFDF9] via-[#FFF8EE] to-[#F7EADA] border border-[#E6D5BF] p-4 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)]">
-        <div className="pointer-events-none hidden sm:block absolute -right-12 -top-12 h-44 w-44 rounded-full bg-[#E5AE4E]/18 blur-2xl" />
-        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5 min-w-0">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#22150E] to-[#3B2418] text-[#F4CA73] shadow-md border border-[#C88A2B]/45">
-              <Trophy className="h-6 w-6" />
+      <motion.section
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+        className="relative overflow-hidden dsb-glass rounded-[24px] sm:rounded-[26px] p-4 sm:p-6"
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-1"
+          style={{ background: adminTheme.headerStrip }}
+        />
+        <div className="pointer-events-none hidden sm:block absolute -right-12 -top-12 h-44 w-44 rounded-full bg-[#8B0018]/10 blur-2xl" />
+        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4">
+          <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+            <div
+              className="flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl text-[#FDE68A] shadow-md border border-white/25"
+              style={{ background: adminTheme.heroGradient }}
+            >
+              <Trophy className="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
             <div className="min-w-0">
-              <span className="inline-flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.15em] text-[#9A6315]">
-                <Sparkles className="h-3.5 w-3.5 text-[#C88A2B] shrink-0" />
+              <span className="inline-flex items-center gap-1.5 text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.15em] text-[#8B0018]">
+                <Sparkles className="h-3.5 w-3.5 text-[#B91C1C] shrink-0" />
                 Programa de Embajadores QR · Competencia de Premios
               </span>
               <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#22150E] mt-0.5 leading-snug">
                 Ranking de Referidos y Ganadores
               </h2>
-              <p className="text-xs sm:text-sm text-[#6E5341] mt-1 max-w-2xl">
+              <p className="text-xs sm:text-sm text-[#594133] mt-1 max-w-2xl">
                 Controla los QRs individuales de tus embajadores, mide visitas, registros y ventas atribuidas en tiempo real, e identifica automáticamente a los ganadores del premio.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                setAddMode('single');
-                setAddModalOpen(true);
-              }}
-              className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full bg-[#22150E] px-4 py-2 text-xs font-bold text-[#F4CA73] border border-[#C88A2B]/40 hover:bg-[#3A2418] transition-colors cursor-pointer shadow-sm"
-            >
-              <UserPlus className="h-4 w-4 shrink-0" />
-              Agregar embajador
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAddMode('batch');
-                setAddModalOpen(true);
-              }}
-              className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#E5AE4E] to-[#C88A2B] px-4 py-2 text-xs font-bold text-[#1A0E08] hover:brightness-105 transition-all cursor-pointer shadow-sm"
-            >
-              <Users className="h-4 w-4 shrink-0" />
-              Lote rápido (20)
-            </button>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
+            {onGoToAccounts && (
+              <button
+                type="button"
+                onClick={onGoToAccounts}
+                style={{ background: adminTheme.heroGradient }}
+                className="inline-flex min-h-[44px] flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-[11.5px] sm:text-xs font-bold text-white border border-white/20 hover:brightness-110 active:scale-[0.985] transition-all cursor-pointer shadow-md"
+              >
+                <Users className="h-4 w-4 shrink-0" />
+                Gestionar Embajadores en Cuentas
+              </button>
+            )}
             <button
               type="button"
               onClick={handleExportCsv}
               disabled={visibleRows.length === 0}
-              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-[#FFFDF9] px-4 py-2 text-xs font-semibold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer disabled:opacity-45"
+              className="dsb-glass-subtle inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5 sm:px-4 py-2 text-xs font-semibold text-[#4E382B] hover:bg-white/85 transition-colors cursor-pointer disabled:opacity-45"
             >
               <Download className="h-3.5 w-3.5 shrink-0" />
               CSV
             </button>
           </div>
         </div>
-      </section>
+      </motion.section>
 
       {/* Feedback Banner */}
       <AnimatePresence>
@@ -932,86 +815,89 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       </AnimatePresence>
 
       {/* KPI Overview Bar */}
-      <section aria-label="Resumen de embajadores QR" className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
-        <div className="relative overflow-hidden rounded-[20px] bg-[#FFFDF9] border border-[#E6D5BF] p-3.5 sm:p-4 shadow-xs">
+      <section aria-label="Resumen de embajadores QR" className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3.5">
+        <div className="relative overflow-hidden dsb-glass rounded-[18px] sm:rounded-[20px] p-3 sm:p-4 hover:-translate-y-0.5 transition-transform">
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#C88A2B] to-[#F4CA73]" />
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#6E5341]">
-            <Users className="h-4 w-4 text-[#C88A2B] shrink-0" />
+          <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-semibold text-[#594133]">
+            <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-[#C88A2B] shrink-0" />
             <span className="truncate">Embajadores</span>
           </div>
-          <p className="mt-2 text-2xl sm:text-3xl font-bold text-[#22150E] tabular-nums">
+          <p className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-bold text-[#22150E] tabular-nums">
             {kpis.activePartners}
-            <span className="text-sm font-semibold text-[#8C6D58]"> / {kpis.totalPartners}</span>
+            <span className="text-xs sm:text-sm font-semibold text-[#7B5D4A]"> / {kpis.totalPartners}</span>
           </p>
-          <p className="mt-0.5 text-[11px] text-[#7B5D4A]">Activos ahora</p>
+          <p className="mt-0.5 text-[10.5px] sm:text-[11px] text-[#6E5341]">Activos ahora</p>
         </div>
 
-        <div className="relative overflow-hidden rounded-[20px] bg-[#FFFDF9] border border-[#E6D5BF] p-3.5 sm:p-4 shadow-xs">
-          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#B84A27] to-[#E5AE4E]" />
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#6E5341]">
-            <Eye className="h-4 w-4 text-[#B84A27] shrink-0" />
+        <div className="relative overflow-hidden dsb-glass rounded-[18px] sm:rounded-[20px] p-3 sm:p-4 hover:-translate-y-0.5 transition-transform">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#8B0018] to-[#DC2626]" />
+          <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-semibold text-[#594133]">
+            <Eye className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-[#8B0018] shrink-0" />
             <span className="truncate">Visitas QR</span>
           </div>
-          <p className="mt-2 text-2xl sm:text-3xl font-bold text-[#22150E] tabular-nums">
+          <p className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-bold text-[#22150E] tabular-nums">
             {kpis.totalVisits.toLocaleString('en-US')}
           </p>
-          <p className="mt-0.5 text-[11px] text-[#7B5D4A] tabular-nums">
+          <p className="mt-0.5 text-[10.5px] sm:text-[11px] text-[#6E5341] tabular-nums">
             {kpis.totalUniqueVisits.toLocaleString('en-US')} únicas
           </p>
         </div>
 
-        <div className="relative overflow-hidden rounded-[20px] bg-[#FFFDF9] border border-[#E6D5BF] p-3.5 sm:p-4 shadow-xs">
-          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#3D6B52] to-emerald-500" />
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#6E5341]">
-            <TrendingUp className="h-4 w-4 text-[#3D6B52] shrink-0" />
+        <div className="relative overflow-hidden dsb-glass rounded-[18px] sm:rounded-[20px] p-3 sm:p-4 hover:-translate-y-0.5 transition-transform">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#2B3A24] to-[#556B2F]" />
+          <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-semibold text-[#594133]">
+            <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-[#3F5432] shrink-0" />
             <span className="truncate">Registros QR</span>
           </div>
-          <p className="mt-2 text-2xl sm:text-3xl font-bold text-[#22150E] tabular-nums">
+          <p className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-bold text-[#22150E] tabular-nums">
             {kpis.totalLeads.toLocaleString('en-US')}
           </p>
-          <p className="mt-0.5 text-[11px] text-[#3D6B52] font-semibold tabular-nums">
+          <p className="mt-0.5 text-[10.5px] sm:text-[11px] text-[#3F5432] font-semibold tabular-nums">
             {kpis.conversionPct}% conversión
           </p>
         </div>
 
-        <div className="relative overflow-hidden rounded-[20px] bg-[#FFFDF9] border border-[#E6D5BF] p-3.5 sm:p-4 shadow-xs">
-          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 to-emerald-600" />
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#6E5341]">
-            <Award className="h-4 w-4 text-sky-700 shrink-0" />
+        <div className="relative overflow-hidden dsb-glass rounded-[18px] sm:rounded-[20px] p-3 sm:p-4 hover:-translate-y-0.5 transition-transform">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#0891B2] to-emerald-600" />
+          <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-semibold text-[#594133]">
+            <Award className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-[#0B4F6C] shrink-0" />
             <span className="truncate">Embudo QR</span>
           </div>
-          <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs sm:text-sm font-bold text-[#22150E] tabular-nums">
+          <div className="mt-1.5 sm:mt-2 flex flex-wrap items-baseline gap-x-1.5 sm:gap-x-2 gap-y-0.5 text-[11px] sm:text-sm font-bold text-[#22150E] tabular-nums">
             <span className="text-rose-700">{kpis.citas} Citas</span>
             <span className="text-[#C8B29A]">·</span>
             <span className="text-sky-700">{kpis.demos} Demos</span>
             <span className="text-[#C8B29A]">·</span>
             <span className="text-emerald-700">{kpis.ordenes} Órd.</span>
           </div>
-          <p className="mt-1 text-[11px] font-semibold text-[#7B5D4A] tabular-nums">
+          <p className="mt-1 text-[10.5px] sm:text-[11px] font-semibold text-[#6E5341] tabular-nums">
             Ventas: ${kpis.salesTotal.toLocaleString('en-US')}
           </p>
         </div>
 
-        <div className="col-span-2 lg:col-span-1 relative overflow-hidden rounded-[20px] bg-gradient-to-br from-[#22150E] via-[#341F14] to-[#4E2A16] border border-[#C88A2B]/55 p-3.5 sm:p-4 text-[#FFFDF9] shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#F4CA73]">
-            <Crown className="h-4 w-4 shrink-0" />
+        <div
+          style={{ background: adminTheme.heroGradient }}
+          className="col-span-2 lg:col-span-1 relative overflow-hidden rounded-[18px] sm:rounded-[20px] border border-white/25 backdrop-blur-xl p-3 sm:p-4 text-[#FFFDF9] shadow-md hover:-translate-y-0.5 transition-transform"
+        >
+          <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-semibold text-[#FDE68A]">
+            <Crown className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
             <span className="truncate">Ganadores</span>
           </div>
-          <p className="mt-2 text-2xl sm:text-3xl font-bold text-white tabular-nums">
+          <p className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-bold text-white tabular-nums">
             {kpis.winnersCount}
             {prizeRule.maxWinners > 0 && (
-              <span className="text-sm font-semibold text-[#E8D5BE]"> / Top {prizeRule.maxWinners}</span>
+              <span className="text-xs sm:text-sm font-semibold text-white/75"> / Top {prizeRule.maxWinners}</span>
             )}
           </p>
-          <p className="mt-0.5 text-[11px] text-[#E8D5BE] truncate">
+          <p className="mt-0.5 text-[10.5px] sm:text-[11px] text-white/80 truncate">
             Meta: {prizeRule.targetCount} {metricInfo.unit}
           </p>
         </div>
       </section>
 
       {/* Prize Rules Card (Collapsible) */}
-      <section className="rounded-[22px] bg-[#FFFDF9] border border-[#E6D5BF] shadow-xs overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-3.5 bg-gradient-to-r from-[#FAF1E4]/85 via-[#FFFDF9] to-[#FAF1E4]/70">
+      <section className="dsb-glass rounded-[22px] overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-3.5 bg-white/40">
           <div className="flex items-start sm:items-center gap-3 min-w-0">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF3DA] border border-[#E5C17B] text-[#8C5510]">
               <Settings2 className="h-5 w-5" />
@@ -1043,7 +929,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
           <button
             type="button"
             onClick={() => setRulePanelOpen((prev) => !prev)}
-            className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-white px-4 py-1.5 text-xs font-bold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer shrink-0"
+            className="inline-flex min-h-[40px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-full border border-[#DFCBB3] bg-white px-4 py-1.5 text-xs font-bold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer shrink-0"
           >
             {rulePanelOpen ? (
               <>
@@ -1080,7 +966,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                       onChange={(e) => setRuleDraft((prev) => ({ ...prev, prizeName: e.target.value }))}
                       maxLength={80}
                       placeholder="Premio Embajador Royal Prestige"
-                      className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                      className="w-full min-h-[44px] sm:min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                     />
                   </div>
 
@@ -1096,7 +982,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                           metric: e.target.value as ReferralMetricKey,
                         }))
                       }
-                      className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                      className="w-full min-h-[44px] sm:min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                     >
                       <option value="leads">Registros (Leads)</option>
                       <option value="citas">Citas</option>
@@ -1121,7 +1007,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                           targetCount: Math.max(1, Number(e.target.value) || 1),
                         }))
                       }
-                      className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-sm font-mono font-bold text-[#22150E] tabular-nums focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                      className="w-full min-h-[44px] sm:min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                     />
                   </div>
 
@@ -1140,7 +1026,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                           maxWinners: Math.max(0, Number(e.target.value) || 0),
                         }))
                       }
-                      className="w-full min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-sm font-mono font-bold text-[#22150E] tabular-nums focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                      className="w-full min-h-[44px] sm:min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                     />
                     <span className="mt-0.5 block text-[10.5px] text-[#8A6D5B]">
                       {ruleDraft.maxWinners === 0
@@ -1172,7 +1058,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                               pointsPerLead: Math.max(0, Number(e.target.value) || 0),
                             }))
                           }
-                          className="w-full min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-sm font-mono font-bold text-[#22150E] tabular-nums"
+                          className="w-full min-h-[42px] sm:min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums"
                         />
                       </div>
                       <div>
@@ -1190,7 +1076,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                               pointsPerCita: Math.max(0, Number(e.target.value) || 0),
                             }))
                           }
-                          className="w-full min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-sm font-mono font-bold text-[#22150E] tabular-nums"
+                          className="w-full min-h-[42px] sm:min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums"
                         />
                       </div>
                       <div>
@@ -1208,7 +1094,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                               pointsPerDemo: Math.max(0, Number(e.target.value) || 0),
                             }))
                           }
-                          className="w-full min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-sm font-mono font-bold text-[#22150E] tabular-nums"
+                          className="w-full min-h-[42px] sm:min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums"
                         />
                       </div>
                       <div>
@@ -1226,28 +1112,28 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                               pointsPerOrden: Math.max(0, Number(e.target.value) || 0),
                             }))
                           }
-                          className="w-full min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-sm font-mono font-bold text-[#22150E] tabular-nums"
+                          className="w-full min-h-[42px] sm:min-h-[38px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-base sm:text-sm font-mono font-bold text-[#22150E] tabular-nums"
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => {
                       setRuleDraft(prizeRule);
                       setRulePanelOpen(false);
                     }}
-                    className="min-h-[40px] rounded-full border border-[#DFCBB3] px-4 py-1.5 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF1E4] cursor-pointer"
+                    className="min-h-[44px] sm:min-h-[40px] w-full sm:w-auto rounded-full border border-[#DFCBB3] px-4 py-1.5 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF1E4] cursor-pointer"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
                     disabled={savingRule}
-                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-full bg-[#22150E] px-5 py-1.5 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
+                    className="inline-flex min-h-[44px] sm:min-h-[40px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-full bg-[#22150E] px-5 py-1.5 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
                   >
                     <Save className="h-3.5 w-3.5" />
                     {savingRule ? 'Guardando...' : 'Guardar reglas del premio'}
@@ -1262,17 +1148,17 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       {/* Top 3 Winners Podium */}
       {podiumRows.length > 0 && (
         <section aria-label="Podio Top 3 Embajadores" className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
             <h3 className="font-serif text-base sm:text-lg font-bold text-[#22150E] flex items-center gap-2">
-              <Crown className="h-5 w-5 text-[#C88A2B]" />
+              <Crown className="h-5 w-5 text-[#C88A2B] shrink-0" />
               Podio de Líderes · Top {podiumRows.length}
             </h3>
-            <span className="text-xs font-semibold text-[#7B5D4A]">
+            <span className="text-[11px] sm:text-xs font-semibold text-[#7B5D4A]">
               Ordenado por {metricInfo.label.toLowerCase()}
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 items-stretch">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-3.5 items-stretch">
             {podiumRows.map((row) => {
               const isFirst = row.rank === 1;
               const isSecond = row.rank === 2;
@@ -1281,20 +1167,23 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                   key={row.partner.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`relative overflow-hidden rounded-[22px] border p-4 sm:p-5 flex flex-col justify-between transition-all ${
+                  whileHover={{ y: -3 }}
+                  transition={{ duration: 0.22 }}
+                  className={`relative overflow-hidden rounded-[20px] sm:rounded-[22px] border p-3.5 sm:p-5 flex flex-col justify-between transition-all ${
                     isFirst
-                      ? 'bg-gradient-to-b from-[#24150D] via-[#1D110A] to-[#130A06] border-[#C88A2B]/70 text-[#FFFDF9] shadow-[0_18px_38px_-14px_rgba(34,21,14,0.48)]'
+                      ? 'bg-gradient-to-b from-[#24150D]/95 via-[#1D110A]/95 to-[#130A06]/95 backdrop-blur-xl border-[#C88A2B]/70 text-[#FFFDF9] shadow-[0_18px_38px_-14px_rgba(34,21,14,0.48)]'
                       : isSecond
-                        ? 'bg-gradient-to-b from-[#FFFDF9] to-[#FAF1E4] border-[#D8BE99] text-[#22150E] shadow-sm'
-                        : 'bg-gradient-to-b from-[#FFFDF9] to-[#F8EEE1] border-[#E6D5BF] text-[#22150E] shadow-xs'
+                        ? 'dsb-glass border-[#D8BE99]/80 text-[#22150E]'
+                        : 'dsb-glass border-white/75 text-[#22150E]'
                   }`}
                 >
                   {isFirst && (
                     <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-[#F4CA73]/18 blur-2xl" />
                   )}
-                  <div className="relative space-y-3">
+                  <div className="relative space-y-2.5 sm:space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <span
+                        data-preserve-surface={isFirst ? 'true' : undefined}
                         className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${
                           isFirst
                             ? 'bg-[#F4CA73] text-[#1A0E08]'
@@ -1326,38 +1215,47 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                       )}
                     </div>
 
-                    <div>
-                      <h4
-                        className={`font-serif text-lg font-bold truncate ${
-                          isFirst ? 'text-white' : 'text-[#22150E]'
-                        }`}
-                      >
-                        {row.partner.name}
-                      </h4>
-                      <span
-                        className={`inline-block mt-0.5 font-mono text-[11px] font-bold tracking-wide ${
-                          isFirst ? 'text-[#F4CA73]' : 'text-[#9A6315]'
-                        }`}
-                      >
-                        ?ref={row.partner.code}
-                      </span>
+                    <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                      <AmbassadorAvatar
+                        name={row.partner.name}
+                        avatarUrl={row.partner.avatarUrl}
+                        size="md"
+                        ring="gold"
+                        className={isFirst ? 'ring-offset-[#1D110A]' : ''}
+                      />
+                      <div className="min-w-0">
+                        <h4
+                          className={`font-serif text-base sm:text-lg font-bold truncate ${
+                            isFirst ? 'text-white' : 'text-[#22150E]'
+                          }`}
+                        >
+                          {row.partner.name}
+                        </h4>
+                        <span
+                          className={`inline-block mt-0.5 font-mono text-[11px] font-bold tracking-wide truncate max-w-full ${
+                            isFirst ? 'text-[#F4CA73]' : 'text-[#9A6315]'
+                          }`}
+                        >
+                          ?ref={row.partner.code}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 pt-1">
+                    <div className="grid grid-cols-3 gap-1.5 sm:gap-2 pt-0.5 sm:pt-1">
                       <div
-                        className={`rounded-xl px-2.5 py-2 text-center ${
+                        className={`rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-center ${
                           isFirst ? 'bg-white/8 border border-white/10' : 'bg-white border border-[#EFE3D2]'
                         }`}
                       >
                         <span
-                          className={`block text-[10px] font-semibold ${
+                          className={`block text-[10px] font-semibold truncate ${
                             isFirst ? 'text-[#E8D5BE]' : 'text-[#8A6D5B]'
                           }`}
                         >
                           {metricInfo.short}
                         </span>
                         <span
-                          className={`block text-lg font-bold tabular-nums ${
+                          className={`block text-base sm:text-lg font-bold tabular-nums ${
                             isFirst ? 'text-[#F4CA73]' : 'text-[#22150E]'
                           }`}
                         >
@@ -1365,7 +1263,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         </span>
                       </div>
                       <div
-                        className={`rounded-xl px-2.5 py-2 text-center ${
+                        className={`rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-center ${
                           isFirst ? 'bg-white/8 border border-white/10' : 'bg-white border border-[#EFE3D2]'
                         }`}
                       >
@@ -1377,7 +1275,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                           Visitas
                         </span>
                         <span
-                          className={`block text-lg font-bold tabular-nums ${
+                          className={`block text-base sm:text-lg font-bold tabular-nums ${
                             isFirst ? 'text-white' : 'text-[#22150E]'
                           }`}
                         >
@@ -1385,7 +1283,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         </span>
                       </div>
                       <div
-                        className={`rounded-xl px-2.5 py-2 text-center ${
+                        className={`rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-center ${
                           isFirst ? 'bg-white/8 border border-white/10' : 'bg-white border border-[#EFE3D2]'
                         }`}
                       >
@@ -1397,7 +1295,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                           Conv.
                         </span>
                         <span
-                          className={`block text-lg font-bold tabular-nums ${
+                          className={`block text-base sm:text-lg font-bold tabular-nums ${
                             isFirst ? 'text-emerald-300' : 'text-[#3D6B52]'
                           }`}
                         >
@@ -1425,14 +1323,15 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     </div>
                   </div>
 
-                  <div className="relative mt-4 pt-3 border-t border-current/10 flex items-center gap-2">
+                  <div className="relative mt-3 pt-2.5 sm:mt-4 sm:pt-3 border-t border-current/10 flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => openQrModal(row.partner)}
+                      data-preserve-surface={isFirst ? 'true' : undefined}
                       className={`flex-1 min-h-[38px] inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
                         isFirst
                           ? 'bg-[#F4CA73] text-[#1A0E08] hover:brightness-105'
-                          : 'bg-[#22150E] text-[#FAF3E8] hover:bg-[#3A2418]'
+                          : 'border border-[#C88A2B]/40 bg-[#22150E] text-[#FAF3E8] hover:bg-[#3A2418]'
                       }`}
                     >
                       <QrCode className="h-3.5 w-3.5" />
@@ -1463,31 +1362,31 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       )}
 
       {/* Full Ranking Directory (~20 Ambassadors) */}
-      <section className="rounded-[24px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF]/90 p-3.5 sm:p-6 shadow-[0_14px_34px_-16px_rgba(34,21,14,0.12)] space-y-4">
+      <section className="dsb-glass rounded-[24px] sm:rounded-[26px] p-3.5 sm:p-6 space-y-4">
         {/* Search, Filter Pills & Sort */}
-        <div className="flex flex-col gap-3 pb-4 border-b border-[#EFE3D2]">
+        <div className="flex flex-col gap-3 pb-4 border-b border-slate-900/10">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="relative flex-1 md:max-w-md">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#9B816E]" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#7B5D4A]" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar embajador por nombre, código o teléfono..."
-                className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] py-2.5 pl-10 pr-4 text-sm text-[#22150E] placeholder:text-[#9D8370] focus:border-[#C88A2B] focus:bg-white focus:outline-none"
+                className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3]/85 bg-white/75 backdrop-blur-sm py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#8A6D5B] focus:border-[#8B0018] focus:bg-white focus:outline-none transition-colors"
               />
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 w-full md:w-auto">
               <Filter className="h-4 w-4 text-[#8A6D5B] shrink-0" />
-              <label htmlFor="referrals-sort-select" className="text-xs font-semibold text-[#6E5341] whitespace-nowrap">
+              <label htmlFor="referrals-sort-select" className="text-xs font-semibold text-[#594133] whitespace-nowrap">
                 Ordenar:
               </label>
               <select
                 id="referrals-sort-select"
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="min-h-[42px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-1.5 text-xs font-semibold text-[#22150E] focus:border-[#C88A2B] focus:bg-white focus:outline-none"
+                className="flex-1 md:flex-none min-h-[44px] sm:min-h-[42px] rounded-xl border border-[#DFCBB3]/85 bg-white/75 backdrop-blur-sm px-3 py-1.5 text-base sm:text-xs font-semibold text-[#22150E] focus:border-[#8B0018] focus:bg-white focus:outline-none transition-colors"
               >
                 <option value="prize_rank">Ranking del premio</option>
                 <option value="leads">Más registros</option>
@@ -1530,8 +1429,8 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                   onClick={() => setFilterMode(pill.id)}
                   className={`shrink-0 whitespace-nowrap min-h-[38px] sm:min-h-[34px] rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
                     active
-                      ? 'bg-[#B84A27] text-white shadow-sm'
-                      : 'bg-[#FAF1E4] text-[#6E5341] hover:bg-[#F0E1CC]'
+                      ? adminTheme.activePillClass
+                      : 'dsb-glass-subtle text-[#594133] hover:bg-white/85'
                   }`}
                 >
                   {pill.label}
@@ -1551,32 +1450,20 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               Aún no hay embajadores registrados
             </h3>
             <p className="text-xs sm:text-sm text-[#6E5341] max-w-md mx-auto">
-              Crea tus primeros embajadores uno por uno o genera un lote de 20 códigos QR listos para repartir en segundos.
+              Los embajadores se crean y sincronizan automáticamente desde la pestaña <strong>Cuentas</strong> al dar de alta cuentas con rol Vendedor / Embajador.
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setAddMode('batch');
-                  setAddModalOpen(true);
-                }}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#E5AE4E] to-[#C88A2B] px-5 py-2 text-xs font-bold text-[#1A0E08] shadow hover:brightness-105 cursor-pointer"
-              >
-                <Users className="h-4 w-4" />
-                Generar 20 embajadores (EMB-01 a EMB-20)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAddMode('single');
-                  setAddModalOpen(true);
-                }}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-[#22150E] px-5 py-2 text-xs font-bold text-[#FAF3E8] hover:bg-[#3A2418] cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                Crear embajador individual
-              </button>
-            </div>
+            {onGoToAccounts && (
+              <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={onGoToAccounts}
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-[#22150E] px-5 py-2 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer"
+                >
+                  <Users className="h-4 w-4" />
+                  Ir a Cuentas y crear Embajador
+                </button>
+              </div>
+            )}
           </div>
         ) : visibleRows.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[#DEC9AE] bg-[#FAF1E4]/40 py-10 text-center">
@@ -1599,12 +1486,13 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               return (
                 <div
                   key={partner.id}
-                  className={`rounded-2xl border p-3.5 sm:p-4 transition-all ${
+                  data-dsb-card={!partner.active ? 'locked' : row.isWinning ? 'winning' : undefined}
+                  className={`rounded-2xl border p-3.5 sm:p-4 backdrop-blur-md transition-all duration-200 ${
                     !partner.active
-                      ? 'border-stone-200 bg-stone-50/70 opacity-80'
+                      ? 'border-stone-200/80 bg-stone-50/65 opacity-80'
                       : row.isWinning
-                        ? 'border-emerald-300 bg-gradient-to-r from-[#FFFDF9] via-[#F7FCF9] to-[#F0FAF4] shadow-xs'
-                        : 'border-[#E6D5BF] bg-white hover:border-[#C88A2B]/65'
+                        ? 'border-emerald-300/85 bg-gradient-to-r from-white/78 via-[#F7FCF9]/75 to-[#F0FAF4]/75 shadow-xs hover:bg-white/88'
+                        : 'dsb-glass-subtle bg-white/70 hover:bg-white/85 hover:shadow-sm'
                   }`}
                 >
                   <div
@@ -1624,9 +1512,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     title={isExpanded ? 'Clic para ocultar prospectos' : 'Clic para desplegar métricas y prospectos de este QR'}
                   >
                     {/* Left: Rank + Identity + Prize Progress */}
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
                       <div
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-serif text-sm font-bold tabular-nums border ${
+                        className={`flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl font-serif text-xs sm:text-sm font-bold tabular-nums border ${
                           row.rank === 1
                             ? 'bg-[#22150E] text-[#F4CA73] border-[#C88A2B]'
                             : row.rank === 2
@@ -1638,6 +1526,13 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                       >
                         #{row.rank}
                       </div>
+
+                      <AmbassadorAvatar
+                        name={partner.name}
+                        avatarUrl={partner.avatarUrl}
+                        size="sm"
+                        ring={row.isWinning ? 'gold' : 'subtle'}
+                      />
 
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -1684,7 +1579,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                             <span>Último escaneo: {formatShortDate(partner.lastVisitAt)}</span>
                           )}
                           {partner.notes && (
-                            <span className="truncate max-w-xs italic text-[#8A6D5B]">
+                            <span className="truncate max-w-full sm:max-w-xs italic text-[#8A6D5B]">
                               “{partner.notes}”
                             </span>
                           )}
@@ -1707,9 +1602,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     </div>
 
                     {/* Center: Compact Live Metrics Grid */}
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 shrink-0">
-                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-2.5 py-1.5 text-center">
-                        <span className="block text-[10px] font-semibold text-[#8A6D5B]">Visitas QR</span>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 sm:gap-2 w-full xl:w-auto xl:shrink-0">
+                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-1.5 sm:px-2.5 py-1.5 text-center min-w-0">
+                        <span className="block text-[10px] font-semibold text-[#8A6D5B] truncate">Visitas QR</span>
                         <span className="block text-sm font-bold text-[#22150E] tabular-nums">
                           {row.visits}
                         </span>
@@ -1718,8 +1613,8 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         </span>
                       </div>
 
-                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-2.5 py-1.5 text-center">
-                        <span className="block text-[10px] font-semibold text-[#8A6D5B]">Registros</span>
+                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-1.5 sm:px-2.5 py-1.5 text-center min-w-0">
+                        <span className="block text-[10px] font-semibold text-[#8A6D5B] truncate">Registros</span>
                         <span className="block text-sm font-bold text-[#B84A27] tabular-nums">
                           {row.leadsCount}
                         </span>
@@ -1728,34 +1623,34 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         </span>
                       </div>
 
-                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-2.5 py-1.5 text-center">
-                        <span className="block text-[10px] font-semibold text-[#8A6D5B]">Citas</span>
+                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-1.5 sm:px-2.5 py-1.5 text-center min-w-0">
+                        <span className="block text-[10px] font-semibold text-[#8A6D5B] truncate">Citas</span>
                         <span className="block text-sm font-bold text-rose-700 tabular-nums">
                           {row.citasCount}
                         </span>
                       </div>
 
-                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-2.5 py-1.5 text-center">
-                        <span className="block text-[10px] font-semibold text-[#8A6D5B]">Demos</span>
+                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-1.5 sm:px-2.5 py-1.5 text-center min-w-0">
+                        <span className="block text-[10px] font-semibold text-[#8A6D5B] truncate">Demos</span>
                         <span className="block text-sm font-bold text-sky-700 tabular-nums">
                           {row.demosCount}
                         </span>
                       </div>
 
-                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-2.5 py-1.5 text-center">
-                        <span className="block text-[10px] font-semibold text-[#8A6D5B]">Órdenes</span>
+                      <div className="rounded-xl border border-[#EFE3D2] bg-[#FCF8F2] px-1.5 sm:px-2.5 py-1.5 text-center min-w-0">
+                        <span className="block text-[10px] font-semibold text-[#8A6D5B] truncate">Órdenes</span>
                         <span className="block text-sm font-bold text-emerald-700 tabular-nums">
                           {row.ordenesCount}
                         </span>
                         {row.salesTotal > 0 && (
-                          <span className="block text-[9.5px] font-bold text-emerald-800 tabular-nums">
+                          <span className="block text-[9.5px] font-bold text-emerald-800 tabular-nums truncate">
                             ${row.salesTotal.toLocaleString('en-US')}
                           </span>
                         )}
                       </div>
 
-                      <div className="rounded-xl border border-[#E5C17B] bg-[#FFF6E3] px-2.5 py-1.5 text-center">
-                        <span className="block text-[10px] font-bold text-[#8A5610]">
+                      <div className="rounded-xl border border-[#E5C17B] bg-[#FFF6E3] px-1.5 sm:px-2.5 py-1.5 text-center min-w-0">
+                        <span className="block text-[10px] font-bold text-[#8A5610] truncate">
                           {prizeRule.metric === 'points' ? 'Puntaje' : metricInfo.short}
                         </span>
                         <span className="block text-sm font-bold text-[#22150E] tabular-nums">
@@ -1771,31 +1666,31 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                   </div>
 
                   {/* Quick Action Strip */}
-                  <div className="mt-3 pt-3 border-t border-[#EFE3D2] flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="mt-3 pt-3 border-t border-[#EFE3D2] flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2">
+                    <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full sm:w-auto">
                       <button
                         type="button"
                         onClick={() => openQrModal(partner)}
-                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1.5 rounded-xl bg-[#22150E] px-3 py-1.5 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] transition-colors cursor-pointer"
+                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center justify-center gap-1.5 rounded-xl bg-[#22150E] px-2.5 sm:px-3 py-1.5 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] transition-colors cursor-pointer"
                       >
-                        <QrCode className="h-3.5 w-3.5" />
-                        Tarjeta QR HD
+                        <QrCode className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">Tarjeta QR HD</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleCopyLink(partner)}
-                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1.5 rounded-xl border border-[#DFCBB3] bg-[#FAF3E8] px-3 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
+                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center justify-center gap-1.5 rounded-xl border border-[#DFCBB3] bg-[#FAF3E8] px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#F3E4CE] transition-colors cursor-pointer"
                       >
                         {copiedId === partner.id ? (
                           <>
-                            <Check className="h-3.5 w-3.5 text-emerald-600" />
-                            Enlace copiado
+                            <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                            <span className="truncate">Enlace copiado</span>
                           </>
                         ) : (
                           <>
-                            <Link2 className="h-3.5 w-3.5 text-[#B84A27]" />
-                            Copiar enlace
+                            <Link2 className="h-3.5 w-3.5 text-[#B84A27] shrink-0" />
+                            <span className="truncate">Copiar enlace</span>
                           </>
                         )}
                       </button>
@@ -1804,9 +1699,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         href={whatsappHref}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
                       >
-                        <MessageCircle className="h-3.5 w-3.5" />
+                        <MessageCircle className="h-3.5 w-3.5 shrink-0" />
                         WhatsApp
                       </a>
 
@@ -1815,18 +1710,18 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         onClick={() =>
                           setExpandedPartnerId((cur) => (cur === partner.id ? null : partner.id))
                         }
-                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center gap-1.5 rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer"
+                        className="inline-flex min-h-[38px] sm:min-h-[34px] items-center justify-center gap-1.5 rounded-xl border border-[#DFCBB3] bg-white px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#594133] hover:bg-[#FAF1E4] transition-colors cursor-pointer"
                       >
                         {isExpanded ? (
-                          <ChevronUp className="h-3.5 w-3.5" />
+                          <ChevronUp className="h-3.5 w-3.5 shrink-0" />
                         ) : (
-                          <ChevronDown className="h-3.5 w-3.5" />
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
                         )}
-                        Ver referidos ({row.leadsCount})
+                        <span className="truncate">Ver referidos ({row.leadsCount})</span>
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-end gap-1.5 w-full sm:w-auto">
                       <button
                         type="button"
                         onClick={() => openEditModal(partner)}
@@ -1894,11 +1789,11 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                         className="overflow-hidden"
                       >
                         <div className="mt-3 pt-3 border-t border-dashed border-[#DFCBB3] space-y-2">
-                          <div className="flex items-center justify-between text-xs">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
                             <span className="font-bold text-[#594133]">
                               Prospectos traídos por {partner.name} ({row.leadsCount})
                             </span>
-                            <span className="font-mono text-[11px] text-[#8A6D5B] truncate max-w-[240px] sm:max-w-md">
+                            <span className="font-mono text-[11px] text-[#8A6D5B] truncate max-w-full sm:max-w-md">
                               {referralUrl}
                             </span>
                           </div>
@@ -1953,310 +1848,6 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         )}
       </section>
 
-      {/* Modal 1: Add Single or Batch Ambassadors (~20 people) */}
-      <AnimatePresence>
-        {addModalOpen && (
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-referrers-title"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/60 backdrop-blur-xs sm:backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
-            onClick={() => !submittingSingle && !submittingBatch && setAddModalOpen(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-xl max-h-[90dvh] overflow-y-auto rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF] p-5 sm:p-6 shadow-2xl space-y-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#9A6315]">
-                    Alta de Embajadores QR
-                  </span>
-                  <h3 id="add-referrers-title" className="font-serif text-xl font-bold text-[#22150E]">
-                    Crear códigos de referencia
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAddModalOpen(false)}
-                  aria-label="Cerrar modal"
-                  className="flex h-10 w-10 items-center justify-center rounded-full text-[#7B5D4A] hover:bg-[#FAF1E4] cursor-pointer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {/* Mode Switcher */}
-              <div className="grid grid-cols-2 rounded-2xl bg-[#F3E8D9] p-1 border border-[#E3D0B8]">
-                <button
-                  type="button"
-                  onClick={() => setAddMode('single')}
-                  className={`min-h-[40px] rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    addMode === 'single'
-                      ? 'bg-[#FFFDF9] text-[#22150E] shadow-sm'
-                      : 'text-[#6E5341] hover:text-[#22150E]'
-                  }`}
-                >
-                  1 Embajador
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAddMode('batch')}
-                  className={`min-h-[40px] rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    addMode === 'batch'
-                      ? 'bg-[#FFFDF9] text-[#22150E] shadow-sm'
-                      : 'text-[#6E5341] hover:text-[#22150E]'
-                  }`}
-                >
-                  Modo Lote (hasta 20+)
-                </button>
-              </div>
-
-              {addMode === 'single' ? (
-                <form onSubmit={handleSingleSubmit} className="space-y-3.5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-[#594133] mb-1">
-                        Nombre completo *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={singleName}
-                        onChange={(e) => setSingleName(e.target.value)}
-                        placeholder="Ej. María González"
-                        className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-[#594133] mb-1">
-                        Código único (?ref=...)
-                      </label>
-                      <input
-                        type="text"
-                        value={singleCode}
-                        onChange={(e) => {
-                          setSingleCodeTouched(true);
-                          setSingleCode(sanitizeReferralCodeDraft(e.target.value));
-                        }}
-                        onBlur={() => setSingleCode((prev) => normalizeReferralCodeInput(prev))}
-                        placeholder="Auto-sugerido (ej. MARIA-01)"
-                        maxLength={32}
-                        className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 font-mono text-sm font-bold text-[#8C4A19] uppercase focus:bg-white focus:border-[#C88A2B] focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-[#594133] mb-1">
-                        WhatsApp / Teléfono (opcional)
-                      </label>
-                      <input
-                        type="tel"
-                        value={singlePhone}
-                        onChange={(e) => setSinglePhone(e.target.value)}
-                        placeholder="Ej. +52 55 1234 5678"
-                        className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-[#594133] mb-1">
-                        Estilo de tarjeta QR
-                      </label>
-                      <select
-                        value={singleStyleId}
-                        onChange={(e) => setSingleStyleId(e.target.value as QrStyleId)}
-                        className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
-                      >
-                        {QR_STYLE_OPTIONS.map((opt) => (
-                          <option key={opt.id} value={opt.id}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-[#594133] mb-1">
-                      Notas (opcional)
-                    </label>
-                    <input
-                      type="text"
-                      value={singleNotes}
-                      onChange={(e) => setSingleNotes(e.target.value)}
-                      placeholder="Ej. Grupo Norte · Cliente VIP"
-                      className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
-                    />
-                  </div>
-
-                  {normalizeReferralCodeInput(singleCode).length >= 2 && (
-                    <div className="rounded-xl border border-[#E6D5BF] bg-[#FAF1E4]/70 px-3.5 py-2 text-xs text-[#594133]">
-                      <span className="font-semibold">Enlace generado: </span>
-                      <span className="font-mono text-[#8C4A19] break-all">
-                        {buildReferralUrl(defaultOriginUrl, normalizeReferralCodeInput(singleCode))}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setAddModalOpen(false)}
-                      className="min-h-[44px] rounded-full border border-[#DFCBB3] px-4 py-2 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF1E4] cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submittingSingle || singleName.trim().length < 2}
-                      className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-full bg-[#22150E] px-5 py-2 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
-                    >
-                      <Plus className="h-4 w-4" />
-                      {submittingSingle ? 'Creando...' : 'Crear embajador'}
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div className="space-y-5">
-                  {/* Option A: Paste list of names */}
-                  <div className="rounded-2xl border border-[#E6D5BF] bg-[#FCF8F2] p-4 space-y-3">
-                    <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#8C4A19]">
-                        Opción A · Pegar lista de embajadores (1 por línea)
-                      </h4>
-                      <p className="text-[11.5px] text-[#6E5341] mt-0.5">
-                        Formato aceptado: <code className="font-mono">Nombre</code> o{' '}
-                        <code className="font-mono">Nombre, Teléfono</code> (máximo 50 por lote).
-                      </p>
-                    </div>
-
-                    <textarea
-                      rows={5}
-                      value={batchText}
-                      onChange={(e) => setBatchText(e.target.value)}
-                      placeholder={'María González, +52 55 1111 2222\nCarlos Ramírez\nSofía Herrera, +52 55 3333 4444'}
-                      className="w-full rounded-xl border border-[#DFCBB3] bg-white p-3 text-xs font-mono text-[#22150E] placeholder:text-[#A8917D] focus:border-[#C88A2B] focus:outline-none"
-                    />
-
-                    {parsedBatchPreview.length > 0 && (
-                      <div className="max-h-36 overflow-y-auto rounded-xl border border-[#EFE3D2] bg-white p-2.5 space-y-1">
-                        <p className="text-[10.5px] font-bold uppercase text-[#8A6D5B] mb-1">
-                          Vista previa ({parsedBatchPreview.length} listos)
-                        </p>
-                        {parsedBatchPreview.map((item, idx) => (
-                          <div
-                            key={`${item.code}-${idx}`}
-                            className="flex items-center justify-between gap-2 text-xs py-0.5 border-b border-[#FAF1E4] last:border-0"
-                          >
-                            <span className="font-semibold text-[#22150E] truncate">{item.name}</span>
-                            <div className="flex items-center gap-2 shrink-0">
-                              {item.phone && (
-                                <span className="font-mono text-[10.5px] text-[#7B5D4A]">{item.phone}</span>
-                              )}
-                              <span className="rounded bg-[#FAF0E0] px-1.5 py-0.5 font-mono text-[10.5px] font-bold text-[#8C4A19]">
-                                {item.code}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      disabled={parsedBatchPreview.length === 0 || submittingBatch}
-                      onClick={handleBatchTextSubmit}
-                      className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 rounded-full bg-[#22150E] px-5 py-2 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-45"
-                    >
-                      <Users className="h-4 w-4" />
-                      {submittingBatch
-                        ? 'Creando lote...'
-                        : `Crear ${parsedBatchPreview.length} embajadores en 1 clic`}
-                    </button>
-                  </div>
-
-                  {/* Option B: Instant Generator (e.g. 20 ambassadors EMB-01 to EMB-20) */}
-                  <div className="rounded-2xl border border-[#E5C17B] bg-gradient-to-br from-[#FFF9ED] to-[#FAF1E4] p-4 space-y-3">
-                    <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#8C5510]">
-                        Opción B · Generador instantáneo (ej. 20 personas)
-                      </h4>
-                      <p className="text-[11.5px] text-[#6E5341] mt-0.5">
-                        Arma el lote completo al instante y luego edita el nombre real de cada persona cuando entregues su QR.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-[#594133] mb-1">
-                          Cantidad
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={50}
-                          value={quickCount}
-                          onChange={(e) => setQuickCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
-                          className="w-full min-h-[40px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-sm font-mono font-bold text-[#22150E] tabular-nums"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-[#594133] mb-1">
-                          Prefijo nombre
-                        </label>
-                        <input
-                          type="text"
-                          value={quickNamePrefix}
-                          onChange={(e) => setQuickNamePrefix(e.target.value)}
-                          placeholder="Embajador"
-                          className="w-full min-h-[40px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 text-sm text-[#22150E]"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-[#594133] mb-1">
-                          Prefijo código
-                        </label>
-                        <input
-                          type="text"
-                          value={quickCodePrefix}
-                          onChange={(e) => setQuickCodePrefix(sanitizeReferralCodeDraft(e.target.value, 12))}
-                          onBlur={() =>
-                            setQuickCodePrefix((prev) => normalizeReferralCodeInput(prev).slice(0, 12))
-                          }
-                          placeholder="EMB"
-                          maxLength={12}
-                          className="w-full min-h-[40px] rounded-xl border border-[#DFCBB3] bg-white px-3 py-1.5 font-mono text-sm font-bold text-[#8C4A19] uppercase"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={submittingBatch}
-                      onClick={handleQuickGenerateBatch}
-                      className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] px-5 py-2.5 text-xs font-bold text-[#1A0E08] shadow hover:brightness-105 cursor-pointer disabled:opacity-50"
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      {submittingBatch
-                        ? 'Generando...'
-                        : `Generar ${quickCount} embajadores (${normalizeReferralCodeInput(quickCodePrefix) || 'EMB'}-01 a ${normalizeReferralCodeInput(quickCodePrefix) || 'EMB'}-${String(quickCount).padStart(2, '0')})`}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Modal 2: Edit Ambassador */}
       <AnimatePresence>
         {editingPartner && (
@@ -2267,7 +1858,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/60 backdrop-blur-xs sm:backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c1009]/60 backdrop-blur-xs sm:backdrop-blur-sm p-3 sm:p-4 overflow-y-auto"
             onClick={() => !savingEdit && setEditingPartner(null)}
           >
             <motion.form
@@ -2276,21 +1867,21 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               exit={{ opacity: 0, scale: 0.96 }}
               onClick={(e) => e.stopPropagation()}
               onSubmit={handleSaveEdit}
-              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF] p-5 sm:p-6 shadow-2xl space-y-4"
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-[22px] sm:rounded-[26px] bg-[#FFFDF9] border border-[#E6D5BF] p-4 sm:p-6 shadow-2xl space-y-3.5 sm:space-y-4"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex items-start justify-between gap-2.5 sm:gap-3">
+                <div className="min-w-0">
                   <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#9A6315]">
                     Editar Embajador
                   </span>
-                  <h3 id="edit-referrer-title" className="font-serif text-xl font-bold text-[#22150E]">
+                  <h3 id="edit-referrer-title" className="font-serif text-lg sm:text-xl font-bold text-[#22150E] break-words leading-snug">
                     {editingPartner.name}
                   </h3>
                 </div>
                 <button
                   type="button"
                   onClick={() => setEditingPartner(null)}
-                  className="flex h-10 w-10 items-center justify-center rounded-full text-[#7B5D4A] hover:bg-[#FAF1E4] cursor-pointer"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#7B5D4A] hover:bg-[#FAF1E4] cursor-pointer"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -2304,7 +1895,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     required
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                    className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                   />
                 </div>
 
@@ -2319,7 +1910,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     onChange={(e) => setEditCode(sanitizeReferralCodeDraft(e.target.value))}
                     onBlur={() => setEditCode((prev) => normalizeReferralCodeInput(prev))}
                     maxLength={32}
-                    className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 font-mono text-sm font-bold text-[#8C4A19] uppercase focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                    className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 font-mono text-base sm:text-sm font-bold text-[#8C4A19] uppercase focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                   />
                 </div>
 
@@ -2330,7 +1921,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                       type="tel"
                       value={editPhone}
                       onChange={(e) => setEditPhone(e.target.value)}
-                      className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                      className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                     />
                   </div>
                   <div>
@@ -2338,7 +1929,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     <select
                       value={editStyleId}
                       onChange={(e) => setEditStyleId(e.target.value as QrStyleId)}
-                      className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-sm text-[#22150E]"
+                      className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3 py-2 text-base sm:text-sm text-[#22150E]"
                     >
                       {QR_STYLE_OPTIONS.map((opt) => (
                         <option key={opt.id} value={opt.id}>
@@ -2355,12 +1946,20 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     type="text"
                     value={editNotes}
                     onChange={(e) => setEditNotes(e.target.value)}
-                    className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
+                    className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3] bg-[#FCF8F2] px-3.5 py-2 text-base sm:text-sm text-[#22150E] focus:bg-white focus:border-[#C88A2B] focus:outline-none"
                   />
                 </div>
 
-                <div className="flex items-center justify-between rounded-xl border border-[#EFE3D2] bg-[#FAF3E8]/60 px-3.5 py-2.5">
-                  <div>
+                <AvatarPickerField
+                  name={editName || editingPartner.name}
+                  value={editAvatarUrl}
+                  onChange={setEditAvatarUrl}
+                  disabled={savingEdit}
+                  label="Foto de perfil del Embajador"
+                />
+
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-[#EFE3D2] bg-[#FAF3E8]/60 px-3.5 py-2.5">
+                  <div className="min-w-0">
                     <p className="text-xs font-bold text-[#22150E]">QR Activo</p>
                     <p className="text-[11px] text-[#7B5D4A]">
                       Si está inactivo, los nuevos escaneos no sumarán visitas.
@@ -2370,11 +1969,11 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     type="checkbox"
                     checked={editActive}
                     onChange={(e) => setEditActive(e.target.checked)}
-                    className="h-5 w-5 accent-[#22150E] cursor-pointer"
+                    className="h-5 w-5 shrink-0 accent-[#22150E] cursor-pointer"
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5">
                   <div className="text-xs text-amber-950">
                     <p className="font-bold">Contador de visitas</p>
                     <p className="text-[11px] text-amber-800 tabular-nums">
@@ -2385,7 +1984,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                     type="button"
                     disabled={resettingVisitsId === editingPartner.id}
                     onClick={() => handleResetVisits(editingPartner)}
-                    className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 cursor-pointer disabled:opacity-50"
+                    className="inline-flex min-h-[38px] sm:min-h-[36px] w-full sm:w-auto items-center justify-center gap-1 rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 cursor-pointer disabled:opacity-50"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                     {resettingVisitsId === editingPartner.id ? 'Reiniciando...' : 'Reiniciar visitas'}
@@ -2393,18 +1992,25 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                 </div>
               </div>
 
+              {editError && (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                  <span>{editError}</span>
+                </div>
+              )}
+
               <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingPartner(null)}
-                  className="min-h-[44px] rounded-full border border-[#DFCBB3] px-4 py-2 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF1E4] cursor-pointer"
+                  className="min-h-[44px] w-full sm:w-auto rounded-full border border-[#DFCBB3] px-4 py-2 text-xs font-semibold text-[#6E5341] hover:bg-[#FAF1E4] cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={savingEdit}
-                  className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-full bg-[#22150E] px-5 py-2 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
+                  className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full border border-[#C88A2B]/45 bg-[#22150E] px-5 py-2 text-xs font-bold text-[#F4CA73] hover:bg-[#3A2418] cursor-pointer disabled:opacity-50"
                 >
                   <Save className="h-3.5 w-3.5" />
                   {savingEdit ? 'Guardando...' : 'Guardar cambios'}
@@ -2425,7 +2031,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#120804]/75 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#120804]/75 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto"
             onClick={() => setQrModalPartner(null)}
           >
             <motion.div
@@ -2433,7 +2039,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md max-h-[92dvh] overflow-y-auto rounded-[28px] border border-[#C88A2B]/50 bg-gradient-to-b from-[#23140D] via-[#1A0E08] to-[#120804] p-5 sm:p-6 text-[#FFFDF9] shadow-2xl space-y-4"
+              className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-[24px] sm:rounded-[28px] border border-[#C88A2B]/50 bg-gradient-to-b from-[#23140D] via-[#1A0E08] to-[#120804] p-4 sm:p-6 text-[#FFFDF9] shadow-2xl space-y-3.5 sm:space-y-4"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -2481,7 +2087,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               </div>
 
               {/* HD Card Preview */}
-              <div className="relative mx-auto w-full max-w-[300px] aspect-[4/5] rounded-2xl overflow-hidden border border-[#F4CA73]/35 bg-[#120A06] flex items-center justify-center shadow-xl">
+              <div className="relative mx-auto w-full max-w-[230px] sm:max-w-[300px] aspect-[4/5] rounded-2xl overflow-hidden border border-[#F4CA73]/35 bg-[#120A06] flex items-center justify-center shadow-xl">
                 {qrPreviewLoading || !qrPreviewDataUrl ? (
                   <div className="text-center space-y-2 p-4">
                     <QrCode className="mx-auto h-8 w-8 text-[#F4CA73] animate-pulse" />
@@ -2497,8 +2103,8 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               </div>
 
               {/* URL Preview */}
-              <div className="rounded-xl border border-white/10 bg-black/35 px-3 py-2 flex items-center justify-between gap-2">
-                <span className="font-mono text-[11px] text-[#E8D5BE] truncate">
+              <div className="rounded-xl border border-white/10 bg-black/35 px-3 py-2 flex items-center justify-between gap-2 min-w-0">
+                <span className="font-mono text-[11px] text-[#E8D5BE] truncate min-w-0 flex-1">
                   {buildReferralUrl(defaultOriginUrl, qrModalPartner.code)}
                 </span>
                 <button
@@ -2525,6 +2131,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                   type="button"
                   disabled={downloadingQr}
                   onClick={handleDownloadQrModal}
+                  data-preserve-surface="true"
                   className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#C88A2B] via-[#F4CA73] to-[#C88A2B] px-4 py-2.5 text-xs font-bold text-[#1A0E08] shadow hover:brightness-105 cursor-pointer disabled:opacity-50"
                 >
                   <Download className="h-4 w-4" />
@@ -2548,6 +2155,18 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <SecretKeyModal
+        open={Boolean(pendingSecretAction)}
+        title={pendingSecretAction?.title || 'Autorizar cambio'}
+        description={pendingSecretAction?.description}
+        confirmLabel={pendingSecretAction?.confirmLabel}
+        onClose={() => setPendingSecretAction(null)}
+        onAuthorize={async (masterPassword) => {
+          if (!pendingSecretAction) return;
+          await pendingSecretAction.run(masterPassword);
+        }}
+      />
     </div>
   );
 };

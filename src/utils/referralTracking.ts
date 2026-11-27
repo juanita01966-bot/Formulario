@@ -22,6 +22,8 @@ let memoryReferralCode: string | null = null;
 let memoryVisitorId: string | null = null;
 const memoryPingedCodes = new Set<string>();
 
+const REF_PARAM_PRIORITY = ['ref', 'tag', 'r', 'qr'] as const;
+
 function extractRefParamFromSearch(search: string): string | null {
   if (!search) return null;
   const query = search.startsWith('?') ? search.slice(1) : search;
@@ -29,15 +31,24 @@ function extractRefParamFromSearch(search: string): string | null {
 
   try {
     const params = new URLSearchParams(query);
-    const direct = params.get('ref') ?? params.get('r');
-    if (direct) return direct;
+    for (const key of REF_PARAM_PRIORITY) {
+      const direct = params.get(key);
+      if (direct && normalizeReferralCode(direct)) {
+        return direct;
+      }
+    }
 
-    // Case-insensitive fallback (e.g. ?REF=... or ?R=...)
+    // Case-insensitive fallback (e.g. ?REF=..., ?TAG=..., ?R=..., ?QR=...)
+    const lowered = new Map<string, string>();
     for (const [key, value] of params.entries()) {
       const lower = key.toLowerCase();
-      if ((lower === 'ref' || lower === 'r') && value) {
-        return value;
+      if (value && normalizeReferralCode(value) && !lowered.has(lower)) {
+        lowered.set(lower, value);
       }
+    }
+    for (const key of REF_PARAM_PRIORITY) {
+      const match = lowered.get(key);
+      if (match) return match;
     }
   } catch {
     return null;
@@ -47,8 +58,8 @@ function extractRefParamFromSearch(search: string): string | null {
 }
 
 /**
- * Extracts and normalizes `?ref=CODE` or `?r=CODE` from window.location.search
- * or hash query string (e.g. `#/?ref=CODE`).
+ * Extracts and normalizes `?ref=CODE`, `?tag=CODE`, `?r=CODE`, or `?qr=CODE`
+ * from window.location.search or hash query string (e.g. `#/?ref=CODE` or `#/?tag=CODE`).
  */
 export function extractReferralCodeFromLocation(
   locationLike?: Pick<Location, 'search' | 'hash'>

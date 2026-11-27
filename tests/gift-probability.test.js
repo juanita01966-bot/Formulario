@@ -225,9 +225,13 @@ describe('Gift Probability Sanitization, Weighted Draw & Supabase Compatibility'
       claim_code: 'OTN-1111',
       called: true,
       category: 'cita',
+      qualification: { score: 80, tier: 'alto', cedeGoldenTicket: true },
       created_at: '2026-11-18T00:00:00.000Z',
     });
     assert.strictEqual(legacyCita.promoCodeInvalidated, true);
+    assert.strictEqual(legacyCita.callOutcome, 'scheduled');
+    assert.strictEqual(legacyCita.sellerLocked, false);
+    assert.strictEqual(legacyCita.qualification?.cedeGoldenTicket, true);
 
     const legacyNone = mapLeadRow({
       id: 'lead-legacy-none',
@@ -240,6 +244,7 @@ describe('Gift Probability Sanitization, Weighted Draw & Supabase Compatibility'
     });
     assert.strictEqual(legacyNone.promoCodeInvalidated, false);
     assert.strictEqual(legacyNone.promoCodeInvalidatedAt, null);
+    assert.strictEqual(legacyNone.callOutcome, 'pending');
 
     memoryLeadPromoStates.set('lead-mem', {
       promoCodeInvalidated: true,

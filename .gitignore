@@ -7,3 +7,6 @@ dist/
 .DS_Store
 Thumbs.db
 .hyperframes/
+server/data/supabase-overlay.json
+server/data/*fallback*.json
+server/data/*.tmp

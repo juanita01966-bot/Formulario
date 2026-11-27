@@ -89,6 +89,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
           setActiveReferralPartner({
             code: visitRes.partner.code,
             name: visitRes.partner.name,
+            avatarUrl: visitRes.partner.avatarUrl ?? null,
           });
           return;
         }
@@ -100,6 +101,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
         setActiveReferralPartner({
           code: resolved.code,
           name: resolved.name,
+          avatarUrl: resolved.avatarUrl ?? null,
         });
       } else {
         setActiveReferralPartner(null);
@@ -172,6 +174,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
       address: formData.address,
       acceptedTerms: formData.acceptedTerms,
       claimCode: generateFreshClaimCode(),
+      visitorId: getOrCreateVisitorId(),
       ...(referralCode ? { referralCode } : {}),
     });
     lastClaimCodeRef.current = res.lead.claimCode;
@@ -181,9 +184,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
   };
 
   const handleQuizComplete = async (qualification: LeadQualification) => {
-    const wantsBooklet = Boolean(
-      (qualification as LeadQualification & { cedeGoldenTicket?: boolean }).cedeGoldenTicket
-    );
+    const wantsBooklet = Boolean(qualification.cedeGoldenTicket);
     setStep(wantsBooklet ? 'share_booklet' : 'loading');
     if (currentLead) {
       try {
@@ -226,10 +227,15 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
     void syncReferralAttribution();
   };
 
+  const handleClaimOwnGiftFromBooklet = () => {
+    setStep('loading');
+  };
+
   const effectiveShareReferralCode =
     activeReferralPartner?.code || capturedReferralCode || currentLead?.referralCode || null;
   const effectiveShareReferrerName =
     activeReferralPartner?.name || currentLead?.referrerName || null;
+  const effectiveShareReferrerAvatarUrl = activeReferralPartner?.avatarUrl || null;
 
   return (
     <div className="relative min-h-[100dvh] w-full overflow-x-clip flex flex-col items-center justify-center px-3 py-5 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10 sm:pb-12">
@@ -242,6 +248,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
               key={`step-form-${playRound}`}
               settings={appState.settings}
               referralPartner={activeReferralPartner}
+              referralCode={effectiveShareReferralCode}
               onSubmit={handleFormSubmit}
             />
           )}
@@ -287,6 +294,7 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
               showcaseStyle={appState.settings.showcaseStyle}
               referralCode={effectiveShareReferralCode}
               referrerName={effectiveShareReferrerName}
+              referrerAvatarUrl={effectiveShareReferrerAvatarUrl}
               onStartAnother={handleResetFlow}
             />
           )}
@@ -297,6 +305,8 @@ export const ReferralFlow: React.FC<ReferralFlowProps> = ({ appState, onStateCha
               leadName={currentLead.name}
               referralCode={effectiveShareReferralCode}
               referrerName={effectiveShareReferrerName}
+              referrerAvatarUrl={effectiveShareReferrerAvatarUrl}
+              onClaimOwnGift={handleClaimOwnGiftFromBooklet}
               onStartAnother={handleResetFlow}
             />
           )}
