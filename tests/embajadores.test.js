@@ -811,8 +811,8 @@ describe('Embajadores, Vendedor Manual Leads & Vendedor 3-State Permissions Suit
     });
   });
 
-  describe('4. Vendedor 3-State Progression on Pending Leads (Opción A) & Admin-Password Downgrades', () => {
-    test('Vendedor advances pending lead none -> cita -> demo -> orden without Telemarketing & without password; downgrades require valid Admin password; Reposo stays locked', async () => {
+  describe('4. Telemarketing-First Gate for Vendedor 3-State Progression & Admin-Password Downgrades', () => {
+    test('Vendedor is blocked (409) on pending lead until Telemarketing marks scheduled, then advances none -> cita -> demo -> orden without password; downgrades require valid Admin password; Reposo stays locked', async () => {
       // Create a fresh PUBLIC pending lead (NOT touched by Telemarketing)
       const pubRes = await fetch(`${baseUrl}/api/leads`, {
         method: 'POST',
@@ -830,14 +830,39 @@ describe('Embajadores, Vendedor Manual Leads & Vendedor 3-State Permissions Suit
       assert.strictEqual(pendingLead.callOutcome, 'pending');
       assert.strictEqual(pendingLead.called, false);
 
-      // 1. none -> cita directly on PENDING lead (no Telemarketing, no password!)
+      // 0. Vendedor attempting to classify a PENDING lead without Telemarketing -> 409
+      const blockedPending = await fetch(`${baseUrl}/api/leads/${pendingLead.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${vendedorAToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'cita', notes: 'Intento sin Telemarketing' }),
+      });
+      assert.strictEqual(blockedPending.status, 409);
+      const blockedBody = await blockedPending.json();
+      assert.match(String(blockedBody.error || ''), /Pendiente de Telemarketing/i);
+
+      // 0b. Telemarketing marks callOutcome: 'scheduled'
+      const teleSchedule = await fetch(`${baseUrl}/api/leads/${pendingLead.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${teleToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ callOutcome: 'scheduled' }),
+      });
+      assert.strictEqual(teleSchedule.status, 200);
+      assert.strictEqual((await teleSchedule.json()).lead.callOutcome, 'scheduled');
+
+      // 1. Now Vendedor advances none -> cita freely without password
       const toCita = await fetch(`${baseUrl}/api/leads/${pendingLead.id}`, {
         method: 'PATCH',
         headers: {
           Authorization: `Bearer ${vendedorAToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ category: 'cita', notes: 'Vendedor agendó directo' }),
+        body: JSON.stringify({ category: 'cita', notes: 'Vendedor agendó tras Telemarketing' }),
       });
       assert.strictEqual(toCita.status, 200);
       const citaLead = (await toCita.json()).lead;

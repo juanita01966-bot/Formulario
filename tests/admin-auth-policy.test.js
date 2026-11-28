@@ -565,6 +565,28 @@ describe('Unified Admin Password Policy & Strict Self-Only Admin Isolation Suite
       assert.strictEqual(createLead.status, 201);
       const leadId = (await createLead.json()).lead.id;
 
+      // Telemarketing-First Gate: Vendedor cannot classify pending lead (409)
+      const advBlocked = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${vendedorToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ category: 'demo' }),
+      });
+      assert.strictEqual(advBlocked.status, 409);
+
+      // Admin/Telemarketing marks lead as scheduled
+      const markScheduled = await fetch(`${baseUrl}/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${ciprianToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ callOutcome: 'scheduled' }),
+      });
+      assert.strictEqual(markScheduled.status, 200);
+
       // Vendedor advances none -> demo without password
       const adv = await fetch(`${baseUrl}/api/leads/${leadId}`, {
         method: 'PATCH',

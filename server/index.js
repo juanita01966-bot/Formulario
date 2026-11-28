@@ -3813,7 +3813,10 @@ async function requireDsbAuth(req, res, next) {
   try {
     const session = await getAuthenticatedSession(req);
     if (!session) {
-      return res.status(401).json({ error: 'Acceso no autorizado. Inicia sesión en el panel.' });
+      return res.status(401).json({
+        error: 'Tu sesión expiró o fue cerrada por seguridad. Inicia sesión nuevamente.',
+        code: 'SESSION_REVOKED',
+      });
     }
     req.dsbSession = session;
     return next();
@@ -3826,7 +3829,10 @@ async function requireAdminRole(req, res, next) {
   try {
     const session = req.dsbSession || (await getAuthenticatedSession(req));
     if (!session) {
-      return res.status(401).json({ error: 'Acceso no autorizado. Inicia sesión en el panel administrativo.' });
+      return res.status(401).json({
+        error: 'Tu sesión expiró o fue cerrada por seguridad. Inicia sesión nuevamente.',
+        code: 'SESSION_REVOKED',
+      });
     }
     if (!isElevatedAdminRole(session.role)) {
       await recordSecurityAlert({
@@ -3862,7 +3868,8 @@ function createRequireAiManagerRole(
       const session = req.dsbSession || (await getAuthenticatedSession(req));
       if (!session) {
         return res.status(401).json({
-          error: 'Acceso no autorizado. Inicia sesión como AI Manager.',
+          error: 'Tu sesión expiró o fue cerrada por seguridad. Inicia sesión nuevamente.',
+          code: 'SESSION_REVOKED',
         });
       }
       if (session.role !== 'ai_manager') {
@@ -6374,7 +6381,14 @@ app.post('/api/admin/master-reset', requireDsbAuth, requireAdminRole, handleMast
 app.get('/api/state', async (req, res) => {
   applyNoStoreHeaders(res);
   try {
+    const bearerToken = getBearerToken(req);
     const session = await getAuthenticatedSession(req);
+    if (bearerToken.length > 0 && !session) {
+      return res.status(401).json({
+        error: 'Tu sesión expiró o fue cerrada por seguridad. Inicia sesión nuevamente.',
+        code: 'SESSION_REVOKED',
+      });
+    }
     const store = await getActiveStore();
     const accounts =
       session && isElevatedAdminRole(session.role) ? await fetchAllAuthAccounts() : [];
@@ -7261,14 +7275,19 @@ app.patch('/api/leads/:id', async (req, res) => {
           });
         }
 
-        if (current.callOutcome === 'not_scheduled') {
+        if (current.callOutcome !== 'scheduled') {
+          const isReposo = current.callOutcome === 'not_scheduled';
           await recordSecurityAlert(
             {
               code: 'rbac_unauthorized_attempt',
               severity: 'high',
               category: 'access',
-              title: 'Vendedor intentó clasificar prospecto en Reposo',
-              description: `${session.displayName || session.user} intentó clasificar "${current.name}" (${current.claimCode}) cuyo estado de llamada es "not_scheduled" (En Reposo).`,
+              title: isReposo
+                ? 'Vendedor intentó clasificar prospecto en Reposo'
+                : 'Vendedor intentó clasificar prospecto sin cita agendada',
+              description: isReposo
+                ? `${session.displayName || session.user} intentó clasificar "${current.name}" (${current.claimCode}) cuyo estado de llamada es "not_scheduled" (En Reposo).`
+                : `${session.displayName || session.user} intentó clasificar "${current.name}" (${current.claimCode}) cuyo estado de llamada es "${current.callOutcome}" (pendiente de Telemarketing).`,
               actorRole: 'vendedor',
               actorName: session.displayName || session.user,
               actorTag: session.tag || null,
@@ -7286,7 +7305,9 @@ app.patch('/api/leads/:id', async (req, res) => {
             { store: USE_SUPABASE ? undefined : store }
           );
           return res.status(409).json({
-            error: 'Este prospecto se encuentra en Reposo. Solo un administrador puede reactivarlo.',
+            error: isReposo
+              ? 'Este prospecto se encuentra en Reposo. Solo un administrador puede reactivarlo.'
+              : 'Este prospecto aún está pendiente de Telemarketing. Se habilitará cuando Telemarketing marque la llamada como agendada.',
           });
         }
 

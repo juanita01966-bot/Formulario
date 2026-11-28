@@ -94,9 +94,13 @@ export const App: React.FC = () => {
         void load(false);
       }
     };
+    const onWindowFocus = () => {
+      void load(false);
+    };
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onWindowFocus);
 
-    const intervalMs = isDashboard ? 6000 : 12000;
+    const intervalMs = isDashboard ? 3500 : 12000;
     const timer = window.setInterval(() => {
       void load(false);
     }, intervalMs);
@@ -105,6 +109,7 @@ export const App: React.FC = () => {
       active = false;
       unsubscribe();
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onWindowFocus);
       window.clearInterval(timer);
     };
   }, [isDashboard, applyState]);

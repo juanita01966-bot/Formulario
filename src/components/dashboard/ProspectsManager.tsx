@@ -711,16 +711,12 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
     }
 
     // Forward advance (targetRank > currentRank) — allowed without password once eligible
-    if (isVendedor) {
-      if (outcome === 'not_scheduled') {
+    if (!isAiManager) {
+      if (outcome === 'not_scheduled' || (!lead.called && outcome !== 'scheduled' && currentRank === 0)) {
         setLockedHintId(lead.id);
         window.setTimeout(() => setLockedHintId((cur) => (cur === lead.id ? null : cur)), 2400);
         return;
       }
-    } else if (!lead.called && outcome !== 'scheduled' && currentRank === 0) {
-      setLockedHintId(lead.id);
-      window.setTimeout(() => setLockedHintId((cur) => (cur === lead.id ? null : cur)), 2200);
-      return;
     }
 
     if (cat === 'orden') {
@@ -1210,9 +1206,10 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
             const isFinalStage = lead.category === 'orden';
             const hasStatusLock =
               Boolean(lead.sellerLocked) || hasAssignedCategory || promoInvalidated;
-            const canChangeStatusBase = isVendedor
-              ? leadOutcome !== 'not_scheduled'
-              : lead.called || leadOutcome === 'scheduled' || hasAssignedCategory;
+            const canChangeStatusBase =
+              isAiManager ||
+              (leadOutcome !== 'not_scheduled' &&
+                (lead.called || leadOutcome === 'scheduled' || hasAssignedCategory));
             const isUpdatingCategoryThis = updatingCategoryLeadId === lead.id;
             const isOrderAmountLocked =
               lead.category === 'orden' &&
@@ -1329,7 +1326,8 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                               ? true
                               : isBackward
                                 ? !(isAdmin || isVendedor)
-                                : isVendedor && !canChangeStatusBase);
+                                : false);
+                          const isLockedForward = isForward && !canChangeStatusBase;
 
                           const btnTitle = isSelected
                             ? `Estado actual: ${cat.label}`
@@ -1339,15 +1337,18 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                                 : `Retroceder a ${cat.label} (requiere contraseña de Administrador)`
                               : canChangeStatusBase
                                 ? `Avanzar a ${cat.label}`
-                                : isVendedor
+                                : leadOutcome === 'not_scheduled'
                                   ? 'En Reposo · No disponible'
-                                  : 'Expande y marca llamada primero';
+                                  : isVendedor
+                                    ? 'Pendiente de Telemarketing — se habilitará cuando marquen la llamada'
+                                    : 'Expande y marca llamada primero';
 
                           return (
                             <button
                               key={cat.id}
                               type="button"
                               disabled={btnDisabled}
+                              aria-disabled={isLockedForward ? true : undefined}
                               aria-current={isSelected ? 'step' : undefined}
                               onClick={() => handleCategoryClick(lead, cat.id)}
                               title={btnTitle}
@@ -1358,8 +1359,8 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                                     ? isAdmin || isVendedor
                                       ? 'text-[#6E5341] hover:bg-amber-50 hover:text-[#8C3318] cursor-pointer disabled:opacity-55'
                                       : 'text-stone-400 opacity-55 cursor-not-allowed'
-                                    : btnDisabled
-                                      ? 'text-stone-400 cursor-not-allowed'
+                                    : btnDisabled || isLockedForward
+                                      ? 'text-stone-400 opacity-60 cursor-not-allowed'
                                       : isForward && canChangeStatusBase
                                         ? 'text-[#594133] hover:bg-white/75 cursor-pointer'
                                         : 'text-stone-500 hover:bg-white/40 cursor-pointer'
@@ -1398,9 +1399,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                             exit={{ opacity: 0 }}
                             className="absolute right-0 -bottom-8 z-20 rounded-lg bg-[#22150E] px-2.5 py-1 text-[10px] font-semibold text-amber-200 shadow-lg whitespace-nowrap"
                           >
-                            {isVendedor
+                            {leadOutcome === 'not_scheduled'
                               ? 'En Reposo · No disponible'
-                              : 'Expande y marca “Ya se llamó” primero'}
+                              : isVendedor
+                                ? 'Pendiente de Telemarketing — se habilitará cuando marquen la llamada'
+                                : 'Expande y marca “Ya se llamó” primero'}
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -1826,7 +1829,8 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                               ? true
                               : isBackward
                                 ? !(isAdmin || isVendedor)
-                                : isVendedor && !canChangeStatusBase);
+                                : false);
+                          const isLockedForward = isForward && !canChangeStatusBase;
 
                           const btnTitle = isSelected
                             ? `Estado actual: ${cat.label}`
@@ -1838,15 +1842,18 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                                 ? currentRank === 0
                                   ? `Asignar a ${cat.label} (sin contraseña)`
                                   : `Avanzar a ${cat.label} (sin contraseña)`
-                                : isVendedor
+                                : leadOutcome === 'not_scheduled'
                                   ? 'En Reposo · No disponible para clasificación'
-                                  : 'Marca primero el check de llamada para clasificar';
+                                  : isVendedor
+                                    ? 'Pendiente de Telemarketing — se habilitará cuando marquen la llamada'
+                                    : 'Marca primero el check de llamada para clasificar';
 
                           return (
                             <button
                               key={cat.id}
                               type="button"
                               disabled={btnDisabled}
+                              aria-disabled={isLockedForward ? true : undefined}
                               aria-current={isSelected ? 'step' : undefined}
                               onClick={() => handleCategoryClick(lead, cat.id)}
                               title={btnTitle}
@@ -1857,8 +1864,8 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                                     ? isAdmin || isVendedor
                                       ? 'text-[#6E5341] hover:bg-amber-50 hover:text-[#8C3318] cursor-pointer disabled:opacity-55'
                                       : 'text-stone-400 opacity-55 cursor-not-allowed'
-                                    : btnDisabled
-                                      ? 'text-stone-400 cursor-not-allowed'
+                                    : btnDisabled || isLockedForward
+                                      ? 'text-stone-400 opacity-60 cursor-not-allowed'
                                       : isForward && canChangeStatusBase
                                         ? 'text-[#594133] hover:bg-white/70 cursor-pointer'
                                         : 'text-stone-500 hover:bg-white/40 cursor-pointer'
@@ -1887,9 +1894,11 @@ export const ProspectsManager: React.FC<ProspectsManagerProps> = ({
                             exit={{ opacity: 0 }}
                             className="mt-1.5 sm:mt-0 sm:absolute sm:right-0 sm:-bottom-8 z-20 rounded-lg bg-[#22150E] px-2.5 py-1.5 sm:py-1 text-[10px] font-semibold text-amber-200 shadow-lg text-center sm:whitespace-nowrap"
                           >
-                            {isVendedor
+                            {leadOutcome === 'not_scheduled'
                               ? 'Prospecto en Reposo · No disponible para clasificación'
-                              : 'Primero marca el check “Ya se llamó”'}
+                              : isVendedor
+                                ? 'Pendiente de Telemarketing — se habilitará cuando marquen la llamada'
+                                : 'Primero marca el check “Ya se llamó”'}
                           </motion.div>
                         )}
                       </AnimatePresence>

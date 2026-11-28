@@ -40,6 +40,7 @@ import {
   deleteLead,
   deleteQrCode,
   deleteReferralPartner,
+  DSB_SESSION_REVOKED_EVENT,
   DsbAuthError,
   fetchAccounts,
   fetchAppState,
@@ -313,6 +314,52 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       cancelled = true;
     };
   }, [onStateChange]);
+
+  // Instant session expulsion when backend returns 401 SESSION_REVOKED
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleSessionRevoked = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setCurrentUser(null);
+      setPreAuthToken(null);
+      setSecurityChallenge(null);
+      setPinInput('');
+      setSecurityAnswerInput('');
+      setPasswordInput('');
+      setAuthLoading(false);
+      setLockoutSeconds(0);
+      setAuthError(detail?.message || 'Tu sesión fue cerrada por un administrador.');
+      setSecurityStage('filter1_credentials');
+    };
+    window.addEventListener(DSB_SESSION_REVOKED_EVENT, handleSessionRevoked);
+    return () => {
+      window.removeEventListener(DSB_SESSION_REVOKED_EVENT, handleSessionRevoked);
+    };
+  }, []);
+
+  // Expel if sessionStorage is cleared from another context on the same origin
+  useEffect(() => {
+    if (typeof window === 'undefined' || securityStage !== 'authenticated') return;
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.storageArea === window.sessionStorage &&
+        (event.key === null || (event.key === 'cipriano_dsb_session_token' && !event.newValue))
+      ) {
+        setCurrentUser(null);
+        setPreAuthToken(null);
+        setSecurityChallenge(null);
+        setPinInput('');
+        setSecurityAnswerInput('');
+        setPasswordInput('');
+        setAuthError('Tu sesión fue cerrada.');
+        setSecurityStage('filter1_credentials');
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [securityStage]);
 
   // Countdown timer when rate-limited / locked out
   const isLockedOut = lockoutSeconds > 0;

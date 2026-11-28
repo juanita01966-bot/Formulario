@@ -35,6 +35,7 @@ const CHANNEL_NAME = 'royal_konverta_sync';
 const DSB_SESSION_TOKEN_KEY = 'cipriano_dsb_session_token';
 export const DSB_ROLE_KEY = 'cipriano_dsb_role';
 const DSB_USER_KEY = 'cipriano_dsb_user';
+export const DSB_SESSION_REVOKED_EVENT = 'dsb-session-revoked';
 
 const channel =
   typeof window !== 'undefined' && 'BroadcastChannel' in window
@@ -117,6 +118,21 @@ function clearSessionStorage(): void {
     window.sessionStorage.removeItem('konverta_dsb_unlocked');
   } catch {
     // Ignore storage errors
+  }
+}
+
+function notifySessionRevoked(message?: string): void {
+  clearSessionStorage();
+  latestCommittedState = null;
+  stateMutationEpoch += 1;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(DSB_SESSION_REVOKED_EVENT, {
+        detail: {
+          message: message || 'Tu sesión fue cerrada por seguridad. Inicia sesión nuevamente.',
+        },
+      })
+    );
   }
 }
 
@@ -1083,6 +1099,12 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     if (res.status === 401 || res.status === 429) {
+      if (
+        res.status === 401 &&
+        (data?.code === 'SESSION_REVOKED' || (Boolean(token) && url === '/api/state'))
+      ) {
+        notifySessionRevoked(data?.error);
+      }
       throw new DsbAuthError({
         ...data,
         error:

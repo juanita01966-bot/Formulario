@@ -638,6 +638,19 @@ describe('AI Manager Supreme Role (Juan Orozco), Opción A & Live Process Contro
         headers: { Authorization: `Bearer ${secondAdminToken}` },
       });
       assert.strictEqual(revokedSess.status, 401);
+
+      // Revoked Bearer token on GET /api/state -> 401 SESSION_REVOKED
+      const revokedStateRes = await fetch(`${baseUrl}/api/state`, {
+        headers: { Authorization: `Bearer ${secondAdminToken}` },
+      });
+      assert.strictEqual(revokedStateRes.status, 401);
+      assert.strictEqual((await revokedStateRes.json()).code, 'SESSION_REVOKED');
+
+      // Unauthenticated GET /api/state without Bearer still returns 200 public state
+      const publicStateRes = await fetch(`${baseUrl}/api/state`);
+      assert.strictEqual(publicStateRes.status, 200);
+      const publicStateBody = await publicStateRes.json();
+      assert.ok(Array.isArray(publicStateBody.gifts));
     });
   });
 
