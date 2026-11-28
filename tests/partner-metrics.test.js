@@ -241,7 +241,7 @@ describe('partnerMetrics — computeEmbajadorMetrics', () => {
       makeLead({ id: 'l1', referralCode: 'SOFIA-VIP', category: 'cita' }), // duplicate ID
       makeLead({ id: 'l2', referralCode: 'sofia-vip', category: 'demo' }),
       makeLead({ id: 'l3', referrerId: 'emb-1', category: 'orden', orderAmount: 2500 }),
-      makeLead({ id: 'l4', referralCode: 'SOFIA-VIP', category: 'orden', orderAmount: null }), // uses defaultTicketAmount
+      makeLead({ id: 'l4', referralCode: 'SOFIA-VIP', category: 'orden', orderAmount: null }), // unset orderAmount -> 0 (no inflation)
       makeLead({ id: 'l-other', referralCode: 'OTHER', category: 'orden', orderAmount: 9999 }),
     ];
 
@@ -278,7 +278,7 @@ describe('partnerMetrics — computeEmbajadorMetrics', () => {
     assert.equal(unfiltered.citasCount, 1);
     assert.equal(unfiltered.demosCount, 1);
     assert.equal(unfiltered.ordenesCount, 2);
-    assert.equal(unfiltered.salesTotal, 4300); // 2500 + 1800
+    assert.equal(unfiltered.salesTotal, 2500); // real orderAmount only (null -> 0, never defaultTicketAmount)
     assert.equal(unfiltered.visitsCount, 12); // max(12, 3)
     assert.equal(unfiltered.uniqueVisitsCount, 8); // max(8, 2)
 
@@ -501,5 +501,45 @@ describe('partnerMetrics — computeVendedorRollupMetrics (ZERO double-counting)
     assert.equal(res.embajadoresLeadsCount, 0);
     assert.equal(res.totalLeadsCount, 1);
     assert.equal(res.citasCount, 1);
+  });
+
+  it('calculates salesTotal strictly from real closed orderAmount values with zero defaultTicketAmount inflation', () => {
+    const acc = makeAccount({ id: 'acc-real', displayName: 'Laura Ventas', tag: 'LAURA', referrerId: 'ref-laura' });
+    const partner = makePartner({ id: 'ref-laura', accountId: 'acc-real', name: 'Laura Ventas', code: 'LAURA' });
+    const emb = makePartner({
+      id: 'emb-real',
+      partnerType: 'embajador',
+      ownerVendedorAccountId: 'acc-real',
+      ownerVendedorTag: 'LAURA',
+      name: 'Elena',
+      code: 'ELENA',
+    });
+
+    const leads = [
+      makeLead({ id: 'o1', referralCode: 'LAURA', category: 'orden', orderAmount: null }),
+      makeLead({ id: 'o2', referralCode: 'LAURA', category: 'orden', orderAmount: 0 }),
+      makeLead({ id: 'o3', referralCode: 'ELENA', category: 'orden', orderAmount: 3200 }),
+      makeLead({ id: 'd1', referralCode: 'LAURA', category: 'demo', orderAmount: 9999 }), // not an orden
+    ];
+
+    const res = computeVendedorRollupMetrics(
+      {
+        accountId: acc.id,
+        partnerId: partner.id,
+        name: acc.displayName,
+        tag: acc.tag,
+        partner,
+      },
+      [partner, emb],
+      leads,
+      [],
+      [],
+      false,
+      [acc],
+      2792
+    );
+
+    assert.equal(res.ordenesCount, 3);
+    assert.equal(res.salesTotal, 3200);
   });
 });

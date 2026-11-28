@@ -31,7 +31,7 @@ export type KpiFilterKey =
 
 interface KpiGridProps {
   leads: Lead[];
-  defaultTicketAmount: number;
+  defaultTicketAmount?: number;
   activeFilter: KpiFilterKey;
   onSelectFilter: (filter: KpiFilterKey) => void;
   onOpenMasterReset?: () => void;
@@ -74,7 +74,6 @@ function AnimatedNumber({ value, prefix = '' }: { value: number; prefix?: string
 
 export const KpiGrid: React.FC<KpiGridProps> = ({
   leads,
-  defaultTicketAmount,
   activeFilter,
   onSelectFilter,
   onOpenMasterReset,
@@ -116,12 +115,10 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
 
   const orderAmounts = ordenesLeads
     .map((l) => l.orderAmount)
-    .filter((amt): amt is number => typeof amt === 'number' && amt > 0);
-  const avgTicket =
-    orderAmounts.length > 0
-      ? Math.round(orderAmounts.reduce((acc, cur) => acc + cur, 0) / orderAmounts.length)
-      : defaultTicketAmount;
+    .filter((amt): amt is number => typeof amt === 'number' && Number.isFinite(amt) && amt > 0);
   const totalVolume = orderAmounts.reduce((acc, cur) => acc + cur, 0);
+  const avgTicket =
+    orderAmounts.length > 0 ? Math.round(totalVolume / orderAmounts.length) : 0;
 
   const cards = [
     {
@@ -356,9 +353,11 @@ export const KpiGrid: React.FC<KpiGridProps> = ({
             <div className="min-w-0">
               <p className="text-xs sm:text-sm font-semibold text-[#F5F2EB] tracking-wide truncate">Ticket promedio</p>
               <p className={`text-[11px] sm:text-xs line-clamp-1 ${heroSubColor}`}>
-                {ordenesCount > 0
-                  ? `${ordenesCount} ${ordenesCount === 1 ? 'orden cerrada' : 'órdenes cerradas'} · Total $${totalVolume.toLocaleString('en-US')}`
-                  : 'Valor base configurado en Dashboard Operativo'}
+                {orderAmounts.length > 0
+                  ? `${orderAmounts.length} ${orderAmounts.length === 1 ? 'orden con monto' : 'órdenes con monto'} · Total $${totalVolume.toLocaleString('en-US')}`
+                  : ordenesCount > 0
+                    ? `${ordenesCount} ${ordenesCount === 1 ? 'orden sin monto registrado' : 'órdenes sin monto registrado'}`
+                    : 'Sin órdenes cerradas aún'}
               </p>
             </div>
           </div>

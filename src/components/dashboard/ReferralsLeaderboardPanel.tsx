@@ -64,6 +64,7 @@ import {
   computeEmbajadorMetrics,
   computeVendedorRollupMetrics,
   normalizePartnerCode,
+  resolveEmbajadorOwner,
   type EmbajadorRollupMetrics,
   type ResolvedOwnerInfo,
   type VendedorRollupMetrics,
@@ -97,7 +98,7 @@ interface ReferralsLeaderboardPanelProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
-type PartnerScopeFilter = 'all' | 'vendedores' | 'embajadores';
+type PartnerScopeFilter = 'vendedores' | 'embajadores';
 type FilterMode = 'all' | 'winning' | 'active_activity' | 'no_leads' | 'inactive';
 type SortMode =
   | 'prize_rank'
@@ -291,7 +292,8 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
 
   // List filters / UI state
   const [search, setSearch] = useState('');
-  const [partnerScope, setPartnerScope] = useState<PartnerScopeFilter>('all');
+  const [partnerScope, setPartnerScope] = useState<PartnerScopeFilter>('vendedores');
+  const [vendedorOwnerFilter, setVendedorOwnerFilter] = useState<string>('all');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [sortMode, setSortMode] = useState<SortMode>('prize_rank');
   const [expandedPartnerId, setExpandedPartnerId] = useState<string | null>(null);
@@ -359,8 +361,63 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       if (r.partnerType === 'embajador') embajadores += 1;
       else vendedores += 1;
     }
-    return { all: referrers.length, vendedores, embajadores };
+    return { vendedores, embajadores };
   }, [referrers]);
+
+  const vendedorFilterOptions = useMemo(() => {
+    const options: Array<{
+      value: string;
+      label: string;
+      accountId: string | null;
+      tagNorm: string;
+    }> = [];
+    const seenKeys = new Set<string>();
+
+    const addOption = (
+      name: string,
+      tag: string | null | undefined,
+      accountId: string | null | undefined
+    ) => {
+      const cleanName = name.trim();
+      const tagNorm = normalizePartnerCode(tag);
+      const accId = accountId || null;
+      if (!cleanName && !tagNorm && !accId) return;
+      const dedupeKey = accId ? `acc:${accId}` : `tag:${tagNorm || cleanName.toUpperCase()}`;
+      if (seenKeys.has(dedupeKey)) return;
+      seenKeys.add(dedupeKey);
+      if (tagNorm) seenKeys.add(`tag:${tagNorm}`);
+      options.push({
+        value: dedupeKey,
+        label: tagNorm ? `${cleanName || tagNorm} (${tagNorm})` : cleanName,
+        accountId: accId,
+        tagNorm,
+      });
+    };
+
+    for (const acc of accounts) {
+      if (acc.role === 'vendedor') {
+        addOption(acc.displayName, acc.tag, acc.id);
+      }
+    }
+
+    for (const r of referrers) {
+      if (r.partnerType !== 'embajador') {
+        addOption(r.name, r.code, r.accountId);
+      }
+    }
+
+    for (const r of referrers) {
+      if (r.partnerType === 'embajador') {
+        const owner = resolveEmbajadorOwner(r, accounts, referrers);
+        if (!owner.isDirect) {
+          addOption(owner.name, owner.tag, owner.accountId);
+        }
+      }
+    }
+
+    options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
+    return options;
+  }, [accounts, referrers]);
 
   // Compute live metrics + official prize ranking (Vendedores roll up direct + all linked Embajadores)
   const rankedRows = useMemo<PartnerMetricsRow[]>(() => {
@@ -372,10 +429,29 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       if (norm) accountByTag.set(norm, acc);
     }
 
+    const selectedVendedorOpt =
+      partnerScope === 'embajadores' && vendedorOwnerFilter !== 'all' && vendedorOwnerFilter !== 'direct'
+        ? vendedorFilterOptions.find((opt) => opt.value === vendedorOwnerFilter) || null
+        : null;
+
     const scopedReferrers = referrers.filter((partner) => {
       if (partnerScope === 'vendedores') return partner.partnerType !== 'embajador';
-      if (partnerScope === 'embajadores') return partner.partnerType === 'embajador';
-      return true;
+      if (partner.partnerType !== 'embajador') return false;
+      if (vendedorOwnerFilter === 'all') return true;
+      const owner = resolveEmbajadorOwner(partner, accounts, referrers);
+      if (vendedorOwnerFilter === 'direct') return owner.isDirect;
+      if (!selectedVendedorOpt || owner.isDirect) return false;
+      if (selectedVendedorOpt.accountId && owner.accountId === selectedVendedorOpt.accountId) {
+        return true;
+      }
+      if (
+        selectedVendedorOpt.tagNorm &&
+        owner.tag &&
+        normalizePartnerCode(owner.tag) === selectedVendedorOpt.tagNorm
+      ) {
+        return true;
+      }
+      return false;
     });
 
     const base = scopedReferrers.map((partner) => {
@@ -558,8 +634,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
     qrHistory,
     isDateFiltered,
     partnerScope,
+    vendedorOwnerFilter,
+    vendedorFilterOptions,
     prizeRule,
-    settings.defaultTicketAmount,
   ]);
 
   // Global KPI aggregates (deduplicated: never double-count Embajadores already rolled up inside a Vendedor row)
@@ -609,9 +686,9 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       .reduce(
         (acc, l) =>
           acc +
-          (typeof l.orderAmount === 'number' && l.orderAmount > 0
+          (typeof l.orderAmount === 'number' && Number.isFinite(l.orderAmount) && l.orderAmount > 0
             ? l.orderAmount
-            : settings.defaultTicketAmount || 0),
+            : 0),
         0
       );
     const winnersCount = rankedRows.filter((r) => r.isWinning).length;
@@ -631,7 +708,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       winnersCount,
       reachedTargetCount,
     };
-  }, [rankedRows, settings.defaultTicketAmount]);
+  }, [rankedRows]);
 
   const podiumRows = useMemo(() => rankedRows.slice(0, 3), [rankedRows]);
 
@@ -673,7 +750,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, partnerScope, filterMode, sortMode]);
+  }, [search, partnerScope, vendedorOwnerFilter, filterMode, sortMode]);
 
   const totalPages = Math.max(1, Math.ceil(visibleRows.length / RANKING_PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
@@ -897,7 +974,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
       escapeCsvCell(row.isEmbajador ? 'Embajador' : 'Vendedor (Equipo)'),
       escapeCsvCell(
         row.isEmbajador
-          ? formatOwnerLabel(row.owner)
+          ? `De: ${formatOwnerLabel(row.owner)}`
           : `Equipo propio (${row.embajadoresCount} emb.)`
       ),
       row.qrCount,
@@ -1061,13 +1138,86 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         )}
       </AnimatePresence>
 
+      {/* Top Ranking Mode Selector + Embajador Vendedor Filter */}
+      {activeSubTab === 'ranking' && (
+        <section
+          aria-label="Selector de ranking por rol"
+          className="dsb-glass rounded-[20px] sm:rounded-[22px] p-3 sm:p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 min-w-0">
+            <div
+              role="tablist"
+              aria-label="Modo de ranking"
+              className="dsb-glass-subtle grid grid-cols-2 sm:inline-flex items-center gap-1 rounded-2xl p-1 border w-full sm:w-auto max-w-full"
+              style={{ borderColor: adminTheme.borderTint }}
+            >
+              {(
+                [
+                  { id: 'vendedores', label: `Ranking de Vendedores (${scopeCounts.vendedores})` },
+                  { id: 'embajadores', label: `Ranking de Embajadores (${scopeCounts.embajadores})` },
+                ] as Array<{ id: PartnerScopeFilter; label: string }>
+              ).map((tab) => {
+                const active = partnerScope === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setPartnerScope(tab.id)}
+                    className={`min-h-[40px] sm:min-h-[36px] rounded-xl px-3 sm:px-3.5 py-1.5 text-[11.5px] sm:text-xs font-bold whitespace-nowrap truncate transition-all cursor-pointer ${
+                      active
+                        ? adminTheme.activePillClass
+                        : 'text-[#594133] hover:bg-white/75'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {partnerScope === 'embajadores' && (
+              <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto">
+                <label
+                  htmlFor="embajador-vendedor-filter"
+                  className="text-xs font-semibold text-[#594133] whitespace-nowrap shrink-0"
+                >
+                  Vendedor:
+                </label>
+                <select
+                  id="embajador-vendedor-filter"
+                  value={vendedorOwnerFilter}
+                  onChange={(e) => setVendedorOwnerFilter(e.target.value)}
+                  className="flex-1 sm:flex-none min-w-0 sm:min-w-[210px] max-w-full min-h-[44px] sm:min-h-[38px] rounded-xl border border-[#DFCBB3]/85 bg-white/80 backdrop-blur-sm px-3 py-1.5 text-base sm:text-xs font-semibold text-[#22150E] focus:border-[#8B0018] focus:bg-white focus:outline-none transition-colors"
+                >
+                  <option value="all">Todos los vendedores</option>
+                  <option value="direct">Ciprian Directo</option>
+                  {vendedorFilterOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <span className="text-[11px] font-medium text-[#6E5341]">
+            {partnerScope === 'vendedores'
+              ? 'Ranking consolidado por equipo: canal directo + embajadores vinculados.'
+              : 'Ranking individual de embajadores con su vendedor vinculado.'}
+          </span>
+        </section>
+      )}
+
       {/* KPI Overview Bar */}
       <section aria-label="Resumen de embajadores QR" className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3.5">
         <div className="relative overflow-hidden dsb-glass rounded-[18px] sm:rounded-[20px] p-3 sm:p-4 hover:-translate-y-0.5 transition-transform">
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#C88A2B] to-[#F4CA73]" />
           <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-semibold text-[#594133]">
             <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-[#C88A2B] shrink-0" />
-            <span className="truncate">Embajadores</span>
+            <span className="truncate">{partnerScope === 'vendedores' ? 'Vendedores' : 'Embajadores'}</span>
           </div>
           <p className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-bold text-[#22150E] tabular-nums">
             {kpis.activePartners}
@@ -1371,7 +1521,10 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
         <>
       {/* Top 3 Winners Podium */}
       {podiumRows.length > 0 && (
-        <section aria-label="Podio Top 3 Embajadores" className="space-y-3">
+        <section
+          aria-label={`Podio Top 3 ${partnerScope === 'vendedores' ? 'Vendedores' : 'Embajadores'}`}
+          className="space-y-3"
+        >
           <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
             <h3 className="font-serif text-base sm:text-lg font-bold text-[#22150E] flex items-center gap-2">
               <Crown className="h-5 w-5 text-[#C88A2B] shrink-0" />
@@ -1499,7 +1652,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                                 : 'border border-emerald-300/70 bg-emerald-50 text-emerald-900'
                             }`}
                           >
-                            Vinculado a: {formatOwnerLabel(row.owner)}
+                            De: {formatOwnerLabel(row.owner)}
                           </span>
                         </>
                       ) : (
@@ -1658,7 +1811,11 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar embajador por nombre, código o teléfono..."
+                placeholder={
+                  partnerScope === 'vendedores'
+                    ? 'Buscar vendedor por nombre, código o teléfono...'
+                    : 'Buscar embajador, código o vendedor vinculado...'
+                }
                 className="w-full min-h-[44px] rounded-xl border border-[#DFCBB3]/85 bg-white/75 backdrop-blur-sm py-2.5 pl-10 pr-4 text-base sm:text-sm text-[#22150E] placeholder:text-[#8A6D5B] focus:border-[#8B0018] focus:bg-white focus:outline-none transition-colors"
               />
             </div>
@@ -1683,48 +1840,6 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                 <option value="name">Nombre (A-Z)</option>
               </select>
             </div>
-          </div>
-
-          {/* Partner Scope Toggle: Todos | Vendedores (Equipo) | Embajadores */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div
-              role="tablist"
-              aria-label="Filtrar por tipo de socio"
-              className="dsb-glass-subtle inline-flex flex-wrap items-center gap-1 rounded-2xl p-1 border border-[#8B0018]/18 max-w-full"
-            >
-              {(
-                [
-                  { id: 'all', label: `Todos (${scopeCounts.all})` },
-                  { id: 'vendedores', label: `Vendedores (Equipo) (${scopeCounts.vendedores})` },
-                  { id: 'embajadores', label: `Embajadores (${scopeCounts.embajadores})` },
-                ] as Array<{ id: PartnerScopeFilter; label: string }>
-              ).map((tab) => {
-                const active = partnerScope === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setPartnerScope(tab.id)}
-                    className={`min-h-[36px] sm:min-h-[34px] rounded-xl px-3 py-1.5 text-[11.5px] sm:text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                      active
-                        ? adminTheme.activePillClass
-                        : 'text-[#594133] hover:bg-white/75'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-            <span className="text-[11px] text-[#7B5D4A]">
-              {partnerScope === 'vendedores'
-                ? 'Totales consolidados: canal directo + todos los embajadores vinculados.'
-                : partnerScope === 'embajadores'
-                  ? 'Rendimiento individual de cada embajador y su vendedor vinculado.'
-                  : 'Los vendedores muestran el total consolidado de su equipo.'}
-            </span>
           </div>
 
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap">
@@ -1883,7 +1998,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                                 Embajador
                               </span>
                               <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2.5 py-0.5 text-[10.5px] font-bold text-emerald-900 max-w-full truncate">
-                                Vinculado a: {formatOwnerLabel(row.owner)}
+                                De: {formatOwnerLabel(row.owner)}
                               </span>
                               <span className="inline-flex items-center gap-1 rounded-full dsb-glass-subtle px-2 py-0.5 text-[10.5px] font-bold text-[#594133] tabular-nums">
                                 <QrCode className="h-3 w-3 shrink-0 text-[#8B0018]" />
@@ -2153,7 +2268,7 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
                               </span>
                               {row.isEmbajador ? (
                                 <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-[#E6EEDB] px-2 py-0.5 text-[10.5px] font-bold text-emerald-900">
-                                  Vinculado a: {formatOwnerLabel(row.owner)}
+                                  De: {formatOwnerLabel(row.owner)}
                                 </span>
                               ) : (
                                 <>
@@ -2468,11 +2583,16 @@ export const ReferralsLeaderboardPanel: React.FC<ReferralsLeaderboardPanelProps>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#F4CA73]">
-                    Tarjeta QR HD · Embajador
+                    Tarjeta QR HD · {qrModalPartner.partnerType === 'embajador' ? 'Embajador' : 'Vendedor'}
                   </span>
                   <h3 id="qr-card-modal-title" className="font-serif text-lg sm:text-xl font-bold text-white truncate">
                     {qrModalPartner.name}
                   </h3>
+                  {qrModalPartner.partnerType === 'embajador' && (
+                    <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2.5 py-0.5 text-[10.5px] font-bold text-emerald-200 max-w-full truncate">
+                      De: {formatOwnerLabel(resolveEmbajadorOwner(qrModalPartner, accounts, referrers))}
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"

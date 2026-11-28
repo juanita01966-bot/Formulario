@@ -91,7 +91,7 @@ function visitMatchesPartner(
   return false;
 }
 
-function computeLeadsBreakdown(matchedLeads: Lead[], defaultTicketAmount = 0) {
+function computeLeadsBreakdown(matchedLeads: Lead[], _defaultTicketAmount = 0) {
   let citasCount = 0;
   let demosCount = 0;
   let ordenesCount = 0;
@@ -104,11 +104,13 @@ function computeLeadsBreakdown(matchedLeads: Lead[], defaultTicketAmount = 0) {
       demosCount += 1;
     } else if (lead.category === 'orden') {
       ordenesCount += 1;
-      const amt =
-        typeof lead.orderAmount === 'number' && Number.isFinite(lead.orderAmount) && lead.orderAmount > 0
-          ? lead.orderAmount
-          : defaultTicketAmount;
-      salesTotal += amt;
+      if (
+        typeof lead.orderAmount === 'number' &&
+        Number.isFinite(lead.orderAmount) &&
+        lead.orderAmount > 0
+      ) {
+        salesTotal += lead.orderAmount;
+      }
     }
   }
 
